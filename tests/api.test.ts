@@ -28,6 +28,7 @@ function harness(): Harness {
     // Advance 1 ms per read so event ordering is deterministic, like a real clock.
     now: () => (clock.now = new Date(clock.now.getTime() + 1)),
     async queueExtraction() {},
+    async queueIntake() {},
   };
   return { svc, db, files, mail, clock, users };
 }
@@ -316,10 +317,14 @@ describe('renewals and reminders', () => {
     expect(sent[0].subject).toMatch(/expires in 25 days/);
     const ren = await ok('owner1', 'renewals.list', {}, o.orgId);
     expect(ren.items[0]).toMatchObject({ stage: 'requested', days: 25 });
-    // Advance to 13 days before expiry: the 14-day reminder fires.
+    // Saturday 13 days out: inside the 14-day window, but outside working hours, so nothing is sent.
     h.clock.now = new Date('2026-06-27T09:00:00Z');
     await runDailyJobs(h.svc);
-    expect(h.mail.filter((m) => m.to === 'rae@renew.example' && /expires in 13 days/.test(m.subject))).toHaveLength(1);
+    expect(h.mail.filter((m) => m.to === 'rae@renew.example' && /expires in 13 days/.test(m.subject))).toHaveLength(0);
+    // Monday morning: the 14-day reminder goes out (late, never twice).
+    h.clock.now = new Date('2026-06-29T15:00:00Z');
+    await runDailyJobs(h.svc);
+    expect(h.mail.filter((m) => m.to === 'rae@renew.example' && /expires in 11 days/.test(m.subject))).toHaveLength(1);
     // After expiry the subcontractor becomes not ready.
     h.clock.now = new Date('2026-07-11T09:00:00Z');
     await runDailyJobs(h.svc);
@@ -490,7 +495,7 @@ describe('Project workflow in one step', () => {
     expect(email.text).toContain('Harbour View');
     expect(email.text).toContain('Reply to this email');
 
-    expect(await ok('owner1', 'nav.counts', {}, o.orgId)).toEqual({ reviews: 0, renewals: 0 });
+    expect(await ok('owner1', 'nav.counts', {}, o.orgId)).toEqual({ reviews: 0, renewals: 0, inbox: 0 });
     const detail = await ok('owner1', 'projects.get', { projectId }, o.orgId);
     const alpha = detail.subcontractors.find((s: any) => s.id === a.subcontractorId);
     expect(alpha.results.every((x: any) => x.status === 'requested')).toBe(true);

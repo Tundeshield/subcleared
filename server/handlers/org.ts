@@ -53,7 +53,8 @@ export async function me(svc: Services, db: Db, identity: Identity, orgId?: stri
     plans: svc.env.plans,
     billingConfigured: !!svc.env.stripeSecret,
     emailConfigured: svc.mail.configured,
-    extractionConfigured: !!svc.env.anthropicKey,
+    extractionConfigured: !!svc.ai,
+    intakeConfigured: !!svc.env.inboundSecret && !!svc.env.inboundDomain,
     mode: svc.mode,
   };
 }
@@ -148,6 +149,20 @@ export async function updateSettings(ctx: Ctx, input: any) {
   if (input.reminderSchedule !== undefined) {
     if (!Array.isArray(input.reminderSchedule) || !input.reminderSchedule.length || input.reminderSchedule.length > 12) throw bad('Reminder schedule needs 1–12 entries');
     s.reminderSchedule = [...new Set(input.reminderSchedule.map((x: any) => n(x, 'Reminder offset', -90, 365)))].sort((a: any, b: any) => b - a) as number[];
+  }
+  if (input.chasing !== undefined) {
+    const c = input.chasing ?? {};
+    const after = Array.isArray(c.afterDays) ? [...new Set(c.afterDays.map((x: any) => n(x, 'Follow-up day', 1, 60)))].sort((a: any, b: any) => a - b) as number[] : (s.chasing?.afterDays ?? [3, 7, 14]);
+    if (!after.length || after.length > 6) throw bad('Choose between 1 and 6 follow-ups');
+    s.chasing = { enabled: c.enabled !== false, afterDays: after, escalateAfterDays: c.escalateAfterDays !== undefined ? n(c.escalateAfterDays, 'Escalation', after[after.length - 1] + 1, 90) : Math.max(after[after.length - 1] + 2, s.chasing?.escalateAfterDays ?? 16) };
+  }
+  if (input.workingHours !== undefined) {
+    const w = input.workingHours ?? {};
+    const start = n(w.start, 'Start hour', 0, 23); const end = n(w.end, 'End hour', 1, 24);
+    if (end <= start) throw bad('Working hours must end after they start');
+    const days = Array.isArray(w.days) ? [...new Set(w.days.map((x: any) => n(x, 'Day', 0, 6)))] as number[] : [1, 2, 3, 4, 5];
+    if (!days.length) throw bad('Choose at least one working day');
+    s.workingHours = { start, end, days };
   }
   const patch: any = { settings: s };
   if (input.name !== undefined) patch.name = reqStr(input.name, 'Organisation name', 120);
@@ -426,8 +441,34 @@ export async function dashboard(ctx: Ctx, input: any) {
   type Need = { tone: 'progress' | 'blocked' | 'attention'; item: string; itemLink: string; context?: string; issue: string; action: string; link: string; rank: number };
   const needs: Need[] = [];
   const pname = (id: string) => projects.find((p) => p.id === id)?.name;
-  for (const v of [...pending].sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt))) {
-    needs.push({ tone: 'progress', item: subName.get(v.subcontractorId) ?? 'Subcontractor', itemLink: `/app/subcontractors/${v.subcontractorId}`, issue: `${docById.get(v.documentId)?.title ?? v.fileName} needs review`, action: 'Review document', link: `/app/reviews/${v.id}`, rank: 1 });
+  // Emailed documents that couldn't be matched with confidence.
+  const inbox = can(ctx, 'documents.upload') ? (await ctx.db.list<any>(C.col(ctx.org.id, 'intake'), [['status', '==', 'needs_match']])) : [];
+  for (const i of inbox.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt))) {
+    needs.push({ tone: 'attention', item: i.fileName, itemLink: '/app/inbox', context: `from ${i.from}`, issue: i.suggestion?.subcontractorId ? (i.suggestion?.requirementId ? 'Emailed in — confirm where it belongs' : 'Emailed in — choose which document it is') : 'Emailed in from an unknown sender — choose who it’s from', action: 'Match document', link: '/app/inbox', rank: 1 });
+  }
+  // Documents waiting for a decision, triaged by the automatic comparison.
+  const triage = (v: any) => v.assessment?.triage ?? (v.extraction?.status === 'completed' ? 'check' : 'not_read');
+  // One row per subcontractor, so a batch of uploads reads as one job, not twelve.
+  const bySub = new Map<string, any[]>();
+  for (const v of [...pending].sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt))) bySub.set(v.subcontractorId, [...(bySub.get(v.subcontractorId) ?? []), v]);
+  for (const [sid, vs] of bySub) {
+    const probs = vs.filter((v) => triage(v) === 'problem');
+    const good = vs.filter((v) => triage(v) === 'looks_good');
+    const other = vs.length - probs.length - good.length;
+    const title = (v: any) => docById.get(v.documentId)?.title ?? v.fileName;
+    let issue: string;
+    if (vs.length === 1) {
+      const v = vs[0]; const t = triage(v); const firstFail = v.assessment?.checks.find((c: any) => c.outcome === 'fail');
+      issue = t === 'looks_good' ? `${title(v)}: checks passed — confirm to approve` : t === 'problem' ? `${title(v)}: ${firstFail ? firstFail.detail.replace(/\.$/, '') : 'doesn’t meet the requirement'}` : `${title(v)} needs review`;
+    } else {
+      issue = [probs.length && `${probs.length} ${probs.length === 1 ? 'doesn’t' : 'don’t'} match what you asked for`, good.length && `${good.length} passed the checks`, other && `${other} to check by eye`].filter(Boolean).join(' · ');
+      issue = `${vs.length} documents submitted: ${issue}`;
+    }
+    const first = probs[0] ?? vs.find((v) => triage(v) !== 'looks_good') ?? vs[0];
+    needs.push({
+      tone: probs.length ? 'blocked' : 'progress', item: subName.get(sid) ?? 'Subcontractor', itemLink: `/app/subcontractors/${sid}`, issue,
+      action: !probs.length && !other ? (vs.length === 1 ? 'Confirm' : 'Confirm all') : 'Review', link: `/app/reviews/${first.id}`, rank: probs.length ? 0 : 1,
+    });
   }
   const changes = new Map<string, { r: typeof rows[number]; names: string[] }>();
   const overdue = new Map<string, { r: typeof rows[number]; names: string[] }>();
@@ -462,6 +503,8 @@ export async function dashboard(ctx: Ctx, input: any) {
       notReady: [...scopedSubs].filter((s) => worst.get(s.id) === 'not_ready').length,
       notEvaluated: [...scopedSubs].filter((s) => !worst.get(s.id) || worst.get(s.id) === 'not_evaluated').length,
     },
+    review: { total: pending.length, looksGood: pending.filter((v) => triage(v) === 'looks_good').length, toCheck: pending.filter((v) => ['check', 'not_read'].includes(triage(v))).length, problems: pending.filter((v) => triage(v) === 'problem').length },
+    inbox: inbox.length, readingOn: !!ctx.svc.ai,
     attention, actions: actions.slice(0, 8), actionsTotal: actions.length, needs: needs.slice(0, 12), needsTotal: needs.length,
     projects: projectSummary,
     upcoming: inForce.filter((x) => x.days <= Math.max(Number(input?.days) || 60, soon)).sort((a, b) => a.days - b.days).slice(0, 8).map((x) => ({
@@ -494,5 +537,6 @@ export async function navCounts(ctx: Ctx) {
     if (!d || d.archived || d.approvedVersionId !== v.id || !v.metadata.expiryDate || !mine(v.subcontractorId)) return false;
     return daysBetween(today, v.metadata.expiryDate) <= ctx.org.settings.expiringSoonDays;
   }).length;
-  return { reviews, renewals };
+  const inbox = permissionsFor(ctx.member).has('documents.upload') ? (await ctx.db.list<any>(C.col(ctx.org.id, 'intake'), [['status', '==', 'needs_match']])).length : 0;
+  return { reviews, renewals, inbox };
 }

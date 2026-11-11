@@ -4,6 +4,7 @@ import { applyOrgFormatting } from '../src/domain/locale';
 // the verified ID token and the x-org-id header before any handler runs.
 import type { Member, Organisation } from '../src/domain/types';
 import { C, type Ctx, HttpError, rateLimit } from './core';
+import * as assistant from './handlers/assistant';
 import * as billing from './handlers/billing';
 import * as docs from './handlers/documents';
 import * as org from './handlers/org';
@@ -12,6 +13,7 @@ import * as reports from './handlers/reports';
 import * as requests from './handlers/requests';
 import * as reqs from './handlers/requirements';
 import * as subs from './handlers/subs';
+import * as intake from './intake';
 import * as portal from './portal';
 import * as sample from './sample';
 import type { Identity, Services } from './services';
@@ -36,6 +38,8 @@ const ORG_ACTIONS: Record<string, OrgHandler> = {
   'requests.create': requests.createRequest, 'requests.forProject': requests.requestForProject, 'requests.list': requests.listRequests, 'requests.resend': requests.resendRequest, 'links.revoke': requests.revokeLink,
   'renewals.list': requests.listRenewals, 'renewals.request': requests.requestRenewals,
   'reports.run': reports.runReport, 'compliance.overview': reports.complianceOverview, 'compliance.history': reports.evaluationHistory,
+  'assistant.ask': assistant.ask, 'assistant.confirm': assistant.confirm, 'ai.usage': assistant.aiUsage,
+  'intake.list': intake.listIntake, 'intake.setup': intake.enableIntake, 'intake.resolve': intake.resolveIntake, 'intake.fileUrl': intake.intakeFileUrl,
   'org.loadSample': sample.loadSample, 'org.clearSample': sample.clearSample,
   'billing.get': billing.getBilling, 'billing.checkout': billing.createCheckout, 'billing.portal': billing.createPortal,
 };

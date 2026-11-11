@@ -7,7 +7,7 @@ import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
 import { Callout, Checkbox, Confirm, cx, Empty, ErrorState, Field, FilterSelect, FormError, humanize, PageHeader, Pagination, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
 
-const SECTIONS = [['organisation', 'Organisation'], ['profile', 'Profile and notifications'], ['delivery', 'Email delivery'], ['audit', 'Audit log'], ['data', 'Sample data']] as const;
+const SECTIONS = [['organisation', 'Organisation'], ['automation', 'Reminders and automation'], ['profile', 'Profile and notifications'], ['delivery', 'Email delivery'], ['audit', 'Audit log'], ['data', 'Sample data']] as const;
 
 export default function Settings() {
   const { section = 'organisation' } = useParams();
@@ -22,6 +22,7 @@ export default function Settings() {
         </nav>
         <div className="min-w-0 max-w-4xl">
           {section === 'organisation' && <OrgSettings />}
+          {section === 'automation' && <Automation />}
           {section === 'profile' && <Profile />}
           {section === 'delivery' && <Delivery />}
           {section === 'audit' && <Audit />}
@@ -188,5 +189,73 @@ function SampleData() {
         Sample projects, subcontractors, documents and their readiness history are deleted. Your own records aren't touched. The audit log keeps a note that sample data existed.
       </Confirm>
     </section>
+  );
+}
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function Automation() {
+  const { me, can, refresh } = useSession();
+  const org = me!.org!;
+  const c = org.settings.chasing ?? { enabled: true, afterDays: [3, 7, 14], escalateAfterDays: 16 };
+  const w = org.settings.workingHours ?? { start: 8, end: 18, days: [1, 2, 3, 4, 5] };
+  const [f, setF] = useState({ enabled: c.enabled !== false, after: c.afterDays.join(', '), escalate: String(c.escalateAfterDays), start: String(w.start), end: String(w.end), days: w.days });
+  const { run, busy, error } = useMutation('org.updateSettings');
+  const usage = useApi<any>(can('settings.manage') ? 'ai.usage' : null);
+  const intake = useApi<any>(can('documents.upload') ? 'intake.list' : null);
+  const toast = useToast();
+  const editable = can('settings.manage');
+  const after = f.after.split(',').map((x) => Number(x.trim())).filter((x) => Number.isInteger(x) && x > 0);
+  const save = async () => {
+    try {
+      await run({ chasing: { enabled: f.enabled, afterDays: after, escalateAfterDays: Number(f.escalate) }, workingHours: { start: Number(f.start), end: Number(f.end), days: f.days } });
+      await refresh(); toast('Saved');
+    } catch { /* shown below */ }
+  };
+  const u = usage.data;
+  return (
+    <div className="space-y-12">
+      <section>
+        <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Following up unanswered requests</h2>
+        <p className="text-muted mt-4">When a subcontractor hasn’t sent what was asked for, SubCleared reminds them, then tells the person who asked. Reminders stop by themselves when the documents arrive, and nobody is chased within two days of opening their link or uploading something.</p>
+        <div className="mt-5 space-y-5">
+          <Checkbox checked={f.enabled} disabled={!editable} onChange={(x) => setF({ ...f, enabled: x })} label="Send automatic reminders" />
+          <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="Remind after (days since the request)" hint="For example 3, 7, 14."><input className="input" value={f.after} disabled={!editable || !f.enabled} onChange={(e) => setF({ ...f, after: e.target.value })} /></Field>
+            <Field label="Tell your team after (days)" hint="If nothing has arrived by then, the requester and project manager are notified."><input className="input" type="number" min={1} max={90} value={f.escalate} disabled={!editable || !f.enabled} onChange={(e) => setF({ ...f, escalate: e.target.value })} /></Field>
+          </div>
+        </div>
+      </section>
+      <section>
+        <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">When messages are sent</h2>
+        <p className="text-muted mt-4">Reminders and renewal requests to subcontractors only go out during these hours, in {org.settings.timezone.replace(/_/g, ' ')} time.</p>
+        <div className="mt-5 grid sm:grid-cols-2 gap-5 max-w-md">
+          <Field label="From"><select className="input" value={f.start} disabled={!editable} onChange={(e) => setF({ ...f, start: e.target.value })}>{Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>)}</select></Field>
+          <Field label="Until"><select className="input" value={f.end} disabled={!editable} onChange={(e) => setF({ ...f, end: e.target.value })}>{Array.from({ length: 24 }, (_, i) => i + 1).map((i) => <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>)}</select></Field>
+        </div>
+        <fieldset className="mt-5"><legend className="text-sm font-medium mb-2">Days</legend>
+          <div className="flex flex-wrap gap-4">{DAYS.map((d, i) => <Checkbox key={d} checked={f.days.includes(i)} disabled={!editable} onChange={(x) => setF({ ...f, days: x ? [...f.days, i].sort() : f.days.filter((y) => y !== i) })} label={d} />)}</div>
+        </fieldset>
+        {editable && <div className="mt-6"><FormError error={error} /><button className="btn-primary" disabled={busy || (f.enabled && !after.length) || !f.days.length} onClick={save}>{busy && <Spinner />}Save</button></div>}
+      </section>
+      <section>
+        <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Emailed documents</h2>
+        {intake.data ? (intake.data.address
+          ? <p className="mt-4">Documents emailed to <code className="font-mono break-all">{intake.data.address}</code> are scanned, read and filed automatically. <a className="link" href="/app/inbox">Open emailed documents</a></p>
+          : <p className="text-muted mt-4">{intake.data.configured ? 'Not set up yet.' : 'Email intake needs an inbound email provider on this deployment.'} <a className="link" href="/app/inbox">Set it up</a></p>) : <p className="text-muted mt-4">—</p>}
+      </section>
+      {can('settings.manage') && (
+        <section>
+          <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Automatic reading</h2>
+          {!u ? <p className="text-muted mt-4">—</p> : !u.configured ? (
+            <p className="text-muted mt-4">Not switched on for this deployment. Documents can still be reviewed by hand.</p>
+          ) : (
+            <div className="mt-4 space-y-2">
+              <p>Every document is read by an inexpensive model first; only unclear ones get a second look from a more capable model. Identical files are never read twice.</p>
+              <p className="text-muted"><span className="text-ink font-medium tnum">{u.month.documents}</span>{u.limit ? ` of ${u.limit}` : ''} documents read this month · {u.month.calls} model calls · {(u.month.inputTokens + u.month.outputTokens).toLocaleString()} tokens{u.pricesConfigured && u.month.costKnown !== false ? ` · about $${(u.month.estimatedCost ?? 0).toFixed(2)}` : ''}</p>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
   );
 }

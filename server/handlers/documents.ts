@@ -12,12 +12,14 @@ import type { Db } from '../db';
 import { sendEmail } from '../email';
 import { scanFile } from '../scan';
 import type { Services } from '../services';
+import { assessVersion } from '../ai';
+import { KIND_LABELS, SCHEMAS } from '../../src/domain/extraction';
 import { loadSub, visibleSubIds } from './subs';
 
 const LOCK_MINUTES = 30;
 const EXT: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' };
 
-export interface UploadActor { type: 'user' | 'portal'; id: string; name: string; email?: string }
+export interface UploadActor { type: 'user' | 'portal' | 'email'; id: string; name: string; email?: string }
 interface Base { db: Db; svc: Services; org: Organisation }
 
 function safeFileName(n: unknown) {
@@ -72,7 +74,7 @@ function sameSet(a: string[], b: string[]) { return a.length === b.length && a.e
  * the file out of quarantine and only then records the submission. Nothing is
  * reported as submitted until this succeeds.
  */
-export async function finalizeUploadSlot(base: Base, actor: UploadActor, versionId: string, source: 'web' | 'portal', allowedSubId?: string) {
+export async function finalizeUploadSlot(base: Base, actor: UploadActor, versionId: string, source: 'web' | 'portal' | 'webhook', allowedSubId?: string) {
   const vpath = C.doc(base.org.id, 'versions', versionId);
   const v = await base.db.get<DocumentVersion>(vpath);
   if (!v || (allowedSubId && v.subcontractorId !== allowedSubId)) throw notFound('Upload not found');
@@ -93,9 +95,14 @@ export async function finalizeUploadSlot(base: Base, actor: UploadActor, version
   const doc = await base.db.get<DocumentRecord>(C.doc(base.org.id, 'documents', v.documentId));
   const def = v.requirementId ? await base.db.get<RequirementDefinition>(C.doc(base.org.id, 'requirements', v.requirementId)) : null;
   const sub = await base.db.get<Subcontractor>(C.doc(base.org.id, 'subcontractors', v.subcontractorId));
-  const extractionOn = !!base.svc.env.anthropicKey;
+  const hash = sha256(bytes);
+  // Identical file already held for this subcontractor? Keep it, but say so (and don't read it twice).
+  const same = (await base.db.list<DocumentVersion>(C.col(base.org.id, 'versions'), [['sha256', '==', hash]]))
+    .find((x) => x.id !== v.id && x.subcontractorId === v.subcontractorId && !['quarantined', 'uploading'].includes(x.reviewStatus));
+  const extractionOn = !!base.svc.ai || !!same;
   await base.db.update(vpath, {
-    storagePath: finalPath, sha256: sha256(bytes), size: bytes.length, mimeType: scan.mime,
+    ...(same ? { duplicateOf: { versionId: same.id, documentId: same.documentId, at: same.uploadedAt } } : {}),
+    storagePath: finalPath, sha256: hash, size: bytes.length, mimeType: scan.mime,
     scan: { status: 'clean', method: scan.method, detail: scan.detail }, reviewStatus: def && !def.reviewRequired ? 'submitted' : 'awaiting_review',
     extraction: { status: extractionOn ? 'queued' : 'not_configured' }, uploadedAt: now, revision: 1,
   });
@@ -123,7 +130,7 @@ export async function finalizeUploadSlot(base: Base, actor: UploadActor, version
   return { versionId, documentId: v.documentId, status: 'awaiting_review' };
 }
 
-function actorFor(a: UploadActor) { return { type: a.type === 'portal' ? 'subcontractor' as const : 'user' as const, id: a.id, name: a.name }; }
+function actorFor(a: UploadActor) { return { type: a.type === 'user' ? 'user' as const : 'subcontractor' as const, id: a.id, name: a.name }; }
 
 export async function progressRequests(base: Base, subcontractorId: string) {
   const [requests, versions, docs] = await Promise.all([
@@ -295,6 +302,7 @@ export async function reviewQueue(ctx: Ctx) {
         versionId: v.id, documentId: v.documentId, fileName: v.fileName, versionNumber: v.versionNumber, uploadedAt: v.uploadedAt, uploadedBy: v.uploadedBy,
         subcontractorId: v.subcontractorId, subcontractor: subs.get(v.subcontractorId)?.legalName, title: docs.get(v.documentId)?.title,
         requirement: v.requirementId ? defs.get(v.requirementId)?.name : undefined, extraction: v.extraction.status,
+        triage: v.assessment?.triage, check: v.assessment?.summary, viaEmail: !!v.intake,
         lockedBy: lockFresh ? v.lock : null, status: v.reviewStatus, replacing: !!docs.get(v.documentId)?.approvedVersionId,
         ageHours: Math.round((now - new Date(v.uploadedAt).getTime()) / 3_600_000), projects: projectsFor(v),
       };
@@ -317,6 +325,9 @@ export async function getReview(ctx: Ctx, input: any) {
     requirement: def, criteria: def?.criteria.map((c) => ({ ...c, description: describeCriterion(c) })) ?? [],
     previous: previous && { id: previous.id, versionNumber: previous.versionNumber, metadata: previous.metadata, fileName: previous.fileName, review: previous.review },
     reviews, verifications, metadataFields: METADATA_FIELDS, valueFields: VALUE_FIELDS,
+    // Recomputed on every open so it always reflects the requirement and projects as they stand now.
+    assessment: await assessVersion(ctx.svc, ctx.org, v),
+    readingOn: !!ctx.svc.ai, kindLabels: KIND_LABELS, schema: v.extraction.kind ? SCHEMAS[v.extraction.kind as keyof typeof SCHEMAS] : undefined,
     canReview: permissionsFor(ctx.member).has('documents.review'), canVerify: permissionsFor(ctx.member).has('documents.verify'),
     me: ctx.member.uid,
   };

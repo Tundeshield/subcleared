@@ -7,7 +7,7 @@ import { auth } from '../../lib/auth';
 import { applyPrefs, readPrefs, useSession } from '../../lib/session';
 import { cx, Dialog, Drawer, Glyph, Icon, Logo, Segmented, Spinner } from '../../ui';
 
-type NavItem = { to: string; label: string; perm?: string; count?: 'reviews' | 'renewals'; icon: keyof typeof NAV_ICON };
+type NavItem = { to: string; label: string; perm?: string; count?: 'reviews' | 'renewals' | 'inbox'; icon: keyof typeof NAV_ICON; onlyWhenCounted?: boolean };
 // 16px outline icons, 1.5px stroke — the only icons in the sidebar.
 const P = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
 const NAV_ICON = {
@@ -26,7 +26,7 @@ const NAV_ICON = {
 // Everyday work stays visible; everything else sits in collapsible groups.
 const MAIN: NavItem[] = [{ to: 'overview', label: 'Overview', icon: 'overview' }, { to: 'projects', label: 'Projects', icon: 'projects' }, { to: 'subcontractors', label: 'Subcontractors', icon: 'subs' }];
 const GROUPS: { id: string; label: string; items: NavItem[] }[] = [
-  { id: 'work', label: 'Work to do', items: [{ to: 'reviews', label: 'Documents to review', perm: 'documents.review', count: 'reviews', icon: 'review' }, { to: 'renewals', label: 'Renewals', count: 'renewals', icon: 'renewals' }] },
+  { id: 'work', label: 'Work to do', items: [{ to: 'reviews', label: 'Documents to review', perm: 'documents.review', count: 'reviews', icon: 'review' }, { to: 'renewals', label: 'Renewals', count: 'renewals', icon: 'renewals' }, { to: 'inbox', label: 'Emailed documents', perm: 'documents.upload', count: 'inbox', icon: 'documents', onlyWhenCounted: true }] },
   { id: 'records', label: 'Records & tools', items: [{ to: 'documents', label: 'All documents', icon: 'documents' }, { to: 'requirements', label: 'Requirements & templates', icon: 'requirements' }, { to: 'reports', label: 'Reports', perm: 'reports.view', icon: 'reports' }] },
   { id: 'admin', label: 'Administration', items: [{ to: 'team', label: 'Team and permissions', icon: 'team' }, { to: 'settings', label: 'Settings', icon: 'settings' }, { to: 'billing', label: 'Billing', icon: 'billing' }] },
 ];
@@ -43,7 +43,7 @@ export default function AppLayout() {
   const loc = useLocation();
   const nav = useNavigate();
   const notif = useApi<{ unread: number }>('notifications.list', { limit: 1, unreadOnly: true }, [loc.pathname]);
-  const counts = useApi<{ reviews: number; renewals: number }>('nav.counts', {}, [loc.pathname]);
+  const counts = useApi<{ reviews: number; renewals: number; inbox?: number }>('nav.counts', {}, [loc.pathname]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
   const toggle = (id: string) => setCollapsed((c) => { const next = { ...c, [id]: !c[id] }; try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ } return next; });
   useEffect(() => setNavOpen(false), [loc.pathname]);
@@ -60,7 +60,7 @@ export default function AppLayout() {
   const sub = org.subscription;
   const trialDays = sub.status === 'trialing' && sub.trialEndsAt ? Math.ceil((new Date(sub.trialEndsAt).getTime() - Date.now()) / 86_400_000) : null;
   const inactive = ['canceled', 'incomplete'].includes(sub.status) || (trialDays !== null && trialDays <= 0);
-  const countOf = (k?: 'reviews' | 'renewals') => (k ? counts.data?.[k] ?? 0 : 0);
+  const countOf = (k?: NavItem['count']) => (k ? counts.data?.[k] ?? 0 : 0);
 
   const item = (n: NavItem) => {
     const c = countOf(n.count);
@@ -70,7 +70,7 @@ export default function AppLayout() {
           isActive ? 'text-accent font-medium bg-accent-tint before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-accent before:rounded-full' : 'text-muted hover:text-ink hover:bg-raised/70')}>
           <svg viewBox="0 0 16 16" className="w-4 h-4 shrink-0 opacity-80" aria-hidden>{NAV_ICON[n.icon]}</svg>
           <span className="flex-1 truncate">{n.label}</span>
-          {c > 0 && <span className="min-w-[1.25rem] h-5 px-1.5 rounded-full bg-raised text-[0.75rem] tnum text-ink grid place-items-center" aria-label={`${c} ${n.count === 'reviews' ? 'waiting for review' : 'needing renewal'}`}>{c}</span>}
+          {c > 0 && <span className="min-w-[1.25rem] h-5 px-1.5 rounded-full bg-raised text-[0.75rem] tnum text-ink grid place-items-center" aria-label={`${c} ${n.count === 'reviews' ? 'waiting for review' : n.count === 'inbox' ? 'to match' : 'needing renewal'}`}>{c}</span>}
         </NavLink>
       </li>
     );
@@ -89,7 +89,7 @@ export default function AppLayout() {
       <div className="flex-1 overflow-y-auto px-2.5 pb-6">
         <ul className="space-y-0.5 pt-1">{MAIN.map(item)}</ul>
         {GROUPS.map((g) => {
-          const items = g.items.filter((n) => !n.perm || can(n.perm as any));
+          const items = g.items.filter((n) => (!n.perm || can(n.perm as any)) && (!n.onlyWhenCounted || countOf(n.count) > 0 || loc.pathname.startsWith(`/app/${n.to}`)));
           if (!items.length) return null;
           const here = items.some((n) => loc.pathname.startsWith(`/app/${n.to}`));
           const open = here || !collapsed[g.id];

@@ -2,10 +2,11 @@ import { applyOrgFormatting } from '../src/domain/locale';
 // Background jobs: daily renewal reminders/escalations, and AI extraction.
 // Every job is idempotent: reminder keys are created with create() (fails if
 // it exists), so overlapping or retried runs cannot send duplicates.
+import { chasingOf, dueChase, inWorkingHours } from '../src/domain/automation';
 import { dueReminder } from '../src/domain/compliance';
 import { daysBetween, formatDate, todayIn } from '../src/domain/dates';
-import { METADATA_FIELDS, VALUE_FIELDS } from '../src/domain/library';
-import type { Assignment, DocumentRecord, DocumentRequest, DocumentVersion, Evaluation, Organisation, PortalLink, Project, RequirementDefinition, Subcontractor } from '../src/domain/types';
+import { processVersion } from './ai';
+import type { Assignment, DocumentRecord, DocumentRequest, DocumentVersion, Evaluation, Member, Organisation, PortalLink, Project, RequirementDefinition, Subcontractor } from '../src/domain/types';
 import { AlreadyExistsError } from './db';
 import { audit, C, membersWith, notifyMembers } from './core';
 import { recompute } from './data';
@@ -14,12 +15,14 @@ import { issuePortalLink } from './handlers/requests';
 import type { Services } from './services';
 import { subscriptionUsable } from './handlers/billing';
 
-export async function runDailyJobs(svc: Services, opts: { orgId?: string } = {}) {
+export interface JobOptions { orgId?: string; /** Dev/test only: send now regardless of working hours, and rerun daily steps. */ force?: boolean }
+
+export async function runDailyJobs(svc: Services, opts: JobOptions = {}) {
   const orgs = opts.orgId ? [await svc.db.get<Organisation>(C.org(opts.orgId))].filter(Boolean) as Organisation[] : await svc.db.list<Organisation>('orgs');
   const summary: any[] = [];
   for (const org of orgs) {
     applyOrgFormatting(org.settings);
-    try { summary.push({ orgId: org.id, ...(await runForOrg(svc, org)) }); } catch (e: any) {
+    try { summary.push({ orgId: org.id, ...(await runForOrg(svc, org, opts)) }); } catch (e: any) {
       console.error('daily job failed', org.id, e);
       summary.push({ orgId: org.id, error: e.message });
     }
@@ -41,7 +44,7 @@ async function claimReminder(svc: Services, org: Organisation, key: string, data
   });
 }
 
-async function runForOrg(svc: Services, org: Organisation) {
+async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
   const base = { svc, db: svc.db, org };
   if (org.subscription.status === 'canceled' && !subscriptionUsable(org.subscription, svc.now())) return { skipped: 'subscription canceled' };
   const today = todayIn(org.settings.timezone, svc.now());
@@ -55,10 +58,15 @@ async function runForOrg(svc: Services, org: Organisation) {
   const liveProjects = new Set(projects.filter((p) => !['archived', 'completed'].includes(p.status)).map((p) => p.id));
   const subsById = new Map(subs.map((s) => [s.id, s]));
   const defsById = new Map(defs.map((d) => [d.id, d]));
-  let reminders = 0; let escalations = 0; let failures = 0;
+  let reminders = 0; let escalations = 0; let failures = 0; let chasers = 0;
+  // Subcontractors are only emailed inside the organisation's working hours (in its own timezone).
+  const inHours = opts.force || inWorkingHours(org.settings, svc.now());
+  // Heavier daily steps (recompute, escalations, alerts) run once per local day even though the scheduler runs hourly.
+  let dailyDue = true;
+  if (!opts.force) { try { await svc.db.create(C.doc(org.id, 'reminders', `daily:${today}`), { id: `daily:${today}`, status: 'sent', at: svc.now().toISOString() }); } catch { dailyDue = false; } }
 
   // 1. Expiry reminders for the evidence currently in force.
-  for (const d of docs) {
+  for (const d of inHours ? docs : []) {
     if (d.archived || !d.approvedVersionId) continue;
     const v = versions.find((x) => x.id === d.approvedVersionId);
     const exp = v?.metadata.expiryDate;
@@ -122,17 +130,91 @@ async function runForOrg(svc: Services, org: Organisation) {
     }
   }
 
-  // 2. Close requests whose links have lapsed.
+  // 2. Follow up unanswered requests, then escalate to the person who asked.
+  const chase = chasingOf(org.settings);
+  if (inHours && chase.enabled) {
+    const members = await svc.db.list<Member>(C.col(org.id, 'members'));
+    for (const r of requests.filter((x) => x.type === 'request' && ['sent', 'acknowledged', 'partially_fulfilled'].includes(x.status))) {
+      const sub = subsById.get(r.subcontractorId);
+      if (!sub || ['archived', 'suspended'].includes(sub.status)) continue;
+      const mine = versions.filter((v) => v.subcontractorId === sub.id && v.uploadedAt >= r.createdAt && !['uploading', 'quarantined'].includes(v.reviewStatus));
+      const received = new Set(mine.filter((v) => !['rejected', 'info_requested'].includes(v.reviewStatus)).map((v) => v.requirementId));
+      const outstanding = r.requirementIds.filter((rid) => !received.has(rid));
+      if (!outstanding.length) continue; // everything arrived: stop chasing
+      const reqLinks = links.filter((l) => l.requestId === r.id);
+      const lastActivity = [...reqLinks.map((l) => l.lastUsedAt).filter(Boolean) as string[], ...mine.map((v) => v.uploadedAt)].sort().at(-1);
+      const sent = chase.afterDays.map((_, i) => i).filter((i) => sentKeys.has(`chase:${r.id}:${i}`));
+      const due = dueChase({
+        daysSinceSent: daysBetween(todayIn(org.settings.timezone, new Date(r.createdAt)), today),
+        daysSinceActivity: lastActivity ? daysBetween(todayIn(org.settings.timezone, new Date(lastActivity)), today) : undefined,
+        sent, afterDays: chase.afterDays, escalateAfterDays: chase.escalateAfterDays, escalated: sentKeys.has(`chase-esc:${r.id}`),
+      });
+      const names = outstanding.map((rid) => defsById.get(rid)?.name ?? 'Document');
+      if (due.type === 'escalate') {
+        const key = `chase-esc:${r.id}`;
+        if (!(await claimReminder(svc, org, key, { type: 'escalation', requestId: r.id }))) continue;
+        const ps = projects.filter((p) => r.projectIds.includes(p.id));
+        const to = [r.createdBy.uid !== 'system' ? r.createdBy.uid : undefined, sub.ownerUid, ...ps.map((p) => p.managerUid)].filter(Boolean) as string[];
+        if (!to.length) to.push(...(await membersWith(base, 'requests.send')).map((m) => m.uid));
+        await notifyMembers(base, to, {
+          type: 'escalation', title: `${sub.legalName} hasn’t sent ${names.join(', ')}`,
+          body: `Requested ${formatDate(r.createdAt)} from ${r.contactEmail}; ${sent.length} automatic reminder${sent.length === 1 ? '' : 's'} sent with no reply. It may need a phone call.`, link: `/app/subcontractors/${sub.id}`, dedupeKey: key,
+        });
+        await svc.db.update(C.doc(org.id, 'reminders', key), { status: 'sent', at: svc.now().toISOString() });
+        await audit({ ...base, source: 'scheduler' }, { action: 'request.escalated', entity: { type: 'request', id: r.id, label: `${sub.legalName} — ${r.contactEmail}` }, after: { outstanding: names, remindersSent: sent.length }, actor: { type: 'system', id: 'scheduler', name: 'Automatic follow-up' }, refs: [sub.id, ...r.projectIds] });
+        escalations++;
+        continue;
+      }
+      if (due.type !== 'chase') continue;
+      for (const i of due.skipped) { try { await svc.db.create(C.doc(org.id, 'reminders', `chase:${r.id}:${i}`), { id: `chase:${r.id}:${i}`, status: 'skipped', reason: 'a later follow-up was due', at: svc.now().toISOString() }); } catch { /* exists */ } }
+      const key = `chase:${r.id}:${due.index}`;
+      if (!(await claimReminder(svc, org, key, { type: 'chase', requestId: r.id, index: due.index }))) continue;
+      try {
+        // Fresh link each time so a reminder never carries an expired link; earlier links stay valid until they lapse.
+        const link = await issuePortalLink(base, { subcontractorId: sub.id, contactEmail: r.contactEmail, requirementIds: r.requirementIds, projectIds: r.projectIds, fullPortal: false, days: org.settings.defaultLinkExpiryDays, requestId: r.id });
+        await svc.db.update(C.doc(org.id, 'requests', r.id), { linkId: link.linkId });
+        const requester = members.find((m) => m.uid === r.createdBy.uid && m.status === 'active');
+        const last = due.index === chase.afterDays.length - 1;
+        const log = await sendEmail(base, {
+          to: r.contactEmail, template: 'sub.chase', dedupeKey: `chase:${key}`, replyTo: requester?.email,
+          subject: `Reminder: ${org.name} is still waiting for ${names.length === 1 ? names[0] : `${names.length} documents`}`,
+          heading: last ? 'Final reminder: documents still needed' : 'Documents still needed',
+          body: [
+            `Hello ${r.contactName ?? ''}`.trim() + ',',
+            `${org.name} asked ${sub.legalName} for the following on ${formatDate(r.createdAt)}, and hasn't received ${names.length === 1 ? 'it' : 'them'} yet:\n${names.map((n) => `• ${n}`).join('\n')}`,
+            received.size ? 'Thank you for what you have already sent.' : '',
+            'Open the secure link below to upload them. A PDF or a clear phone photo is fine, and no account is needed.',
+            requester ? `Questions? Reply to this email to reach ${requester.name || requester.email}.` : '',
+          ].filter(Boolean).join('\n\n'),
+          cta: { label: 'Upload documents', url: link.url },
+          footer: `This is an automatic reminder sent by SubCleared for ${org.name}. Reminders stop as soon as the documents are uploaded.`,
+        });
+        if (log.status === 'failed') throw new Error(log.error ?? 'Email failed');
+        await svc.db.update(C.doc(org.id, 'reminders', key), { status: 'sent', emailStatus: log.status, at: svc.now().toISOString() });
+        await audit({ ...base, source: 'scheduler' }, { action: 'request.reminder_sent', entity: { type: 'request', id: r.id, label: `${sub.legalName} — ${r.contactEmail}` }, after: { reminder: due.index + 1, of: chase.afterDays.length, outstanding: names, automated: true }, actor: { type: 'system', id: 'scheduler', name: 'Automatic follow-up' }, refs: [sub.id, ...r.projectIds] });
+        chasers++;
+      } catch (e: any) {
+        failures++;
+        await svc.db.update(C.doc(org.id, 'reminders', key), { status: 'failed', error: e.message?.slice(0, 300), at: svc.now().toISOString() });
+      }
+    }
+  }
+  if (!dailyDue) return { reminders, chasers, escalations, failures, today, inHours, daily: false };
+
+  // 3. Close requests whose links have lapsed (chasers renew the link, so only abandoned requests close).
   const nowIso = svc.now().toISOString();
-  for (const r of requests.filter((x) => ['sent', 'acknowledged', 'partially_fulfilled'].includes(x.status))) {
-    const l = links.find((x) => x.id === r.linkId);
-    if (l && (l.revokedAt || l.expiresAt < nowIso) && r.createdBy.uid !== 'system') await svc.db.update(C.doc(org.id, 'requests', r.id), { status: 'expired' });
+  const freshLinks = await svc.db.list<PortalLink>(C.col(org.id, 'links'));
+  const freshRequests = await svc.db.list<DocumentRequest>(C.col(org.id, 'requests'));
+  for (const r of freshRequests.filter((x) => ['sent', 'acknowledged', 'partially_fulfilled'].includes(x.status))) {
+    const l = freshLinks.find((x) => x.id === r.linkId);
+    const stillChasing = r.type === 'request' && chase.enabled && !sentKeys.has(`chase-esc:${r.id}`) && daysBetween(todayIn(org.settings.timezone, new Date(r.createdAt)), today) <= chase.escalateAfterDays;
+    if (l && (l.revokedAt || l.expiresAt < nowIso) && r.createdBy.uid !== 'system' && !(stillChasing && !l.revokedAt)) await svc.db.update(C.doc(org.id, 'requests', r.id), { status: 'expired' });
   }
 
-  // 3. Date-driven readiness changes (expiring soon / expired).
+  // 4. Date-driven readiness changes (expiring soon / expired).
   await recompute(base, {}, 'scheduled.daily', 'scheduler');
 
-  // 4. Escalations: mandatory items still missing beyond the configured period.
+  // 5. Escalations: mandatory items still missing beyond the configured period.
   const readiness = await svc.db.list<Evaluation & { id: string }>(C.col(org.id, 'readiness'));
   for (const r of readiness) {
     const a = assignments.find((x) => x.active && x.projectId === r.projectId && x.subcontractorId === r.subcontractorId);
@@ -152,7 +234,7 @@ async function runForOrg(svc: Services, org: Organisation) {
     }
   }
 
-  // 5. Project threshold: alert when fewer than 80% of assigned subcontractors are ready.
+  // 6. Project threshold: alert when fewer than 80% of assigned subcontractors are ready.
   for (const p of projects.filter((x) => liveProjects.has(x.id) && x.status === 'active')) {
     const rs = readiness.filter((r) => r.projectId === p.id && assignments.some((a) => a.active && a.projectId === p.id && a.subcontractorId === r.subcontractorId));
     if (rs.length < 2) continue;
@@ -163,61 +245,12 @@ async function runForOrg(svc: Services, org: Organisation) {
       body: `${rs.filter((r) => r.readiness === 'not_ready').length} not ready, ${rs.filter((r) => r.readiness === 'action_required').length} need attention.`, link: `/app/projects/${p.id}`, dedupeKey: `threshold:${p.id}:${today}`,
     });
   }
-  return { reminders, escalations, failures, today };
+  return { reminders, chasers, escalations, failures, today, inHours, daily: true };
 }
 
-// --- AI extraction -------------------------------------------------------------
+// --- Document reading ----------------------------------------------------------
 
-const EXTRACTION_PROMPT = `You are extracting metadata from a construction compliance document (for example a certificate of insurance, licence, or safety certificate) for a human reviewer to confirm.
-
-Return ONLY a JSON object. For each field give {"value": <value or null>, "confidence": <0..1>, "note": <optional short note>}.
-Rules:
-- Only report what is printed in the document. If a field is not present or not legible, use null with confidence 0. Never guess or infer values.
-- Dates must be YYYY-MM-DD exactly as printed (do not adjust for timezones).
-- Monetary limits are plain numbers without currency symbols or commas; put the currency in the note.
-- Booleans (additionalInsured, waiverOfSubrogation, wcCoverage) are true only if the document explicitly shows it.
-- You are not determining legal validity or whether coverage exists; only transcribe.
-
-Fields: ${[...METADATA_FIELDS.map((f) => f.key), ...VALUE_FIELDS.map((f) => f.key)].join(', ')}`;
-
+/** Kept for the background function and dev server; the pipeline lives in ./ai. */
 export async function runExtraction(svc: Services, orgId: string, versionId: string) {
-  const path = C.doc(orgId, 'versions', versionId);
-  const v = await svc.db.get<DocumentVersion>(path);
-  if (!v || !v.storagePath || v.scan.status !== 'clean') return { skipped: true };
-  if (!svc.env.anthropicKey) { await svc.db.update(path, { extraction: { status: 'not_configured' } }); return { skipped: true }; }
-  const startedAt = svc.now().toISOString();
-  await svc.db.update(path, { extraction: { status: 'processing', startedAt, model: svc.env.anthropicModel } });
-  try {
-    const bytes = await svc.files.read(v.storagePath);
-    if (!bytes) throw new Error('Stored file not found');
-    const b64 = Buffer.from(bytes).toString('base64');
-    const block = v.mimeType === 'application/pdf'
-      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
-      : { type: 'image', source: { type: 'base64', media_type: v.mimeType, data: b64 } };
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': svc.env.anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: svc.env.anthropicModel, max_tokens: 1500, messages: [{ role: 'user', content: [block, { type: 'text', text: EXTRACTION_PROMPT }] }] }),
-    });
-    const body: any = await res.json();
-    if (!res.ok) throw new Error(body?.error?.message || `Extraction API ${res.status}`);
-    const text = (body.content ?? []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
-    const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
-    const allowed = new Set([...METADATA_FIELDS.map((f) => f.key), ...VALUE_FIELDS.map((f) => f.key)]);
-    const fields: Record<string, any> = {};
-    for (const [k, raw] of Object.entries(json)) {
-      if (!allowed.has(k) || !raw || typeof raw !== 'object') continue;
-      const r = raw as any;
-      let value = r.value ?? null;
-      const conf = Math.max(0, Math.min(1, Number(r.confidence) || 0));
-      const fdef = METADATA_FIELDS.find((f) => f.key === k);
-      if (fdef?.type === 'date' && value !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(value))) value = null; // reject malformed dates rather than guess
-      fields[k] = { value, confidence: value === null ? 0 : conf, note: typeof r.note === 'string' ? r.note.slice(0, 200) : undefined };
-    }
-    await svc.db.update(path, { extraction: { status: 'completed', fields, model: svc.env.anthropicModel, startedAt, completedAt: svc.now().toISOString() } });
-    return { ok: true };
-  } catch (e: any) {
-    await svc.db.update(path, { extraction: { status: 'failed', error: String(e.message ?? e).slice(0, 300), model: svc.env.anthropicModel, startedAt, completedAt: svc.now().toISOString() } });
-    return { ok: false, error: e.message };
-  }
+  return processVersion(svc, orgId, versionId);
 }

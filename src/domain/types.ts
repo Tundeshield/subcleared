@@ -26,6 +26,11 @@ export interface OrgSettings {
   market?: Market; // drives terminology and starter templates
   locale?: string; // BCP 47, e.g. en-US, en-GB, en-AU — date format and spelling
   currency?: string; // ISO 4217, used for coverage limits
+  /** Automatic follow-ups for unanswered requests. */
+  chasing?: { enabled: boolean; afterDays: number[]; escalateAfterDays: number };
+  /** Messages to subcontractors are only sent inside these local hours. */
+  workingHours?: { start: number; end: number; days: number[] };
+  intakeKey?: string;
 }
 
 export type Market = 'US' | 'UK' | 'OTHER';
@@ -250,15 +255,60 @@ export interface ExtractedField {
   value: string | number | boolean | null;
   confidence: number; // 0..1
   note?: string;
+  /** Where in the document the value was read: page number (1-based) and the printed text. */
+  page?: number;
+  source?: string;
 }
 
 export interface Extraction {
-  status: 'not_started' | 'queued' | 'processing' | 'completed' | 'failed' | 'not_configured';
+  status: 'not_started' | 'queued' | 'processing' | 'completed' | 'failed' | 'not_configured' | 'skipped';
   fields?: Record<string, ExtractedField>;
+  /** What the document appears to be (see src/domain/extraction.ts). */
+  kind?: string;
+  kindConfidence?: number;
+  /** Problems the reader noticed: unreadable areas, several documents in one file, etc. */
+  issues?: string[];
   error?: string;
+  /** Why automatic reading did not run (file too large, monthly allowance used). */
+  skippedReason?: string;
   model?: string;
+  /** True when the fast model was unsure and a more capable model re-read the document. */
+  escalated?: boolean;
+  /** Fields copied from an identical file that was already read (no second AI call). */
+  reusedFrom?: string;
+  usage?: { inputTokens: number; outputTokens: number; calls: number };
   startedAt?: Timestamp;
   completedAt?: Timestamp;
+}
+
+export type CheckOutcome = 'pass' | 'warn' | 'fail' | 'unclear';
+
+/** One deterministic comparison of what was read against what the requirement asks for. */
+export interface AssessmentCheck {
+  key: string;
+  label: string;
+  outcome: CheckOutcome;
+  detail: string;
+  projectId?: string;
+  evidence?: { page?: number; source?: string; confidence?: number };
+}
+
+/** Comparison of extracted information with the configured requirement. Not a review decision. */
+export interface Assessment {
+  triage: 'looks_good' | 'check' | 'problem' | 'not_read';
+  summary: string;
+  checks: AssessmentCheck[];
+  requirementVersion?: number;
+  at: Timestamp;
+}
+
+export interface IntakeProvenance {
+  channel: 'email';
+  intakeId: string;
+  from: string;
+  subject?: string;
+  messageId?: string;
+  receivedAt: Timestamp;
 }
 
 /** A logical document slot: one subcontractor + one requirement (or ad-hoc type). */
@@ -288,7 +338,7 @@ export interface DocumentVersion {
   sha256?: string;
   storagePath?: string;
   uploadedAt: Timestamp;
-  uploadedBy: { type: 'user' | 'portal'; id: string; name: string };
+  uploadedBy: { type: 'user' | 'portal' | 'email'; id: string; name: string };
   scan: { status: 'pending' | 'clean' | 'rejected'; method?: string; detail?: string };
   extraction: Extraction;
   metadata: DocumentMetadata; // confirmed (official) metadata
@@ -305,6 +355,10 @@ export interface DocumentVersion {
   };
   supersededBy?: string;
   revision: number; // optimistic concurrency counter
+  assessment?: Assessment;
+  /** An identical file (same SHA-256) already held for this subcontractor. */
+  duplicateOf?: { versionId: string; documentId: string; at: Timestamp };
+  intake?: IntakeProvenance;
 }
 
 export interface ReviewRecord {

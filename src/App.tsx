@@ -17,6 +17,7 @@ const Requirements = lazy(() => import('./pages/app/Requirements'));
 const Documents = lazy(() => import('./pages/app/Documents'));
 const DocumentDetail = lazy(() => import('./pages/app/DocumentDetail'));
 const Reviews = lazy(() => import('./pages/app/Reviews'));
+const Inbox = lazy(() => import('./pages/app/Inbox'));
 const ReviewDetail = lazy(() => import('./pages/app/ReviewDetail'));
 const Renewals = lazy(() => import('./pages/app/Renewals'));
 const Compliance = lazy(() => import('./pages/app/Compliance'));
@@ -72,6 +73,7 @@ export default function App() {
           <Route path="reviews" element={<S><Reviews /></S>} />
           <Route path="reviews/:versionId" element={<S><ReviewDetail /></S>} />
           <Route path="renewals" element={<S><Renewals /></S>} />
+          <Route path="inbox" element={<S><Inbox /></S>} />
           <Route path="compliance" element={<S><Compliance /></S>} />
           <Route path="reports" element={<S><Reports /></S>} />
           <Route path="notifications" element={<S><Notifications /></S>} />

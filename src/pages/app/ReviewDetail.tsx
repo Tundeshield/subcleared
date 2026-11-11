@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { TRUST } from '../../domain/assessment';
 import { checkCriteria } from '../../domain/compliance';
+import { fieldLabel } from '../../domain/extraction';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import { term } from '../../domain/locale';
 import { api, dataChanged, useApi } from '../../lib/api';
@@ -28,7 +30,22 @@ export default function ReviewDetail() {
   const nav = useNavigate();
   const v = data?.version;
   const pending = v && ['awaiting_review', 'under_review', 'submitted'].includes(v.reviewStatus);
-  useEffect(() => { if (v) setMeta({ ...v.metadata, values: { ...(v.metadata.values ?? {}) } }); }, [v?.id]); // eslint-disable-line
+  const [prefilled, setPrefilled] = useState<string[]>([]);
+  useEffect(() => {
+    if (!v) return;
+    const next: any = { ...v.metadata, values: { ...(v.metadata.values ?? {}) } };
+    const filled: string[] = [];
+    const empty = !Object.keys(v.metadata).some((k) => k !== 'values') && !Object.keys(v.metadata.values ?? {}).length;
+    // Confident readings fill the form; unsure ones are left for the reviewer to enter or accept.
+    if (empty && ['awaiting_review', 'under_review', 'submitted'].includes(v.reviewStatus)) {
+      for (const [k, f] of Object.entries<any>(v.extraction.fields ?? {})) {
+        if (f.value === null || f.value === undefined || f.confidence < TRUST) continue;
+        if (data.metadataFields.some((x: any) => x.key === k)) { next[k] = String(f.value); filled.push(k); }
+        else if (data.valueFields.some((x: any) => x.key === k)) { next.values[k] = f.value; filled.push(k); }
+      }
+    }
+    setMeta(next); setPrefilled(filled);
+  }, [v?.id, v?.extraction?.status]); // eslint-disable-line
   // Claim the review so a colleague can't decide it at the same time.
   useEffect(() => {
     if (!v || !pending || !data.canReview) return;
@@ -40,16 +57,17 @@ export default function ReviewDetail() {
   if (error) return <ErrorState error={error} onRetry={reload} />;
   const fields = v.extraction.fields ?? {};
   const proposed = Object.entries(fields).filter(([, f]: any) => f.value !== null && f.value !== undefined);
+  const unsureLeft = proposed.filter(([k, f]: any) => f.confidence < TRUST && (data.metadataFields.some((x: any) => x.key === k) ? !meta[k] : data.valueFields.some((x: any) => x.key === k) && meta.values?.[k] === undefined)).length;
   const setM = (k: string, val: any) => setMeta((m: any) => ({ ...m, [k]: val }));
   const setV = (k: string, val: any) => setMeta((m: any) => ({ ...m, values: { ...m.values, [k]: val } }));
   const applyProposed = () => {
     const next = { ...meta, values: { ...meta.values } };
     for (const [k, f] of Object.entries(fields) as any) {
       if (f.value === null || f.value === undefined) continue;
-      if (data.metadataFields.some((x: any) => x.key === k)) next[k] = String(f.value); else next.values[k] = f.value;
+      if (data.metadataFields.some((x: any) => x.key === k)) next[k] = String(f.value); else if (data.valueFields.some((x: any) => x.key === k)) next.values[k] = f.value;
     }
     setMeta(next);
-    toast('Proposed values copied in. Check each one against the document before deciding.', 'info');
+    toast('Values copied in. Check each one against the document before deciding.', 'info');
   };
   const failed = checks.filter((c) => c.passed === false);
   const missingExpiry = data.requirement?.expiryRequired && !meta.expiryDate;
@@ -83,45 +101,62 @@ export default function ReviewDetail() {
       <div className="grid xl:grid-cols-[1.3fr_1fr] gap-x-10 gap-y-8 items-start">
         <div className="min-w-0 xl:sticky xl:top-24 border border-line rounded-md overflow-hidden bg-paper"><FilePreview versionId={v.id} mimeType={v.mimeType} className="h-[78vh]" /></div>
         <div className="space-y-10 min-w-0">
+          <AssessmentBanner a={data.assessment} readingOn={data.readingOn} extraction={v.extraction} />
+
+          <section>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong"><span className="text-faint tnum mr-2">1</span>What the document says</h2>
+            <ReadingNotes v={v} kindLabels={data.kindLabels} readingOn={data.readingOn} onReload={reload} />
+            {proposed.length > 0 && (
+              <table className="w-full mt-2 text-sm">
+                <thead className="sr-only"><tr><th>Field</th><th>Read as</th><th>Confidence</th></tr></thead>
+                <tbody>{proposed.map(([k, f]: any) => (
+                  <tr key={k} className="border-b border-line align-top">
+                    <td className="py-2.5 pr-3 text-muted w-[34%]">{fieldLabel(k, v.extraction.kind)}</td>
+                    <td className="py-2.5 pr-3"><span className="text-ink text-[0.9375rem]">{fmtValue(f.value)}</span>{f.source && <div className="text-xs text-faint mt-0.5 break-words">{f.page ? `Page ${f.page}: ` : ''}“{f.source}”</div>}</td>
+                    <td className="py-2.5 tnum text-right whitespace-nowrap">{f.confidence < TRUST ? <span className="inline-flex items-center gap-1.5 font-medium"><Glyph tone="attention" className="w-3.5 h-3.5" />Unsure</span> : <span className="text-faint">{Math.round(f.confidence * 100)}%</span>}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+            {v.extraction.status === 'completed' && proposed.length === 0 && <p className="text-muted mt-3">Nothing could be read confidently. Enter the details below from the document.</p>}
+          </section>
+
           {data.requirement && (
             <section>
-              <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Against the requirement <span className="text-sm text-faint font-normal">version {data.requirement.version}</span></h2>
-              <p className="text-muted mt-3">{data.requirement.description}</p>
-              <ul className="mt-4 space-y-2.5">
-                {data.requirement.expiryRequired && <li className="flex gap-2.5 items-start"><Glyph tone={missingExpiry ? 'blocked' : expired ? 'attention' : 'ok'} className="w-4 h-4 mt-0.5" /><span>Expiry date recorded{expired ? ' — already expired' : ''}</span></li>}
-                {checks.map((c) => <li key={c.criterion.key} className="flex gap-2.5 items-start"><Glyph tone={c.passed === true ? 'ok' : c.passed === false ? 'blocked' : 'none'} className="w-4 h-4 mt-0.5" /><span>{data.criteria.find((x: any) => x.key === c.criterion.key)?.description} <span className="text-faint">({c.detail})</span></span></li>)}
-                {!data.requirement.expiryRequired && checks.length === 0 && <li className="text-muted">No structured checks — compare the document with the description above.</li>}
-              </ul>
+              <h2 className="text-lg font-semibold pb-3 border-b border-line-strong"><span className="text-faint tnum mr-2">2</span>Compared with what you asked for</h2>
+              <p className="text-sm text-muted mt-3">{data.requirement.name}{data.requirement.description ? ` — ${data.requirement.description}` : ''}</p>
+              {data.assessment?.checks?.length ? (
+                <ul className="mt-4 space-y-3">
+                  {data.assessment.checks.map((c: any) => (
+                    <li key={c.key} className="flex gap-2.5 items-start">
+                      <Glyph tone={c.outcome === 'pass' ? 'ok' : c.outcome === 'fail' ? 'blocked' : c.outcome === 'warn' ? 'attention' : 'none'} className="w-4 h-4 mt-0.5 shrink-0" />
+                      <span className="min-w-0"><span className="font-medium">{c.label}</span><span className="sr-only"> — {OUTCOME[c.outcome]}</span><span className="block text-sm text-muted">{c.detail}</span></span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <ul className="mt-4 space-y-2.5">
+                  {data.requirement.expiryRequired && <li className="flex gap-2.5 items-start"><Glyph tone={missingExpiry ? 'blocked' : expired ? 'attention' : 'ok'} className="w-4 h-4 mt-0.5" /><span>Expiry date recorded{expired ? ' — already expired' : ''}</span></li>}
+                  {checks.map((c) => <li key={c.criterion.key} className="flex gap-2.5 items-start"><Glyph tone={c.passed === true ? 'ok' : c.passed === false ? 'blocked' : 'none'} className="w-4 h-4 mt-0.5" /><span>{data.criteria.find((x: any) => x.key === c.criterion.key)?.description} <span className="text-faint">({c.detail})</span></span></li>)}
+                  {!data.requirement.expiryRequired && checks.length === 0 && <li className="text-muted">No structured conditions. Compare the document with the description above.</li>}
+                </ul>
+              )}
               {isInsurance && pending && (
                 <div className="mt-6 space-y-2.5">
-                  <div className="text-sm font-medium">Reviewer checks</div>
+                  <div className="text-sm font-medium">Also check by eye</div>
                   {['Named insured matches the subcontractor', `${market === 'US' ? 'Carrier' : 'Insurer'} and policy number are legible`, 'Policy dates cover the work period', 'Endorsements are present where required'].map((k) => (
                     <Checkbox key={k} checked={manual[k] === true} onChange={(x) => setManual({ ...manual, [k]: x ? true : null })} label={k} />
                   ))}
-                  <p className="text-xs text-faint leading-relaxed pt-1">{/^[aeiou]/i.test(term(market, 'coi')) ? 'An' : 'A'} {term(market, 'coi')} is evidence of cover, not proof of it. Approving records that it was reviewed against your stated requirements — not a legal coverage determination.</p>
                 </div>
               )}
-            </section>
-          )}
-
-          {(v.extraction.status !== 'not_configured' || proposed.length > 0) && (
-            <section>
-              <div className="flex items-end justify-between gap-3 pb-3 border-b border-line-strong">
-                <div><h2 className="text-lg font-semibold">Extracted from the document</h2><p className="text-sm text-muted mt-0.5">{v.extraction.status === 'completed' ? `Read automatically by ${v.extraction.model}. Nothing becomes official until you confirm it.` : v.extraction.status === 'failed' ? 'The document couldn’t be read automatically — enter the details below.' : 'Reading the document…'}</p></div>
-                {proposed.length > 0 && pending && <button className="btn-secondary btn-sm" onClick={applyProposed}>Use these values</button>}
-              </div>
-              {['queued', 'processing'].includes(v.extraction.status) && <button className="btn-ghost btn-sm mt-3" onClick={reload}><Spinner /> Check again</button>}
-              {proposed.length > 0 && <table className="w-full mt-2"><tbody>{proposed.map(([k, f]: any) => (
-                <tr key={k} className="border-b border-line"><td className="py-2.5 pr-3 text-muted text-sm">{[...data.metadataFields, ...data.valueFields].find((x: any) => x.key === k)?.label ?? k}</td><td className="py-2.5 pr-3">{String(f.value)}</td>
-                  <td className="py-2.5 text-sm tnum text-right whitespace-nowrap">{f.confidence < 0.7 ? <span className="inline-flex items-center gap-1.5 font-medium"><Glyph tone="attention" className="w-3.5 h-3.5" />{Math.round(f.confidence * 100)}% · check</span> : <span className="text-faint">{Math.round(f.confidence * 100)}%</span>}</td></tr>
-              ))}</tbody></table>}
-              {v.extraction.status === 'completed' && proposed.length === 0 && <p className="text-muted mt-3">No details could be read. Enter them manually.</p>}
+              <p className="text-xs text-faint leading-relaxed mt-4">This comparison uses what was read from the document and your requirement. It isn’t a review decision, and {isInsurance ? `${/^[aeiou]/i.test(term(market, 'coi')) ? 'an' : 'a'} ${term(market, 'coi')} is evidence of cover, not proof of it` : 'it doesn’t verify the document with the issuer'}.</p>
             </section>
           )}
 
           <section>
-            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Confirmed details</h2>
-            <p className="text-sm text-muted mt-3">These become the official record when you decide.</p>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong"><span className="text-faint tnum mr-2">3</span>Confirmed details</h2>
+            <p className="text-sm text-muted mt-3">{prefilled.length ? `${prefilled.length === 1 ? '1 detail was' : `${prefilled.length} details were`} filled in from the document. Check them against it — they become the official record when you decide.` : 'These become the official record when you decide.'}</p>
+            {pending && unsureLeft > 0 && <button className="btn-quiet mt-2" onClick={applyProposed}>Also fill in the {unsureLeft} unsure value{unsureLeft === 1 ? '' : 's'}</button>}
             {(() => {
               // Show what this requirement needs first; everything else is one click away.
               const criteriaKeys = new Set((data.requirement?.criteria ?? []).map((c: any) => c.key));
@@ -159,7 +194,7 @@ export default function ReviewDetail() {
 
           {pending && data.canReview ? (
             <section className="border-t border-line-strong pt-6">
-              <h2 className="text-lg font-semibold">Decision</h2>
+              <h2 className="text-lg font-semibold"><span className="text-faint tnum mr-2">4</span>Your decision</h2>
               <div className="mt-4 space-y-5">
                 <Segmented label="Decision" value={decision} onChange={setDecision} options={[{ value: 'approve', label: 'Approve' }, { value: 'request_info', label: 'Request correction' }, { value: 'reject', label: 'Reject' }]} />
                 {blockedApprove && <Callout tone="bad">{missingExpiry ? 'Record the expiry date to approve. ' : ''}{failed.length ? `Doesn't meet: ${failed.map((f) => f.criterion.label).join(', ')}. Correct the values if they were entered wrongly, or reject.` : ''}</Callout>}
@@ -174,7 +209,7 @@ export default function ReviewDetail() {
             </section>
           ) : (
             <section className="border-t border-line-strong pt-6">
-              <h2 className="text-lg font-semibold">Outcome</h2>
+              <h2 className="text-lg font-semibold"><span className="text-faint tnum mr-2">4</span>Decision and verification</h2>
               <div className="mt-3 space-y-2">
                 {v.review ? <p><span className="font-medium">{humanize(v.review.decision)}</span> by {v.review.reviewerName}, {formatDateTime(v.review.at)}</p> : <p className="text-muted">{humanize(v.reviewStatus)}</p>}
                 {v.review?.reason && <p className="text-muted">Reason: {v.review.reason}</p>}
@@ -209,5 +244,44 @@ function VerifyDialog({ versionId, market, onClose }: { versionId: string; marke
         <FormError error={err} />
       </div>
     </Dialog>
+  );
+}
+
+const OUTCOME: Record<string, string> = { pass: 'meets it', warn: 'worth noting', fail: 'doesn’t meet it', unclear: 'check by eye' };
+function fmtValue(v: any) {
+  if (v === true) return 'Yes';
+  if (v === false) return 'No';
+  if (typeof v === 'number') return v.toLocaleString();
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return formatDate(v);
+  return String(v);
+}
+
+function AssessmentBanner({ a, readingOn, extraction }: { a: any; readingOn: boolean; extraction: any }) {
+  if (!a || a.triage === 'not_read') {
+    if (['queued', 'processing'].includes(extraction.status)) return null;
+    return <Callout tone="info" title="Check this one by eye">{extraction.status === 'skipped' ? extraction.skippedReason : !readingOn ? 'Automatic reading isn’t switched on for this workspace, so compare the document with the requirement yourself.' : 'The document couldn’t be read automatically. Compare it with the requirement yourself.'}</Callout>;
+  }
+  const tone = a.triage === 'looks_good' ? 'ok' : a.triage === 'problem' ? 'bad' : 'warn';
+  const title = a.triage === 'looks_good' ? 'Looks right' : a.triage === 'problem' ? 'Doesn’t match the requirement' : 'A few things to check';
+  return <Callout tone={tone as any} title={title}>{a.summary}</Callout>;
+}
+
+function ReadingNotes({ v, kindLabels, readingOn, onReload }: { v: any; kindLabels: Record<string, string>; readingOn: boolean; onReload: () => void }) {
+  const x = v.extraction;
+  const notes: string[] = [];
+  if (x.status === 'completed' && x.kind) notes.push(`Reads as ${(kindLabels[x.kind] ?? x.kind).toLowerCase()}${x.kindConfidence < TRUST ? ' (not certain)' : ''}.`);
+  if (x.reusedFrom) notes.push('This exact file was read before, so the earlier reading was reused.');
+  if (v.duplicateOf) notes.push(`An identical file was already submitted on ${formatDate(v.duplicateOf.at)}.`);
+  if (v.intake) notes.push(`Arrived by email from ${v.intake.from}${v.intake.subject ? ` (“${v.intake.subject}”)` : ''} on ${formatDateTime(v.intake.receivedAt)}.`);
+  for (const i of x.issues ?? []) notes.push(i);
+  return (
+    <div className="mt-3 text-sm text-muted space-y-1">
+      {['queued', 'processing'].includes(x.status) && <div className="flex items-center gap-2"><Spinner /> Reading the document… <button className="btn-ghost btn-sm" onClick={onReload}>Check again</button></div>}
+      {x.status === 'failed' && <p>The document couldn’t be read automatically ({x.error}). Enter the details below.</p>}
+      {x.status === 'skipped' && <p>{x.skippedReason}</p>}
+      {x.status === 'not_configured' && <p>{readingOn ? 'Not read yet.' : 'Automatic reading isn’t switched on. Enter the details below from the document.'}</p>}
+      {notes.map((n, i) => <p key={i}>{n}</p>)}
+      {x.status === 'completed' && <p className="text-xs text-faint">Read automatically{x.escalated ? ', then re-read by a more capable model because some details were unclear' : ''}. Nothing here is official until you confirm it.</p>}
+    </div>
   );
 }

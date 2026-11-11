@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { DEFAULT_PLANS, type Plan } from '../src/domain/plans';
 import { FirestoreDb, type Db } from './db';
+import { AnthropicProvider, type AiProvider } from './ai';
 import { GcsFileStore, type FileStore } from './storage';
 
 export interface Identity { uid: string; email: string; emailVerified: boolean; name?: string }
@@ -21,7 +22,16 @@ export interface Env {
   appUrl: string;
   portalSecret: string;
   anthropicKey?: string;
+  /** The more capable model, used for second looks and the assistant. */
   anthropicModel: string;
+  /** The inexpensive model that reads every document first. */
+  aiFastModel: string;
+  /** Optional per-million-token prices, e.g. {"model":{"in":1,"out":5}}. Without them only tokens are reported. */
+  aiPrices?: Record<string, { in: number; out: number }>;
+  aiMaxPages: number;
+  aiMaxBytes: number;
+  inboundSecret?: string;
+  inboundDomain?: string;
   stripeSecret?: string;
   stripeWebhookSecret?: string;
   scanUrl?: string;
@@ -37,10 +47,14 @@ export interface Services {
   files: FileStore;
   auth: AuthVerifier;
   mail: Mailer;
+  /** Document reader / assistant model. Undefined when no AI provider is configured. */
+  ai?: AiProvider;
   env: Env;
   now(): Date;
   /** Kicks off background extraction for a stored version. */
   queueExtraction(orgId: string, versionId: string): Promise<void>;
+  /** Kicks off background reading and matching of an emailed attachment. */
+  queueIntake(orgId: string, intakeId: string): Promise<void>;
 }
 
 export function readEnv(e: NodeJS.ProcessEnv = process.env): Env {
@@ -57,6 +71,12 @@ export function readEnv(e: NodeJS.ProcessEnv = process.env): Env {
     portalSecret: portalSecret || 'dev-only-portal-secret-change-me-0000000000',
     anthropicKey: e.ANTHROPIC_API_KEY,
     anthropicModel: e.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
+    aiFastModel: e.ANTHROPIC_MODEL_FAST || 'claude-haiku-5-5',
+    aiPrices: (() => { try { return e.AI_PRICES_JSON ? JSON.parse(e.AI_PRICES_JSON) : undefined; } catch { console.error('AI_PRICES_JSON is not valid JSON'); return undefined; } })(),
+    aiMaxPages: Number(e.AI_MAX_PAGES || 12),
+    aiMaxBytes: Number(e.AI_MAX_BYTES || 10 * 1024 * 1024),
+    inboundSecret: e.INBOUND_EMAIL_SECRET,
+    inboundDomain: e.INBOUND_EMAIL_DOMAIN,
     stripeSecret: e.STRIPE_SECRET_KEY,
     stripeWebhookSecret: e.STRIPE_WEBHOOK_SECRET,
     scanUrl: e.MALWARE_SCAN_URL,
@@ -119,6 +139,7 @@ export async function getFirebaseServices(): Promise<Services> {
       async revokeSessions(uid) { await auth.revokeRefreshTokens(uid); },
     },
     mail: new ResendMailer(process.env.RESEND_API_KEY, process.env.EMAIL_FROM),
+    ai: env.anthropicKey ? new AnthropicProvider(env.anthropicKey) : undefined,
     env,
     now: () => new Date(),
     async queueExtraction(orgId, versionId) {
@@ -129,6 +150,14 @@ export async function getFirebaseServices(): Promise<Services> {
         body: JSON.stringify({ orgId, versionId }),
       });
       if (!res.ok && res.status !== 202) throw new Error(`Could not queue extraction (${res.status})`);
+    },
+    async queueIntake(orgId, intakeId) {
+      const res = await fetch(`${env.appUrl}/.netlify/functions/intake-background`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-signature': internalSignature(env.portalSecret, `intake:${orgId}:${intakeId}`) },
+        body: JSON.stringify({ orgId, intakeId }),
+      });
+      if (!res.ok && res.status !== 202) throw new Error(`Could not queue intake (${res.status})`);
     },
   };
   return firebaseServices;

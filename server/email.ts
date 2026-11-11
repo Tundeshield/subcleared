@@ -17,7 +17,7 @@ ${o.cta ? `<p style="margin:22px 0 6px"><a href="${esc(o.cta.url)}" style="displ
 </td></tr>
 <tr><td style="padding:16px 28px;border-top:1px solid #eceef0;font-size:12px;color:#6b7280">${esc(o.footer ?? 'You received this because your organisation uses SubCleared to manage compliance paperwork.')}</td></tr>
 </table></td></tr></table></body></html>`;
-  const text = `${o.heading}\n\n${o.body}${o.cta ? `\n\n${o.cta.label}: ${o.cta.url}` : ''}\n\n— SubCleared${o.orgName ? ` for ${o.orgName}` : ''}`;
+  const text = `${o.heading}\n\n${o.body}${o.cta ? `\n\n${o.cta.label}: ${o.cta.url}` : ''}\n\n— SubCleared${o.orgName ? ` for ${o.orgName}` : ''}${o.footer ? `\n\n${o.footer}` : ''}`;
   return { html, text };
 }
 

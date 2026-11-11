@@ -40,14 +40,14 @@ export default function Reviews() {
           {rows.length === 0 ? <Empty title="Nothing matches these filters" /> : (
             <div className="overflow-x-auto -mx-4 sm:mx-0">
               <table className="table min-w-[900px]">
-                <thead><tr><th className="th">Document</th><th className="th">Subcontractor</th><th className="th">Project</th><th className="th">Submitted</th><th className="th">Details</th><th className="th"><span className="sr-only">Action</span></th></tr></thead>
+                <thead><tr><th className="th">Document</th><th className="th">Subcontractor</th><th className="th">Project</th><th className="th">Submitted</th><th className="th">Automatic check</th><th className="th"><span className="sr-only">Action</span></th></tr></thead>
                 <tbody>{paged.slice.map((r: any) => (
                   <tr key={r.versionId} className="tr-link" onClick={() => nav(`/app/reviews/${r.versionId}`)}>
                     <td className="td"><div className="font-medium">{r.requirement ?? r.title}</div><div className="text-sm text-faint truncate max-w-[18rem]">{r.fileName}{r.versionNumber > 1 ? ` · version ${r.versionNumber}` : ''}{r.replacing ? ' · replaces the approved copy' : ''}</div></td>
                     <td className="td">{r.subcontractor}</td>
                     <td className="td text-sm">{r.projects.length === 0 ? <span className="text-faint">Not on a live project</span> : r.projects.length === 1 ? r.projects[0].name : <span title={r.projects.map((p: any) => p.name).join(', ')}>{r.projects[0].name} <span className="text-faint">+{r.projects.length - 1}</span></span>}</td>
                     <td className="td text-sm"><div>{formatDateTime(r.uploadedAt)}</div><div className={r.ageHours > 72 ? 'text-warning font-medium' : 'text-faint'}>{r.ageHours < 24 ? 'Today' : `Waiting ${Math.floor(r.ageHours / 24)} day${Math.floor(r.ageHours / 24) === 1 ? '' : 's'}`}</div></td>
-                    <td className="td text-sm text-muted">{r.lockedBy ? <span className="flex items-center gap-1.5 text-ink"><Glyph tone="progress" className="w-3 h-3" />{r.lockedBy.name} is reviewing</span> : r.extraction === 'completed' ? 'Details suggested — confirm them' : r.extraction === 'pending' || r.extraction === 'running' ? 'Reading the document…' : 'Enter details while reviewing'}</td>
+                    <td className="td text-sm text-muted max-w-[22rem]">{r.lockedBy ? <span className="flex items-center gap-1.5 text-ink"><Glyph tone="progress" className="w-3 h-3" />{r.lockedBy.name} is reviewing</span> : r.triage ? <span className="flex items-start gap-1.5"><Glyph tone={r.triage === 'looks_good' ? 'ok' : r.triage === 'problem' ? 'blocked' : 'attention'} className="w-3 h-3 mt-1 shrink-0" /><span>{r.triage === 'looks_good' ? 'Checks passed — confirm to approve' : r.check}</span></span> : ['queued', 'processing'].includes(r.extraction) ? 'Reading the document…' : 'Check by eye'}</td>
                     <td className="td text-right"><span className="btn-secondary btn-sm">Review</span></td>
                   </tr>
                 ))}</tbody>

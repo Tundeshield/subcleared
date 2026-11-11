@@ -23,6 +23,7 @@ export const ORG_COLLECTIONS = [
   'members', 'invitations', 'projects', 'subcontractors', 'notes', 'requirements', 'requirementVersions', 'templates',
   'templateVersions', 'projectRequirements', 'assignments', 'overrides', 'documents', 'versions', 'reviews', 'verifications',
   'readiness', 'evaluations', 'requests', 'links', 'notifications', 'deliveryLogs', 'reminders', 'audit', 'billing', 'uploads', 'views',
+  'intake', 'aiUsage',
 ] as const;
 
 export interface Ctx {

@@ -8,6 +8,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { handleApi } from './api';
 import { MemoryDb } from './db';
+import { MockAiProvider } from './ai';
+import { handleInboundEmail, processIntake } from './intake';
 import { runDailyJobs, runExtraction } from './jobs';
 import { readEnv, type Services } from './services';
 import { LocalFileStore } from './storage';
@@ -54,9 +56,11 @@ const svc: Services = {
       return { ok: true, id, dev: true };
     },
   },
-  env: { ...readEnv({ ...process.env, APP_URL }), appUrl: APP_URL },
+  ai: process.env.DEV_AI === 'mock' ? new MockAiProvider() : undefined,
+  env: { ...readEnv({ ...process.env, APP_URL, INBOUND_EMAIL_SECRET: process.env.INBOUND_EMAIL_SECRET || 'dev-inbound', INBOUND_EMAIL_DOMAIN: process.env.INBOUND_EMAIL_DOMAIN || 'in.subcleared.test' }), appUrl: APP_URL },
   now: () => new Date(Date.now() + clockOffsetMs),
   async queueExtraction(orgId, versionId) { setTimeout(() => runExtraction(svc, orgId, versionId).catch(console.error), 10); },
+  async queueIntake(orgId, intakeId) { setTimeout(() => processIntake(svc, orgId, intakeId).catch(console.error), 10); },
 };
 
 async function body(req: http.IncomingMessage, limit = 3_000_000): Promise<Buffer> {
@@ -145,7 +149,12 @@ const server = http.createServer(async (req, res) => {
       const mail = (await db.list<any>('_devMail')).sort((a, b) => b.at.localeCompare(a.at));
       return json(res, 200, { items: mail.slice(0, 200) });
     }
-    if (url.pathname === '/api/_dev/jobs') { const out = await runDailyJobs(svc); return json(res, 200, out); }
+    if (url.pathname === '/webhooks/inbound-email' && req.method === 'POST') {
+      const raw = await body(req, 40_000_000);
+      const out = await handleInboundEmail(svc, raw.toString(), url.searchParams.get('token') || req.headers['x-inbound-secret'] as string);
+      return json(res, out.status, out.body);
+    }
+    if (url.pathname === '/api/_dev/jobs') { const out = await runDailyJobs(svc, { force: url.searchParams.get('force') !== '0' }); return json(res, 200, out); }
     if (url.pathname === '/api/_dev/clock') {
       const input = JSON.parse((await body(req)).toString() || '{}');
       if (input.offsetDays !== undefined) clockOffsetMs = Number(input.offsetDays) * 86_400_000;

@@ -5,6 +5,7 @@ import { addDays, formatDate, formatDateTime } from '../../domain/dates';
 import { api, dataChanged, useApi, useMutation } from '../../lib/api';
 import { exportCsv, exportPdf } from '../../lib/export';
 import { useSession } from '../../lib/session';
+import { AskBox } from './Ask';
 import {
   Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Drawer, Empty, ErrorState, Field, FormError, Glyph, HelpTip, humanize, Icon, KeyValue, Menu, MoreButton,
   PageHeader, PageLoading, ReadinessBadge, ReadinessBar, SampleTag, SearchInput, Spinner, StatusText, Tabs, Toolbar, useToast,
@@ -39,7 +40,7 @@ export default function ProjectDetail() {
   const raw = params.get('tab');
   const tab: Tab = raw === 'requirements' || raw === 'documents' || raw === 'activity' || raw === 'details' ? raw : 'readiness';
   const focus = (params.get('show') as Focus) || 'all';
-  const { can } = useSession();
+  const { can, me } = useSession();
   const { data, error, loading, reload } = useApi<any>('projects.get', { projectId: id });
   const [edit, setEdit] = useState(false);
   const [assign, setAssign] = useState(false);
@@ -92,6 +93,7 @@ export default function ProjectDetail() {
         </>} />
       {archived && <div className="mb-8"><Callout title="Archived">Readiness is frozen as it was when the project was archived, and reminders stop for documents only this project needs.</Callout></div>}
       {!archived && <NextStep data={data} onAdd={() => setAssign(true)} onRequest={() => setRequesting({})} goTo={setTab} />}
+      {!archived && c.total > 0 && me?.extractionConfigured && <AskBox projectId={p.id} className="mb-8" />}
       {c.total > 0 && (
         <section aria-label="Project readiness" className="mb-8 rounded-md border border-line bg-paper px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-3">
           <div className="min-w-[14rem]">
@@ -122,7 +124,7 @@ export default function ProjectDetail() {
         )}
       </div>
       <ProjectDrawer open={edit} onClose={() => setEdit(false)} project={p} />
-      <AddSubsDrawer open={assign} onClose={() => setAssign(false)} projectId={p.id} available={data.available} onAdded={(ids) => { setAssign(false); if (can('requests.send')) setRequesting({ ids }); }} />
+      <AddSubsDrawer open={assign} onClose={() => setAssign(false)} projectId={p.id} available={data.available} canSendNow={can('requests.send') && data.requirements.length > 0} onAdded={(ids, sent) => { setAssign(false); if (!sent && can('requests.send') && data.requirements.length > 0) setRequesting({ ids }); }} />
       <RequestPaperworkDialog open={!!requesting} onClose={() => setRequesting(null)} data={data} preselect={requesting?.ids} />
       <Confirm open={archive} onClose={() => setArchive(false)} title={archived ? 'Restore this project?' : 'Archive this project?'} confirmLabel={archived ? 'Restore' : 'Archive'} danger={!archived} busy={archiveM.busy}
         onConfirm={async () => { await archiveM.run({ projectId: p.id, archived: !archived }); setArchive(false); toast(archived ? 'Project restored' : 'Project archived'); }}>
@@ -364,8 +366,9 @@ type NewSub = { legalName: string; trade: string; name: string; email: string };
 const blankSub = (): NewSub => ({ legalName: '', trade: '', name: '', email: '' });
 
 /** Add existing directory companies and brand-new ones in one place, then assign them all. */
-function AddSubsDrawer({ open, onClose, projectId, available, onAdded }: { open: boolean; onClose: () => void; projectId: string; available: any[]; onAdded: (ids: string[]) => void }) {
+function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNow }: { open: boolean; onClose: () => void; projectId: string; available: any[]; onAdded: (ids: string[], sent: boolean) => void; canSendNow: boolean }) {
   const { can } = useSession();
+  const [sendNow, setSendNow] = useState(true);
   const [sel, setSel] = useState<string[]>([]);
   const [q, setQ] = useState('');
   const [fresh, setFresh] = useState<NewSub[]>([]);
@@ -386,15 +389,22 @@ function AddSubsDrawer({ open, onClose, projectId, available, onAdded }: { open:
         ids.push(r.subcontractorId);
       }
       await api('projects.assign', { projectId, subcontractorIds: ids });
+      let sent = false;
+      if (canSendNow && sendNow) {
+        const r = await api<any>('requests.forProject', { projectId, subcontractorIds: ids });
+        const ok = r.results.filter((x: any) => x.status === 'sent').length;
+        const missed = r.results.filter((x: any) => x.status !== 'sent' && x.detail !== 'Nothing outstanding to request');
+        toast(`${ids.length} added · ${ok} request${ok === 1 ? '' : 's'} sent${missed.length ? ` · ${missed.length} not sent (${missed[0].detail})` : ''}`, missed.length ? 'info' : undefined);
+        sent = true;
+      } else toast(`${ids.length} subcontractor${ids.length === 1 ? '' : 's'} added to the project`);
       dataChanged();
-      toast(`${ids.length} subcontractor${ids.length === 1 ? '' : 's'} added to the project`);
       setSel([]); setFresh([]); setQ('');
-      onAdded(ids);
+      onAdded(ids, sent);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
   return (
     <Drawer open={open} onClose={close} title="Add subcontractors to this project" description="Choose companies you already work with, or add new ones. SubCleared works out what each one still needs to provide."
-      footer={<><button className="btn-secondary" onClick={close}>Cancel</button><button className="btn-primary" disabled={!total || !!incomplete || busy} onClick={save}>{busy && <Spinner />}Add {total || ''} to project</button></>}>
+      footer={<div className="flex w-full flex-wrap items-center justify-between gap-3">{canSendNow ? <Checkbox checked={sendNow} onChange={setSendNow} label="Send paperwork requests now" hint="Each contact gets a secure link; reminders follow automatically." /> : <span />}<div className="flex gap-2"><button className="btn-secondary" onClick={close}>Cancel</button><button className="btn-primary" disabled={!total || !!incomplete || busy} onClick={save}>{busy && <Spinner />}{canSendNow && sendNow ? `Add ${total || ''} and send requests` : `Add ${total || ''} to project`}</button></div></div>}>
       <div className="space-y-8">
         <section>
           <h3 className="text-md font-semibold">From your directory</h3>
