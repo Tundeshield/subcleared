@@ -8,8 +8,7 @@ import { useSession } from '../../lib/session';
 import { AskBox } from './Ask';
 import {
   Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Drawer, Empty, ErrorState, Field, FormError, Glyph, HelpTip, humanize, Icon, KeyValue, Menu, MoreButton,
-  PageHeader, PageLoading, ReadinessBadge, ReadinessBar, SampleTag, SearchInput, Spinner, StatusText, Tabs, Toolbar, useToast,
-} from '../../ui';
+  PageHeader, PageLoading, ReadinessBadge, ReadinessBar, SampleTag, SearchInput, Spinner, StatusText, Tabs, Toolbar, useToast, newRowKey } from '../../ui';
 import { ProjectDrawer } from './Projects';
 import { activityLine, RequestDialog } from './shared';
 
@@ -362,8 +361,8 @@ function ActivityTab({ projectId }: { projectId: string }) {
   );
 }
 
-type NewSub = { legalName: string; trade: string; name: string; email: string };
-const blankSub = (): NewSub => ({ legalName: '', trade: '', name: '', email: '' });
+type NewSub = { k: string; legalName: string; trade: string; name: string; email: string };
+const blankSub = (): NewSub => ({ k: newRowKey(), legalName: '', trade: '', name: '', email: '' });
 
 /** Add existing directory companies and brand-new ones in one place, then assign them all. */
 function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNow }: { open: boolean; onClose: () => void; projectId: string; available: any[]; onAdded: (ids: string[], sent: boolean) => void; canSendNow: boolean }) {
@@ -421,7 +420,7 @@ function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNo
               {fresh.map((f, i) => {
                 const set = (k: keyof NewSub, v: string) => setFresh(fresh.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
                 return (
-                  <fieldset key={i} className="rounded-md border border-line bg-canvas p-4">
+                  <fieldset key={f.k} className="rounded-md border border-line bg-canvas p-4">
                     <legend className="sr-only">New subcontractor {i + 1}</legend>
                     <div className="grid sm:grid-cols-2 gap-4">
                       <Field label="Company name"><input className="input" value={f.legalName} onChange={(e) => set('legalName', e.target.value)} autoFocus={i === fresh.length - 1} /></Field>

@@ -5,7 +5,7 @@ import { formatDate, formatDateTime } from '../../domain/dates';
 import { DOCUMENT_TYPES, SUB_TYPES, VALUE_FIELDS } from '../../domain/library';
 import { useApi, useMutation } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { Checkbox, cx, Dialog, Drawer, Empty, ErrorState, Field, FormError, humanize, PageHeader, SearchInput, Segmented, Skeleton, Spinner, Tabs, Toolbar, useToast } from '../../ui';
+import { Checkbox, cx, Dialog, Drawer, Empty, ErrorState, Field, FormError, humanize, PageHeader, SearchInput, Segmented, Skeleton, Spinner, Tabs, Toolbar, useToast, newRowKey, withoutRowKey } from '../../ui';
 
 const KIND_LABEL: Record<string, string> = { document: 'Document, reviewed', declaration: 'Periodic declaration', manual_check: 'Manual check' };
 
@@ -84,7 +84,7 @@ function RequirementBuilder({ initial, onClose }: { initial: any; onClose: () =>
   const { me } = useSession();
   const [f, setF] = useState<any>({
     name: '', description: '', category: 'Insurance', kind: 'document', jurisdiction: '', subTypes: [], defaultMandatory: true, documentType: me?.org?.settings.market === 'US' ? 'Certificate of insurance' : 'Insurance certificate',
-    expiryRequired: true, renewal: 'on_expiry', renewalPeriodDays: '', reviewRequired: true, criteria: [], instructions: '', active: true, ...initial,
+    expiryRequired: true, renewal: 'on_expiry', renewalPeriodDays: '', reviewRequired: true, instructions: '', active: true, ...initial, criteria: (initial?.criteria ?? []).map((c: any) => ({ ...c, _k: newRowKey() })),
   });
   const [touched, setTouched] = useState(false);
   const { run, busy, error } = useMutation(isNew ? 'requirements.create' : 'requirements.update');
@@ -101,7 +101,7 @@ function RequirementBuilder({ initial, onClose }: { initial: any; onClose: () =>
         <button className="btn-primary" disabled={busy} onClick={async () => {
           setTouched(true);
           if (!f.name.trim()) return;
-          const payload = { ...f, requirementId: initial.id, renewalPeriodDays: f.renewalPeriodDays === '' ? null : Number(f.renewalPeriodDays), criteria: f.criteria.map((c: any) => ({ ...c, value: c.type === 'min_amount' ? Number(c.value) : c.value })) };
+          const payload = { ...f, requirementId: initial.id, renewalPeriodDays: f.renewalPeriodDays === '' ? null : Number(f.renewalPeriodDays), criteria: f.criteria.map((c: any) => ({ ...withoutRowKey(c), value: c.type === 'min_amount' ? Number(c.value) : c.value })) };
           try { const r = await run(payload); toast(isNew ? 'Requirement created' : `Saved as version ${r.version}`); onClose(); } catch { /* shown */ }
         }}>{busy && <Spinner />}{isNew ? 'Create requirement' : 'Save new version'}</button>
       </>}>
@@ -137,7 +137,7 @@ function RequirementBuilder({ initial, onClose }: { initial: any; onClose: () =>
             <legend className="eyebrow mb-2">Checks</legend>
             <p className="text-sm text-muted mb-4">Values the reviewer confirms from the document, such as minimum limits. Approval is blocked if a confirmed value falls short.</p>
             <div className="space-y-3">{f.criteria.map((c: any, i: number) => (
-              <div key={i} className="grid grid-cols-[1.3fr_0.9fr_0.9fr_auto] gap-2 items-center">
+              <div key={c._k} className="grid grid-cols-[1.3fr_0.9fr_0.9fr_auto] gap-2 items-center">
                 <select className="input" value={c.key} onChange={(e) => { const vf = VALUE_FIELDS.find((x) => x.key === e.target.value)!; setCrit(i, { key: vf.key, label: vf.label, type: vf.type === 'amount' ? 'min_amount' : 'boolean' }); }} aria-label="Value checked">
                   {VALUE_FIELDS.map((v) => <option key={v.key} value={v.key}>{v.label}</option>)}
                 </select>
@@ -146,7 +146,7 @@ function RequirementBuilder({ initial, onClose }: { initial: any; onClose: () =>
                 <button className="btn-ghost btn-sm" onClick={() => set('criteria', f.criteria.filter((_: any, j: number) => j !== i))} aria-label="Remove check">Remove</button>
               </div>
             ))}</div>
-            <button className="btn-secondary btn-sm mt-4" onClick={() => set('criteria', [...f.criteria, { key: 'glEachOccurrence', label: VALUE_FIELDS[0].label, type: 'min_amount', value: 1000000, currency }])}>Add a check</button>
+            <button className="btn-secondary btn-sm mt-4" onClick={() => set('criteria', [...f.criteria, { _k: newRowKey(), key: 'glEachOccurrence', label: VALUE_FIELDS[0].label, type: 'min_amount', value: 1000000, currency }])}>Add a check</button>
           </fieldset>
         )}
         <fieldset>

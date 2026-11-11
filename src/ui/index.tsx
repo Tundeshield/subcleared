@@ -290,13 +290,28 @@ export function Tabs<T extends string>({ value, tabs, onChange }: { value: T; ta
 }
 
 // --- Overlays ------------------------------------------------------------------------------
+/**
+ * Focus management for dialogs and drawers. Runs once each time the overlay
+ * opens and once when it closes, never while it is open.
+ *
+ * `onClose` is read through a ref on purpose: callers usually pass an inline
+ * function, which is a new value on every render. Listing it as an effect
+ * dependency made the effect tear down and re-run on every keystroke in a form
+ * whose state lives in the same component, and each re-run moved focus back to
+ * the first field 30 ms later (the "cursor jumps to Company name" bug).
+ */
 function useOverlay(open: boolean, onClose: () => void, ref: React.RefObject<HTMLDivElement>) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    const t = setTimeout(() => ref.current?.querySelector<HTMLElement>('[autofocus],input:not([type=hidden]),select,textarea,button:not([data-close])')?.focus(), 30);
+    const t = setTimeout(() => {
+      // Only place initial focus if nothing inside the overlay has it yet (e.g. a field with autoFocus).
+      if (ref.current && !ref.current.contains(document.activeElement)) ref.current.querySelector<HTMLElement>('[autofocus],input:not([type=hidden]),select,textarea,button:not([data-close])')?.focus();
+    }, 30);
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') closeRef.current();
       if (e.key === 'Tab' && ref.current) {
         const f = [...ref.current.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')];
         if (!f.length) return;
@@ -307,7 +322,7 @@ function useOverlay(open: boolean, onClose: () => void, ref: React.RefObject<HTM
     document.addEventListener('keydown', key);
     document.body.style.overflow = 'hidden';
     return () => { clearTimeout(t); document.removeEventListener('keydown', key); document.body.style.overflow = ''; prev?.focus?.(); };
-  }, [open, onClose, ref]);
+  }, [open, ref]);
 }
 
 /** Modal: short, focused decisions. */
@@ -496,3 +511,13 @@ export function KeyValue({ items, columns = 1 }: { items: [ReactNode, ReactNode]
     </dl>
   );
 }
+
+/**
+ * Stable keys for editable rows (contacts, conditions, new subcontractors).
+ * Using the array index as the key lets React hand one row's inputs to the
+ * next row when a row is removed, which moves focus and half-typed text.
+ */
+let rowSeq = 0;
+export const newRowKey = () => `row-${++rowSeq}`;
+/** Removes client-only row keys before data is sent to the server. */
+export function withoutRowKey<T extends { _k?: string }>(x: T): Omit<T, '_k'> { const { _k, ...rest } = x; return rest; }

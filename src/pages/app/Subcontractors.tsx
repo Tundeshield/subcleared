@@ -8,8 +8,7 @@ import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
 import {
   Callout, Checkbox, cx, Dialog, Drawer, Empty, ErrorState, Field, FilterSelect, FormError, Glyph, humanize, PageHeader, Pagination, ReadinessBadge, SampleTag,
-  SearchInput, Skeleton, SortHeader, sortRows, Spinner, toneText, Toolbar, usePaged, useToast,
-} from '../../ui';
+  SearchInput, Skeleton, SortHeader, sortRows, Spinner, toneText, Toolbar, usePaged, useToast, newRowKey, withoutRowKey } from '../../ui';
 
 const READINESS_FILTERS = [{ value: 'attention', label: 'Requiring attention' }, { value: 'not_ready', label: 'Not ready' }, { value: 'action_required', label: 'Action required' }, { value: 'ready', label: 'Ready' }, { value: 'not_evaluated', label: 'Not assessed yet' }];
 
@@ -115,6 +114,7 @@ const CONTACT_ROLES = [['owner', 'Business owner'], ['administrator', 'Administr
 
 export function SubDrawer({ open, onClose, sub }: { open: boolean; onClose: () => void; sub?: any }) {
   const blank = { legalName: '', tradingName: '', registrationNumber: '', companyType: '', trade: '', subTypes: [] as string[], address: '', country: '', jurisdiction: '', tags: '', contacts: [{ name: '', email: '', phone: '', roles: ['submission'], primary: true }] as any[], ownerUid: '' };
+  const keyed = (cs: any[]) => cs.map((c) => ({ ...c, _k: c.id ?? newRowKey() }));
   const [f, setF] = useState<any>(blank);
   const [touched, setTouched] = useState(false);
   const members = useApi<any>(open ? 'members.list' : null);
@@ -122,7 +122,7 @@ export function SubDrawer({ open, onClose, sub }: { open: boolean; onClose: () =
   const { run, busy, error } = useMutation(sub ? 'subs.update' : 'subs.create');
   const toast = useToast();
   const nav = useNavigate();
-  useEffect(() => { if (open) { setTouched(false); setF(sub ? { ...blank, ...sub, tags: sub.tags.join(', '), contacts: sub.contacts.length ? sub.contacts : blank.contacts, ownerUid: sub.ownerUid ?? '' } : { ...blank, country: me?.org?.settings.market === 'US' ? 'United States' : me?.org?.settings.market === 'UK' ? 'United Kingdom' : '' }); } }, [open]); // eslint-disable-line
+  useEffect(() => { if (open) { setTouched(false); setF(sub ? { ...blank, ...sub, tags: sub.tags.join(', '), contacts: keyed(sub.contacts.length ? sub.contacts : blank.contacts), ownerUid: sub.ownerUid ?? '' } : { ...blank, contacts: keyed(blank.contacts), country: me?.org?.settings.market === 'US' ? 'United States' : me?.org?.settings.market === 'UK' ? 'United Kingdom' : '' }); } }, [open]); // eslint-disable-line
   const set = (k: string, v: any) => setF((x: any) => ({ ...x, [k]: v }));
   const setContact = (i: number, k: string, v: any) => set('contacts', f.contacts.map((c: any, j: number) => (j === i ? { ...c, [k]: v } : k === 'primary' && v ? { ...c, primary: false } : c)));
   const badEmail = (e: string) => e && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
@@ -135,7 +135,7 @@ export function SubDrawer({ open, onClose, sub }: { open: boolean; onClose: () =
         setTouched(true);
         if (!valid) return;
         try {
-          const contacts = f.contacts.filter((c: any) => c.name.trim() || c.email.trim());
+          const contacts = f.contacts.filter((c: any) => c.name.trim() || c.email.trim()).map(withoutRowKey);
           const r = await run({ ...f, subcontractorId: sub?.id, tags: f.tags.split(',').map((t: string) => t.trim()).filter(Boolean), contacts, ownerUid: f.ownerUid || undefined, subTypes: f.subTypes.length ? f.subTypes : undefined });
           toast(sub ? 'Saved' : 'Subcontractor added'); onClose();
           if (!sub) nav(`/app/subcontractors/${r.subcontractorId}`);
@@ -164,7 +164,7 @@ export function SubDrawer({ open, onClose, sub }: { open: boolean; onClose: () =
         <fieldset>
           <legend className="eyebrow mb-4">Contacts</legend>
           <div className="space-y-5">{f.contacts.map((c: any, i: number) => (
-            <div key={i} className={cx(i > 0 && 'pt-5 border-t border-line')}>
+            <div key={c._k} className={cx(i > 0 && 'pt-5 border-t border-line')}>
               <div className="grid sm:grid-cols-3 gap-3">
                 <input className="input" placeholder="Name" value={c.name} onChange={(e) => setContact(i, 'name', e.target.value)} aria-label="Contact name" />
                 <input className="input" type="email" placeholder="Email" value={c.email} onChange={(e) => setContact(i, 'email', e.target.value)} aria-label="Contact email" />
@@ -178,7 +178,7 @@ export function SubDrawer({ open, onClose, sub }: { open: boolean; onClose: () =
                 {f.contacts.length > 1 && <button className="btn-quiet text-ink" onClick={() => set('contacts', f.contacts.filter((_: any, j: number) => j !== i))}>Remove contact</button>}</div>
             </div>
           ))}</div>
-          <button className="btn-secondary btn-sm mt-5" onClick={() => set('contacts', [...f.contacts, { name: '', email: '', phone: '', roles: ['submission'], primary: false }])}>Add another contact</button>
+          <button className="btn-secondary btn-sm mt-5" onClick={() => set('contacts', [...f.contacts, { _k: newRowKey(), name: '', email: '', phone: '', roles: ['submission'], primary: false }])}>Add another contact</button>
         </fieldset>
         <fieldset className="space-y-5">
           <legend className="eyebrow mb-4">Internal</legend>
