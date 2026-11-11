@@ -7,3 +7,4 @@ dist
 .netlify
 *.log
 test-results
+dist-dev

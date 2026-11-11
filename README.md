@@ -1,10 +1,21 @@
 # SubCleared
 
-**Know which subcontractors are ready to work, what's missing and what needs attention.**
+SUBCONTRACTOR COMPLIANCE & READINESS — **Know who's ready to work.**
 
 SubCleared is a multi-tenant subcontractor compliance and readiness platform for general contractors. It answers one question per project and per subcontractor: *is this subcontractor ready to work on this project, and can we show why?*
 
 Stack: **React 18 + TypeScript + Vite + Tailwind** (frontend), **Netlify Functions** (API, scheduled jobs, webhooks), **Firebase** (Authentication, Firestore, Cloud Storage), **Stripe** (billing), **Resend** (email), **Anthropic API** (optional AI extraction).
+
+---
+
+## Brand and design system
+
+- **Palette — three colours only.** Warm Ivory `#F6F5F0` (canvas), Deep Charcoal `#252B27` (text, structure), Field Green `#52745F` (primary actions, active navigation, positive readiness, progress). Every other tone is one of these at a set opacity. There are no red/amber/blue status colours: status is carried by wording plus a small glyph (filled = done, half = in progress, outline = attention, solid "!" = blocking), so it never relies on colour alone.
+- **Type.** IBM Plex Sans (400/500/600, self-hosted via `@fontsource`), Plex Mono for codes. Plex was kept after evaluation: it is legible in dense tables at 15–16 px, has an engineered, construction-appropriate character, and avoids the generic feel of Inter.
+- **Mark.** A raised site barrier — a post with a boom lifting clear — meaning "the way is clear to work". No shields, hard hats or checkmarks. Implemented as the `Mark`/`Logo` components and `public/favicon.svg`.
+- **Tokens and components** live in `tailwind.config.cjs`, `src/styles.css` and `src/ui/index.tsx` (buttons, inputs, tables, tabs, drawers, dialogs, toasts, status glyphs, filters, pagination, empty states, progress, page headers). Drawers are used for contextual editing; dialogs only for short decisions.
+- **Markets.** Organisations are US, UK or other (`settings.market`), which sets terminology (general/principal contractor, COI/insurance certificate, licence/license), date format, currency (USD/GBP pricing and Stripe prices) and a market-specific starter requirement library. Everything stays editable — the library is a starting point, not a legal standard.
+- **Sample data.** Settings → Sample data loads a labelled US or UK set (Austin, Dallas, Chicago / London, Manchester, Birmingham) through the real handlers, so readiness, reviews and renewals are genuinely computed. It can be removed in one step; sample subcontractors never receive email.
 
 ---
 
@@ -31,7 +42,7 @@ Stack: **React 18 + TypeScript + Vite + Tailwind** (frontend), **Netlify Functio
 | Audit | Append-only events for every meaningful action with actor, source, IP, before/after |
 | Search | Global ⌘K search across subcontractors, contacts, projects, documents, reference numbers, requirements |
 | Billing | Stripe Checkout, plan switching with proration, customer portal, webhook-driven subscription state, invoice history, 14-day trial, server-enforced plan limits (subcontractors, projects, users). Plans configurable via `PLANS_JSON` |
-| Design | Dark (default) and light themes, 4 text sizes (saved per user), neutral greys + one teal accent, tables for operational data, empty/loading/error states throughout |
+| Design | Light, three-colour brand system (see above); 4 text sizes saved per user; open layouts with tables for operational data; empty, loading and error states throughout; responsive from 390 px |
 
 ### Not completed / known limitations — read before launch
 
@@ -72,11 +83,12 @@ Per organisation `orgs/{orgId}/…`: `members`, `invitations`, `projects`, `subc
 
 ### Tests performed
 
-- `npm test` — **50 passing** (Vitest):
+- `npm test` — **51 passing** (Vitest), including US/UK market setup and sample data:
   - Compliance engine: missing ≠ compliant, review required before counting, optional never blocks, expiring window, expired, replacement pending keeps approval in force, uploaded-after-expiry, rejection reasons, per-project readiness, project-scoped documents, N/A with actor, suspended, criteria change after approval (blocking and non-blocking), requested/overdue, type applicability, rule snapshots, declarations, timezone-aware "today", reminder de-duplication.
   - API end to end (real handlers, in-memory DB): unauthenticated/unverified rejection, **tenant isolation**, role enforcement, PM scoping, deactivation, last-owner protection, full request → portal upload → review → readiness → notifications → audit → history → report flow, multi-project readiness, **two reviewers racing**, malicious/disguised/oversized uploads, versioning & supersession, link expiry, revocation, suspension killing live sessions, forged tokens, email codes, reminders sent once / retried after failure / stopped on archive, template versioning, requirement criteria changes, CSV import, plan limits after trial.
   - File safety, permissions, CSV parsing.
-- **Browser E2E (Playwright, 0 console errors)**: sign-up → email verification → organisation → project from template → subcontractor → CSV import → assignment → request → **mobile portal upload (390 px)** → malicious PDF blocked → review with failing criteria (approve disabled) → approve → readiness, activity, documents, renewals, compliance matrix, requirements, notifications, settings, users, billing, audit, reports, search, light theme + larger text, cross-tenant URL blocked.
+- **Redesign E2E (Playwright, 0 console errors)**: US sign-up → onboarding → project from template → subcontractor → assignment → document request → mobile portal upload (390 px) → review with recorded limits → approval → readiness updated → sample data → every app page at desktop (1440), tablet (820) and mobile (390) with no horizontal overflow.
+- **Original-build E2E (Playwright, 0 console errors)**: sign-up → email verification → organisation → project from template → subcontractor → CSV import → assignment → request → **mobile portal upload (390 px)** → malicious PDF blocked → review with failing criteria (approve disabled) → approve → readiness, activity, documents, renewals, compliance matrix, requirements, notifications, settings, users, billing, audit, reports, search, larger text, cross-tenant URL blocked.
 
 ### Security controls
 

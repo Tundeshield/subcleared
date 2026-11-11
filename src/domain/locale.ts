@@ -36,3 +36,9 @@ export function getLocale() { return activeLocale; }
 export function money(n: number, currency = activeCurrency) {
   return n.toLocaleString(activeLocale, { style: 'currency', currency, maximumFractionDigits: 0 });
 }
+
+/** Server-side: switch date/currency formatting to an organisation's settings for the current unit of work. */
+export function applyOrgFormatting(s?: Partial<Pick<OrgSettings, 'locale' | 'currency'>>) {
+  activeLocale = s?.locale ?? 'en-GB';
+  activeCurrency = s?.currency ?? 'GBP';
+}

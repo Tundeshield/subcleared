@@ -1,85 +1,73 @@
-@import '@fontsource-variable/geist';
-@import '@fontsource-variable/geist-mono';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-sans/400-italic.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Design tokens. Neutral greys + one accent (teal). Status colours are used
-   only for status, never decoration. */
-:root,
-[data-theme='dark'] {
-  --bg: 11 13 15;
-  --surface: 17 20 23;
-  --raised: 24 28 32;
-  --line: 36 41 47;
-  --line-strong: 52 58 66;
-  --ink: 236 238 240;
-  --muted: 156 164 173;
-  --faint: 110 118 128;
-  --accent: 44 201 184;
-  --accent-ink: 4 30 27;
-  --accent-soft: 44 201 184;
-  --ok: 74 200 120;
-  --warn: 230 170 60;
-  --bad: 240 98 90;
-  --info: 120 170 240;
-  color-scheme: dark;
-}
-[data-theme='light'] {
-  --bg: 247 248 249;
-  --surface: 255 255 255;
-  --raised: 242 244 246;
-  --line: 226 229 233;
-  --line-strong: 206 211 217;
-  --ink: 20 23 27;
-  --muted: 90 98 108;
-  --faint: 130 138 148;
-  --accent: 10 128 119;
-  --accent-ink: 255 255 255;
-  --accent-soft: 10 128 119;
-  --ok: 22 130 70;
-  --warn: 166 104 0;
-  --bad: 196 48 43;
-  --info: 40 100 200;
+/* Brand tokens.
+   Warm Ivory #F6F5F0 · Deep Charcoal #252B27 · Field Green #52745F
+   Derived tones are charcoal at fixed opacities over ivory. */
+:root {
+  --ivory: 246 245 240;
+  --charcoal: 37 43 39;
+  --field: 82 116 95;
+  --paper: 251 250 247;       /* ivory, lifted — inputs, drawers, popovers */
+  --raised: 236 235 229;      /* charcoal 5% on ivory — hover, selected rows */
+  --line: 221 221 214;        /* charcoal 11% on ivory — dividers */
+  --line-strong: 196 198 191; /* charcoal 22% — input borders */
+  --muted: 82 87 83;          /* charcoal 76% — secondary text (AA) */
+  --faint: 108 112 107;       /* charcoal 64% — metadata (AA on ivory) */
   color-scheme: light;
 }
 
 @layer base {
   html { -webkit-text-size-adjust: 100%; }
-  body { @apply bg-bg text-ink font-sans text-base antialiased; font-feature-settings: 'ss01', 'cv11'; }
-  h1, h2, h3 { letter-spacing: -0.015em; }
-  :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; border-radius: 4px; }
-  ::selection { background: rgb(var(--accent) / 0.3); }
+  body { @apply bg-ivory text-charcoal font-sans text-base antialiased; font-feature-settings: 'kern'; }
+  h1, h2, h3 { letter-spacing: -0.012em; }
+  :focus-visible { outline: 2px solid rgb(var(--field)); outline-offset: 2px; border-radius: 3px; }
+  ::selection { background: rgb(var(--field) / 0.22); }
   table { font-variant-numeric: tabular-nums; }
-  input[type='date']::-webkit-calendar-picker-indicator { filter: var(--date-icon-filter, none); }
-  [data-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator { filter: invert(0.8); }
+  .tnum { font-variant-numeric: tabular-nums; }
 }
 
 @layer components {
-  .btn { @apply inline-flex items-center justify-center gap-2 rounded px-3.5 h-9 text-sm font-medium transition-colors whitespace-nowrap select-none disabled:opacity-50 disabled:pointer-events-none; }
-  .btn-primary { @apply btn bg-accent text-accent-ink hover:brightness-110; }
-  .btn-secondary { @apply btn bg-raised text-ink border border-line hover:border-line-strong; }
-  .btn-ghost { @apply btn text-muted hover:text-ink hover:bg-raised; }
-  .btn-danger { @apply btn bg-bad/15 text-bad border border-bad/30 hover:bg-bad/25; }
-  .btn-sm { @apply h-8 px-2.5 text-xs; }
-  .btn-lg { @apply h-11 px-5 text-md; }
-  .input { @apply w-full h-10 rounded border border-line bg-surface px-3 text-base text-ink placeholder:text-faint transition-colors hover:border-line-strong focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:opacity-60; }
-  textarea.input { @apply h-auto py-2 min-h-[5rem]; }
-  select.input { @apply pr-8 appearance-none bg-no-repeat; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%239ca4ad' stroke-width='1.6'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E"); background-position: right 0.7rem center; }
-  .label { @apply block text-sm font-medium text-ink mb-1.5; }
-  .hint { @apply text-xs text-muted mt-1.5; }
-  .panel { @apply bg-surface border border-line rounded-md; }
-  .th { @apply text-left text-xs font-medium text-muted px-3 py-2.5 border-b border-line whitespace-nowrap bg-surface sticky top-0 z-[1]; }
-  .td { @apply px-3 py-3 border-b border-line align-top text-sm; }
-  .tr-link { @apply hover:bg-raised/60 cursor-pointer; }
-  .kbd { @apply font-mono text-[0.7rem] px-1.5 py-0.5 rounded border border-line text-muted; }
-  .eyebrow { @apply text-xs font-medium uppercase tracking-[0.08em] text-faint; }
-  .link { @apply text-accent hover:underline underline-offset-2; }
+  /* Buttons: one filled (primary), one outlined (secondary), one text (ghost). */
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded h-10 px-4 text-sm font-medium transition-colors whitespace-nowrap select-none disabled:opacity-45 disabled:pointer-events-none; }
+  .btn-primary { @apply btn bg-field text-ivory hover:bg-[#476653]; }
+  .btn-secondary { @apply btn bg-transparent text-charcoal border border-line-strong hover:border-charcoal/50 hover:bg-charcoal/[0.03]; }
+  .btn-ghost { @apply btn text-muted hover:text-charcoal hover:bg-charcoal/[0.05] px-3; }
+  .btn-quiet { @apply inline-flex items-center gap-1 text-sm font-medium text-field hover:underline underline-offset-4 disabled:opacity-45; }
+  .btn-danger { @apply btn bg-charcoal text-ivory hover:bg-charcoal/90; }
+  .btn-sm { @apply h-8 px-3 text-xs; }
+  .btn-lg { @apply h-12 px-6 text-md; }
+
+  .input { @apply w-full h-10 rounded border border-line-strong bg-paper px-3 text-base text-charcoal placeholder:text-faint transition-colors hover:border-charcoal/40 focus:border-field focus:outline-none focus:ring-2 focus:ring-field/20 disabled:opacity-60 disabled:bg-raised; }
+  textarea.input { @apply h-auto py-2.5 min-h-[5rem] leading-relaxed; }
+  select.input { @apply pr-9 appearance-none bg-no-repeat cursor-pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23525753' stroke-width='1.5'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E"); background-position: right 0.8rem center; }
+  .label { @apply block text-sm font-medium text-charcoal mb-1.5; }
+  .hint { @apply text-xs text-faint mt-1.5 leading-relaxed; }
+
+  /* Tables: hairline row dividers, no outer boxes, generous rows. */
+  .table { @apply relative w-full border-collapse; }
+  .th { @apply text-left text-xs font-medium text-faint px-4 py-3 border-b border-line whitespace-nowrap bg-ivory; }
+  .td { @apply px-4 py-4 border-b border-line align-top text-base; }
+  .tr-link { @apply cursor-pointer transition-colors hover:bg-raised/60; }
+
+  .eyebrow { @apply text-2xs font-medium uppercase tracking-[0.12em] text-faint; }
+  .link { @apply text-field underline-offset-4 hover:underline; }
+  .kbd { @apply font-mono text-[0.7rem] px-1.5 py-px rounded border border-line text-faint; }
+  .rule { @apply border-t border-line; }
+  .panel { @apply bg-paper border border-line rounded-md; }
 }
 
-.skeleton { background: linear-gradient(90deg, rgb(var(--raised)) 0%, rgb(var(--line)) 50%, rgb(var(--raised)) 100%); background-size: 200% 100%; animation: sk 1.3s ease-in-out infinite; border-radius: 4px; }
+.skeleton { background: linear-gradient(90deg, rgb(var(--raised)) 0%, rgb(var(--line)) 50%, rgb(var(--raised)) 100%); background-size: 200% 100%; animation: sk 1.4s ease-in-out infinite; border-radius: 3px; }
 @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-.fade-in { animation: fi 0.18s ease-out; }
-@keyframes fi { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: fi 0.16s ease-out; }
+@keyframes fi { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.slide-in { animation: si 0.2s ease-out; }
+@keyframes si { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { *, .skeleton { animation: none !important; transition: none !important; } }
-.grid-bg { background-image: linear-gradient(rgb(var(--line) / 0.5) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--line) / 0.5) 1px, transparent 1px); background-size: 48px 48px; }

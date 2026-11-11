@@ -1,105 +1,104 @@
 import { Link } from 'react-router-dom';
-import { cx, Icon, ReadinessBadge } from '../../ui';
+import { Glyph, ReadinessBadge, ReadinessBar } from '../../ui';
 import { PublicFooter, PublicNav } from './PublicShell';
 
 const EXAMPLE = [
-  { co: 'Northgate Electrical', trade: 'Electrical', r: 'ready', why: 'All 6 mandatory requirements approved and in date' },
-  { co: 'Harbour Roofing', trade: 'Roofing', r: 'action_required', why: 'General liability expires in 18 days' },
-  { co: 'Kestrel Groundworks', trade: 'Civils', r: 'not_ready', why: "Workers' compensation rejected — wrong named insured" },
-  { co: 'Fenwick Mechanical', trade: 'HVAC', r: 'action_required', why: 'Risk assessment submitted, awaiting review' },
+  { co: 'Thameside Electrical Services', trade: 'Electrical', r: 'ready', why: 'All 8 mandatory requirements approved and in date' },
+  { co: 'Pennine Roofing & Cladding', trade: 'Roofing', r: 'action_required', why: 'Public liability expires in 18 days — renewal requested' },
+  { co: 'Midland Groundworks', trade: 'Groundworks', r: 'not_ready', why: "Employers' liability rejected: named insured doesn't match" },
+  { co: 'Northern Mechanical Services', trade: 'HVAC', r: 'action_required', why: 'RAMS submitted, awaiting review' },
 ];
 
-const FEATURES = [
-  { t: 'Readiness per project, not per company', d: 'The same subcontractor can be cleared for one site and blocked on another. Requirements are set per project and readiness is calculated for every assignment.' },
-  { t: 'Collect paperwork without the email chase', d: 'Send a secure, expiring link. Subcontractors upload from their phone without creating an account, see what was rejected and why, and replace it.' },
-  { t: 'Review, don’t just receive', d: 'Nothing counts until a reviewer approves it against the requirement. AI proposes fields; a person confirms them. Received, reviewed and independently verified are kept distinct.' },
-  { t: 'Renewals that run themselves', d: 'Reminders at 90, 60, 30, 14 and 7 days, on expiry and after — once each, in your timezone. Replacements are reviewed and the old version is kept.' },
-  { t: 'Evidence you can stand behind', d: 'Every upload, decision, metadata correction and status change is recorded with who, when and why. Historical readiness keeps the rules that produced it.' },
-  { t: 'Reports a project manager can use', d: 'Project readiness, missing and expiring documents, rejected items and audit trails — filtered, exported to CSV or PDF in a click.' },
+const CAPABILITIES = [
+  ['Readiness per project', 'The same subcontractor can be cleared for one site and held back on another. Each project sets its own requirements, and readiness is worked out for every assignment — with the reason spelled out.'],
+  ['Paperwork without the chase', 'Send each contact a secure, expiring link. They upload from a phone without creating an account, see exactly what was rejected and why, and replace it.'],
+  ['Review that means something', 'Nothing counts until a reviewer approves it against the requirement. Automatic reading suggests the details; a person confirms them.'],
+  ['Renewals on schedule', 'Reminders at 90, 60, 30, 14 and 7 days, on expiry and after — each sent once, in your timezone. The old version is always kept.'],
+  ['Evidence you can stand behind', 'Every submission, decision, correction and status change is recorded with who, when and why. Past readiness keeps the rules it was judged by.'],
+  ['Reports for the site team', 'Project readiness, outstanding and expiring documents, review activity and a full audit trail — as a clean PDF or CSV.'],
 ];
 
 export default function Landing() {
   return (
     <div className="min-h-screen">
       <PublicNav />
-      <section className="relative overflow-hidden border-b border-line">
-        <div className="absolute inset-0 grid-bg opacity-40 [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_75%)]" aria-hidden />
-        <div className="relative max-w-6xl mx-auto px-5 pt-20 pb-16 sm:pt-28 sm:pb-24">
-          <p className="eyebrow text-accent">Subcontractor compliance &amp; readiness</p>
-          <h1 className="mt-4 text-4xl sm:text-5xl font-semibold tracking-tight max-w-4xl leading-[1.05]">
-            Know which subcontractors are ready to work, what’s missing and what needs attention.
-          </h1>
-          <p className="mt-6 text-lg text-muted max-w-2xl">
-            Manage subcontractor onboarding, project requirements, compliance documents and renewals in one place. Collect paperwork without endless email follow-ups and keep reliable records across every project.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
+      <main>
+        <section className="max-w-6xl mx-auto px-5 sm:px-8 pt-20 sm:pt-28 pb-20">
+          <p className="eyebrow">Subcontractor compliance &amp; readiness</p>
+          <h1 className="mt-6 text-4xl sm:text-5xl font-medium tracking-[-0.025em] leading-[1.05] max-w-3xl">Know who's ready to work.</h1>
+          <p className="mt-7 text-lg text-muted max-w-2xl leading-relaxed">Manage subcontractor onboarding, project requirements, compliance documents and renewals in one place. See what's outstanding, what's been approved and what needs attention before work begins.</p>
+          <div className="mt-10 flex flex-wrap gap-3">
             <Link to="/signup" className="btn-primary btn-lg">Start a 14-day free trial</Link>
             <Link to="/pricing" className="btn-secondary btn-lg">See pricing</Link>
           </div>
-          <p className="mt-4 text-sm text-faint">No card required. Subcontractors never pay to submit documents.</p>
+          <p className="mt-5 text-sm text-faint">No card needed. Subcontractors never pay to submit documents.</p>
+        </section>
 
-          <div className="mt-14 panel overflow-hidden shadow-pop">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-line">
-              <div className="text-sm font-medium">Riverside Apartments · Phase 2 <span className="text-faint font-normal">— readiness</span></div>
-              <span className="text-xs text-faint">Illustrative example</span>
+        <section className="max-w-6xl mx-auto px-5 sm:px-8" aria-label="Example project view">
+          <div className="border-t border-charcoal pt-6">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <div><div className="text-xl font-medium">Kings Cross Office Fit-out</div><div className="text-sm text-muted mt-1">KCX-114 · London · 4 subcontractors</div></div>
+              <span className="text-xs text-faint uppercase tracking-[0.1em]">Illustrative example</span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px]">
+            <div className="mt-5 max-w-sm"><div className="text-sm tnum"><span className="font-medium">1</span><span className="text-muted"> of 4 ready</span></div><ReadinessBar className="mt-2" ready={1} action={2} notReady={1} total={4} /></div>
+            <div className="mt-8 overflow-x-auto">
+              <table className="table min-w-[720px]">
                 <thead><tr><th className="th">Subcontractor</th><th className="th">Trade</th><th className="th">Readiness</th><th className="th">Why</th></tr></thead>
-                <tbody>{EXAMPLE.map((e) => (
-                  <tr key={e.co}><td className="td font-medium">{e.co}</td><td className="td text-muted">{e.trade}</td><td className="td"><ReadinessBadge value={e.r} /></td><td className="td text-muted">{e.why}</td></tr>
-                ))}</tbody>
+                <tbody>{EXAMPLE.map((e) => <tr key={e.co}><td className="td font-medium">{e.co}</td><td className="td text-muted">{e.trade}</td><td className="td"><ReadinessBadge value={e.r} size="sm" /></td><td className="td text-muted">{e.why}</td></tr>)}</tbody>
               </table>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="max-w-6xl mx-auto px-5 py-20">
-        <div className="grid lg:grid-cols-[1fr_1.4fr] gap-10 items-start">
-          <div>
-            <h2 className="text-3xl font-semibold tracking-tight">One question, answered with evidence.</h2>
-            <p className="mt-4 text-muted text-lg">Is this subcontractor ready to work on this project — and can you show why?</p>
+        <section className="max-w-6xl mx-auto px-5 sm:px-8 mt-32 grid lg:grid-cols-[1fr_1.5fr] gap-x-16 gap-y-8">
+          <h2 className="text-3xl font-medium tracking-[-0.02em] leading-tight">One question, answered with evidence.</h2>
+          <div className="text-lg text-muted leading-relaxed space-y-5">
+            <p>Before anyone sets foot on site, you need to know: is this subcontractor ready to work on this project — and can you show why?</p>
+            <p>SubCleared turns that from a spreadsheet hunt into an answer you can read at a glance, with the requirement, the document and the decision behind every status.</p>
           </div>
-          <ol className="grid sm:grid-cols-2 gap-px bg-line border border-line rounded-md overflow-hidden">
-            {['Set requirements per project, from templates you control.', 'Assign subcontractors and send one secure request link.', 'Review each submission against the requirement.', 'See readiness, with the exact reason behind every status.'].map((s, i) => (
-              <li key={i} className="bg-surface p-5"><div className="text-accent font-mono text-sm">0{i + 1}</div><div className="mt-2">{s}</div></li>
+        </section>
+
+        <section className="max-w-6xl mx-auto px-5 sm:px-8 mt-28">
+          <ol className="grid md:grid-cols-2 lg:grid-cols-3 gap-x-14 border-t border-charcoal">
+            {CAPABILITIES.map(([t, d], i) => (
+              <li key={t} className="pt-7 pb-10 border-b border-line">
+                <div className="font-mono text-sm text-field">{String(i + 1).padStart(2, '0')}</div>
+                <h3 className="mt-3 text-lg font-semibold">{t}</h3>
+                <p className="mt-2 text-muted leading-relaxed">{d}</p>
+              </li>
             ))}
           </ol>
-        </div>
-      </section>
+        </section>
 
-      <section className="border-y border-line bg-surface/50">
-        <div className="max-w-6xl mx-auto px-5 py-20 grid sm:grid-cols-2 lg:grid-cols-3 gap-x-10 gap-y-12">
-          {FEATURES.map((f) => (
-            <div key={f.t}>
-              <div className="w-8 h-8 rounded grid place-items-center bg-accent/10 text-accent">{Icon.check()}</div>
-              <h3 className="mt-4 text-lg font-semibold">{f.t}</h3>
-              <p className="mt-2 text-muted">{f.d}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+        <section className="max-w-6xl mx-auto px-5 sm:px-8 mt-28">
+          <h2 className="text-3xl font-medium tracking-[-0.02em]">Received, reviewed, verified — never blurred.</h2>
+          <div className="mt-10 grid md:grid-cols-3 gap-x-14">
+            {[
+              ['none', 'Received', 'A file arrived and passed security checks. It doesn’t count yet.'],
+              ['ok', 'Reviewed', 'Someone checked it against your stated requirements and approved it.'],
+              ['ok', 'Independently verified', 'Confirmed with the broker, insurer or register — and recorded who confirmed it.'],
+            ].map(([g, t, d]) => (
+              <div key={t} className="py-6 border-t border-line"><div className="flex items-center gap-2.5 font-medium"><Glyph tone={g as any} />{t}</div><p className="mt-2 text-muted leading-relaxed">{d}</p></div>
+            ))}
+          </div>
+          <p className="mt-6 text-sm text-faint max-w-3xl">A certificate of insurance is evidence of cover, not proof of it. SubCleared keeps these states separate and never calls a document verified unless someone recorded a genuine verification.</p>
+        </section>
 
-      <section className="max-w-6xl mx-auto px-5 py-20">
-        <div className="grid md:grid-cols-3 gap-6">
-          {[
-            ['Received', 'A file arrived and passed security checks.', 'text-faint'],
-            ['Reviewed', 'A person checked it against your stated requirements.', 'text-ok'],
-            ['Independently verified', 'Confirmed with the broker, insurer or register — and recorded who confirmed it.', 'text-accent'],
-          ].map(([t, d, c]) => (
-            <div key={t} className="panel p-5"><div className={cx('text-sm font-medium', c)}>{t}</div><p className="mt-2 text-muted">{d}</p></div>
-          ))}
-        </div>
-        <p className="mt-6 text-sm text-faint max-w-3xl">A certificate of insurance is evidence, not proof of coverage. SubCleared keeps these three states separate and never claims a document was verified unless someone recorded a genuine verification.</p>
-      </section>
+        <section className="max-w-6xl mx-auto px-5 sm:px-8 mt-28 grid lg:grid-cols-2 gap-x-16 gap-y-6">
+          <div><h2 className="text-3xl font-medium tracking-[-0.02em]">Built for the US and the UK.</h2></div>
+          <div className="text-muted leading-relaxed space-y-4 text-lg">
+            <p>General contractor or principal contractor. Certificate of insurance or insurance certificate. General liability or public liability, workers' compensation or employers' liability.</p>
+            <p>SubCleared speaks your market's language and starts you with templates to match — every requirement stays yours to change.</p>
+          </div>
+        </section>
 
-      <section className="max-w-6xl mx-auto px-5">
-        <div className="panel p-8 sm:p-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div><h2 className="text-2xl font-semibold">Built for contractors running 20 to 200 subcontractors.</h2><p className="mt-2 text-muted">Simple enough for a project administrator on day one. Robust enough for your audit file.</p></div>
-          <Link to="/signup" className="btn-primary btn-lg shrink-0">Start free trial</Link>
-        </div>
-      </section>
+        <section className="max-w-6xl mx-auto px-5 sm:px-8 mt-28">
+          <div className="border-t border-b border-charcoal py-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div><h2 className="text-2xl font-medium">For contractors running 20 to 200 subcontractors.</h2><p className="mt-2 text-muted">Simple enough for a project administrator on day one. Thorough enough for your audit file.</p></div>
+            <Link to="/signup" className="btn-primary btn-lg shrink-0">Start free trial</Link>
+          </div>
+        </section>
+      </main>
       <PublicFooter />
     </div>
   );

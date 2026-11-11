@@ -11,8 +11,8 @@ export default function DevMailbox() {
   useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, []);
   return (
     <div className="max-w-4xl mx-auto px-5 py-8">
-      <div className="flex items-center justify-between mb-6"><Logo /><span className="text-xs text-warn">Development mailbox — not available in production</span></div>
-      {err && <p className="text-bad">{err}</p>}
+      <div className="flex items-center justify-between mb-6"><Logo /><span className="text-xs text-faint">Development mailbox — not available in production</span></div>
+      {err && <p className="text-charcoal">{err}</p>}
       {items?.length === 0 && <p className="text-muted">No emails yet.</p>}
       <div className="panel divide-y divide-line">
         {items?.map((m) => (

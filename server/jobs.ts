@@ -1,3 +1,4 @@
+import { applyOrgFormatting } from '../src/domain/locale';
 // Background jobs: daily renewal reminders/escalations, and AI extraction.
 // Every job is idempotent: reminder keys are created with create() (fails if
 // it exists), so overlapping or retried runs cannot send duplicates.
@@ -17,6 +18,7 @@ export async function runDailyJobs(svc: Services, opts: { orgId?: string } = {})
   const orgs = opts.orgId ? [await svc.db.get<Organisation>(C.org(opts.orgId))].filter(Boolean) as Organisation[] : await svc.db.list<Organisation>('orgs');
   const summary: any[] = [];
   for (const org of orgs) {
+    applyOrgFormatting(org.settings);
     try { summary.push({ orgId: org.id, ...(await runForOrg(svc, org)) }); } catch (e: any) {
       console.error('daily job failed', org.id, e);
       summary.push({ orgId: org.id, error: e.message });

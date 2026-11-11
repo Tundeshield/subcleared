@@ -1,35 +1,31 @@
 import { useEffect, useState } from 'react';
-import { NavLink, useParams, useSearchParams } from 'react-router-dom';
-import { formatDate, formatDateTime } from '../../domain/dates';
-import { ROLE_DESCRIPTIONS, ROLE_LABELS, ROLE_PERMISSIONS } from '../../domain/permissions';
-import type { Permission, Role } from '../../domain/types';
+import { NavLink, useParams } from 'react-router-dom';
+import { formatDateTime } from '../../domain/dates';
+import { MARKETS, setFormatting } from '../../domain/locale';
 import { api, useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
-import { Callout, Checkbox, Confirm, cx, Dialog, Empty, ErrorState, Field, FormError, humanize, PageHeader, Section, Segmented, Skeleton, Spinner, useToast } from '../../ui';
+import { Callout, Checkbox, Confirm, cx, Empty, ErrorState, Field, FilterSelect, FormError, humanize, PageHeader, Pagination, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
 
-const SECTIONS = [
-  ['organisation', 'Organisation'], ['users', 'Users and roles'], ['profile', 'Profile and notifications'], ['billing', 'Billing'], ['delivery', 'Delivery logs'], ['audit', 'Audit log'],
-] as const;
+const SECTIONS = [['organisation', 'Organisation'], ['profile', 'Profile and notifications'], ['delivery', 'Email delivery'], ['audit', 'Audit log'], ['data', 'Sample data']] as const;
 
 export default function Settings() {
   const { section = 'organisation' } = useParams();
   const { can } = useSession();
-  const visible = SECTIONS.filter(([k]) => (k === 'audit' ? can('audit.view') : k === 'delivery' ? can('settings.manage') : true));
+  const visible = SECTIONS.filter(([k]) => (k === 'audit' ? can('audit.view') : ['delivery', 'data'].includes(k) ? can('settings.manage') : true));
   return (
     <div>
       <PageHeader title="Settings" />
-      <div className="grid lg:grid-cols-[14rem_1fr] gap-6 items-start">
-        <nav className="panel p-1.5 flex lg:flex-col overflow-x-auto" aria-label="Settings">
-          {visible.map(([k, l]) => <NavLink key={k} to={`/app/settings/${k}`} className={({ isActive }) => cx('rounded px-3 py-2 text-sm whitespace-nowrap', isActive ? 'bg-raised text-ink font-medium' : 'text-muted hover:text-ink')}>{l}</NavLink>)}
+      <div className="grid lg:grid-cols-[14rem_1fr] gap-x-12 gap-y-6 items-start">
+        <nav aria-label="Settings sections" className="flex lg:flex-col gap-1 overflow-x-auto">
+          {visible.map(([k, l]) => <NavLink key={k} to={`/app/settings/${k}`} className={({ isActive }) => cx('relative rounded px-3 py-2 text-[0.9375rem] whitespace-nowrap', isActive ? 'bg-charcoal/[0.05] font-medium lg:before:absolute lg:before:left-0 lg:before:top-2 lg:before:bottom-2 lg:before:w-[2px] lg:before:bg-field' : 'text-muted hover:text-charcoal')}>{l}</NavLink>)}
         </nav>
-        <div className="min-w-0">
+        <div className="min-w-0 max-w-4xl">
           {section === 'organisation' && <OrgSettings />}
-          {section === 'users' && <Users />}
           {section === 'profile' && <Profile />}
-          {section === 'billing' && <Billing />}
           {section === 'delivery' && <Delivery />}
           {section === 'audit' && <Audit />}
+          {section === 'data' && <SampleData />}
         </div>
       </div>
     </div>
@@ -39,30 +35,46 @@ export default function Settings() {
 function OrgSettings() {
   const { me, can, refresh } = useSession();
   const org = me!.org!;
-  const [f, setF] = useState({ name: org.name, country: org.country, ...org.settings, reminderText: org.settings.reminderSchedule.join(', ') });
+  const [f, setF] = useState<any>({ name: org.name, country: org.country, ...org.settings, market: org.settings.market ?? 'OTHER', locale: org.settings.locale ?? 'en-GB', currency: org.settings.currency ?? 'USD', reminderText: org.settings.reminderSchedule.join(', ') });
   const { run, busy, error } = useMutation('org.updateSettings');
   const toast = useToast();
   const editable = can('settings.manage');
   const set = (k: string, v: any) => setF((x: any) => ({ ...x, [k]: v }));
   const zones: string[] = (Intl as any).supportedValuesOf ? (Intl as any).supportedValuesOf('timeZone') : [f.timezone];
   return (
-    <div className="space-y-6">
-      <Section title="Organisation"><div className="p-4 grid sm:grid-cols-2 gap-4">
-        <Field label="Name"><input className="input" value={f.name} disabled={!editable} onChange={(e) => set('name', e.target.value)} /></Field>
-        <Field label="Country"><input className="input" value={f.country} disabled={!editable} onChange={(e) => set('country', e.target.value)} /></Field>
-        <Field label="Timezone" hint="Defines “today” for expiry checks and reminder timing."><select className="input" value={f.timezone} disabled={!editable} onChange={(e) => set('timezone', e.target.value)}>{zones.map((z) => <option key={z}>{z}</option>)}</select></Field>
-      </div></Section>
-      <Section title="Compliance rules"><div className="p-4 grid sm:grid-cols-2 gap-4">
-        <Field label="Expiring-soon window (days)" hint="Approved documents expiring within this many days mark a subcontractor as needing attention."><input className="input" type="number" min={0} max={180} value={f.expiringSoonDays} disabled={!editable} onChange={(e) => set('expiringSoonDays', e.target.value)} /></Field>
-        <Field label="Escalation period (days)" hint="Notify the project manager when a mandatory item is still missing after this long."><input className="input" type="number" min={1} max={120} value={f.escalationDays} disabled={!editable} onChange={(e) => set('escalationDays', e.target.value)} /></Field>
-        <Field label="Reminder schedule (days before expiry)" hint="Comma separated. 0 = on the expiry date; negative = after expiry. Each reminder is sent once." className="sm:col-span-2"><input className="input font-mono" value={f.reminderText} disabled={!editable} onChange={(e) => set('reminderText', e.target.value)} /></Field>
-        <Field label="Default link expiry (days)"><input className="input" type="number" min={1} max={30} value={f.defaultLinkExpiryDays} disabled={!editable} onChange={(e) => set('defaultLinkExpiryDays', e.target.value)} /></Field>
-        <Field label="Minimum evidence retention (years)" hint="Superseded documents and decisions are kept at least this long."><input className="input" type="number" min={1} max={30} value={f.retentionYears} disabled={!editable} onChange={(e) => set('retentionYears', e.target.value)} /></Field>
-        <div className="sm:col-span-2"><Checkbox checked={f.remindArchived} disabled={!editable} onChange={(v) => set('remindArchived', v)} label="Send reminders for archived or inactive records" hint="Off by default: no reminders for archived subcontractors or subcontractors with no live projects." /></div>
-      </div></Section>
-      {editable && <div className="flex justify-end gap-3 items-center"><FormError error={error} /><button className="btn-primary" disabled={busy} onClick={async () => {
+    <div className="space-y-12">
+      {!editable && <Callout>Only owners and administrators can change these settings.</Callout>}
+      <section>
+        <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Organisation</h2>
+        <div className="grid sm:grid-cols-2 gap-5 pt-5">
+          <Field label="Name"><input className="input" value={f.name} disabled={!editable} onChange={(e) => set('name', e.target.value)} /></Field>
+          <Field label="Country"><input className="input" value={f.country} disabled={!editable} onChange={(e) => set('country', e.target.value)} /></Field>
+        </div>
+      </section>
+      <section>
+        <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Region and formats</h2>
+        <div className="grid sm:grid-cols-2 gap-5 pt-5">
+          <Field label="Market" hint="Shapes terminology — for example general contractor and certificate of insurance (US) or principal contractor and insurance certificate (UK)."><select className="input" value={f.market} disabled={!editable} onChange={(e) => set('market', e.target.value)}>{MARKETS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}</select></Field>
+          <Field label="Timezone" hint="Defines “today” for expiry checks and when reminders go out."><select className="input" value={f.timezone} disabled={!editable} onChange={(e) => set('timezone', e.target.value)}>{zones.map((z) => <option key={z}>{z}</option>)}</select></Field>
+          <Field label="Date format and spelling"><select className="input" value={f.locale} disabled={!editable} onChange={(e) => set('locale', e.target.value)}><option value="en-US">US English (Nov 11, 2026)</option><option value="en-GB">UK English (11 Nov 2026)</option></select></Field>
+          <Field label="Currency" hint="Used for coverage limits and billing."><select className="input" value={f.currency} disabled={!editable} onChange={(e) => set('currency', e.target.value)}><option value="USD">US dollar ($)</option><option value="GBP">Pound sterling (£)</option></select></Field>
+        </div>
+      </section>
+      <section>
+        <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Compliance rules</h2>
+        <div className="grid sm:grid-cols-2 gap-5 pt-5">
+          <Field label="Expiring-soon window (days)" hint="Approved documents expiring within this many days mark a subcontractor as needing attention."><input className="input" type="number" min={0} max={180} value={f.expiringSoonDays} disabled={!editable} onChange={(e) => set('expiringSoonDays', e.target.value)} /></Field>
+          <Field label="Escalate after (days)" hint="Tell the project manager when a mandatory item is still missing this long after assignment."><input className="input" type="number" min={1} max={120} value={f.escalationDays} disabled={!editable} onChange={(e) => set('escalationDays', e.target.value)} /></Field>
+          <Field label="Reminder schedule" hint="Days before expiry, separated by commas. 0 means on the expiry date; negative numbers are days after. Each reminder is sent once." className="sm:col-span-2"><input className="input font-mono" value={f.reminderText} disabled={!editable} onChange={(e) => set('reminderText', e.target.value)} /></Field>
+          <Field label="Upload links expire after (days)"><input className="input" type="number" min={1} max={30} value={f.defaultLinkExpiryDays} disabled={!editable} onChange={(e) => set('defaultLinkExpiryDays', e.target.value)} /></Field>
+          <Field label="Keep superseded evidence for (years)"><input className="input" type="number" min={1} max={30} value={f.retentionYears} disabled={!editable} onChange={(e) => set('retentionYears', e.target.value)} /></Field>
+          <div className="sm:col-span-2"><Checkbox checked={f.remindArchived} disabled={!editable} onChange={(v) => set('remindArchived', v)} label="Remind archived and inactive subcontractors too" hint="Off by default — no reminders for archived subcontractors, or for documents only needed on finished projects." /></div>
+        </div>
+      </section>
+      {editable && <div className="flex justify-end items-center gap-4 border-t border-line pt-6"><FormError error={error} /><button className="btn-primary" disabled={busy} onClick={async () => {
         try {
-          await run({ name: f.name, country: f.country, timezone: f.timezone, expiringSoonDays: Number(f.expiringSoonDays), escalationDays: Number(f.escalationDays), defaultLinkExpiryDays: Number(f.defaultLinkExpiryDays), retentionYears: Number(f.retentionYears), remindArchived: f.remindArchived, reminderSchedule: f.reminderText.split(',').map((x: string) => Number(x.trim())).filter((x: number) => !isNaN(x)) });
+          await run({ name: f.name, country: f.country, timezone: f.timezone, market: f.market, locale: f.locale, currency: f.currency, expiringSoonDays: Number(f.expiringSoonDays), escalationDays: Number(f.escalationDays), defaultLinkExpiryDays: Number(f.defaultLinkExpiryDays), retentionYears: Number(f.retentionYears), remindArchived: f.remindArchived, reminderSchedule: f.reminderText.split(',').map((x: string) => Number(x.trim())).filter((x: number) => !isNaN(x)) });
+          setFormatting({ locale: f.locale, currency: f.currency });
           await refresh(); toast('Settings saved');
         } catch { /* shown */ }
       }}>{busy && <Spinner />}Save settings</button></div>}
@@ -70,102 +82,9 @@ function OrgSettings() {
   );
 }
 
-const ALL_PERMS = ROLE_PERMISSIONS.owner;
-
-function Users() {
-  const { can, me } = useSession();
-  const { data, error, loading, reload } = useApi<any>('members.list');
-  const [invite, setInvite] = useState(false);
-  const [edit, setEdit] = useState<any>(null);
-  const [deact, setDeact] = useState<any>(null);
-  const update = useMutation('members.update');
-  const revoke = useMutation('invitations.revoke');
-  const toast = useToast();
-  const manage = can('users.manage');
-  if (loading && !data) return <div className="panel"><Skeleton /></div>;
-  if (error) return <ErrorState error={error} onRetry={reload} />;
-  return (
-    <div className="space-y-6">
-      <Section title="Members" actions={manage && <button className="btn-primary btn-sm" onClick={() => setInvite(true)}>Invite user</button>}>
-        <div className="overflow-x-auto"><table className="w-full min-w-[640px]">
-          <thead><tr><th className="th">Name</th><th className="th">Role</th><th className="th">Status</th><th className="th">Joined</th><th className="th" /></tr></thead>
-          <tbody>{data.members.map((m: any) => (
-            <tr key={m.uid} className={cx(m.status !== 'active' && 'opacity-60')}>
-              <td className="td"><div className="font-medium">{m.name || m.email}{m.uid === me!.user.uid && <span className="text-xs text-faint"> (you)</span>}</div><div className="text-xs text-muted">{m.email}</div></td>
-              <td className="td">{ROLE_LABELS[m.role as Role]}{(m.extraPermissions?.length || m.revokedPermissions?.length) ? <div className="text-xs text-faint">Custom permissions</div> : null}</td>
-              <td className="td">{humanize(m.status)}</td><td className="td text-muted">{formatDate(m.joinedAt)}</td>
-              <td className="td text-right">{manage && m.uid !== me!.user.uid && <><button className="btn-ghost btn-sm" onClick={() => setEdit(m)}>Edit</button>
-                {m.status === 'active' ? <button className="btn-ghost btn-sm text-bad" onClick={() => setDeact(m)}>Deactivate</button> : <button className="btn-ghost btn-sm" onClick={() => update.run({ uid: m.uid, status: 'active' }).then(() => toast('Reactivated'))}>Reactivate</button>}</>}</td>
-            </tr>
-          ))}</tbody>
-        </table></div>
-        <div className="px-4 pb-3"><FormError error={update.error} /></div>
-      </Section>
-      {manage && data.invitations.length > 0 && (
-        <Section title="Pending invitations"><ul className="divide-y divide-line">{data.invitations.map((i: any) => (
-          <li key={i.id} className="px-4 py-2.5 flex justify-between items-center text-sm"><span>{i.email} · <span className="text-muted">{ROLE_LABELS[i.role as Role]}</span> <span className="text-xs text-faint">expires {formatDate(i.expiresAt)}</span></span><button className="btn-ghost btn-sm text-bad" onClick={() => revoke.run({ invitationId: i.id }).then(() => toast('Invitation revoked'))}>Revoke</button></li>
-        ))}</ul></Section>
-      )}
-      <Section title="Roles" description="Permissions are enforced on the server for every request."><div className="p-4 grid sm:grid-cols-2 gap-4">{(Object.keys(ROLE_LABELS) as Role[]).map((r) => <div key={r}><div className="font-medium text-sm">{ROLE_LABELS[r]}</div><p className="text-sm text-muted">{ROLE_DESCRIPTIONS[r]}</p></div>)}</div></Section>
-      {invite && <InviteDialog onClose={() => setInvite(false)} />}
-      {edit && <EditMember member={edit} onClose={() => setEdit(null)} />}
-      <Confirm open={!!deact} onClose={() => setDeact(null)} danger title={`Deactivate ${deact?.name || deact?.email}?`} confirmLabel="Deactivate" busy={update.busy} onConfirm={async () => { await update.run({ uid: deact.uid, status: 'deactivated' }); setDeact(null); toast('Deactivated'); }}>
-        They lose access immediately and are signed out. Their history stays in the audit trail.
-      </Confirm>
-    </div>
-  );
-}
-
-function InviteDialog({ onClose }: { onClose: () => void }) {
-  const { me } = useSession();
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<Role>('compliance_manager');
-  const [res, setRes] = useState<any>(null);
-  const { run, busy, error } = useMutation('members.invite');
-  const toast = useToast();
-  return (
-    <Dialog open onClose={onClose} title="Invite a user" footer={res ? <button className="btn-primary" onClick={onClose}>Done</button> : <><button className="btn-secondary" onClick={onClose}>Cancel</button><button className="btn-primary" disabled={busy || !email} onClick={async () => { try { setRes(await run({ email, role })); } catch { /* shown */ } }}>{busy && <Spinner />}Send invitation</button></>}>
-      {res ? <div className="space-y-3"><Callout tone={res.emailStatus === 'failed' ? 'warn' : 'ok'} title="Invitation created">{res.emailStatus === 'failed' ? `The email could not be sent (${res.emailError}). Share this link directly:` : `An invitation was sent to ${email}. It expires in 7 days.`}</Callout>
-        {res.emailStatus === 'failed' && <div className="flex gap-2"><input className="input text-xs font-mono" readOnly value={res.inviteUrl} /><button className="btn-secondary btn-sm" onClick={() => navigator.clipboard.writeText(res.inviteUrl).then(() => toast('Copied'))}>Copy</button></div>}</div> : (
-        <div className="space-y-4">
-          <Field label="Email"><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-          <Field label="Role" hint={ROLE_DESCRIPTIONS[role]}><select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>{(Object.keys(ROLE_LABELS) as Role[]).filter((r) => r !== 'owner' || me!.member!.role === 'owner').map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}</select></Field>
-          <FormError error={error} />
-        </div>
-      )}
-    </Dialog>
-  );
-}
-
-function EditMember({ member, onClose }: { member: any; onClose: () => void }) {
-  const { me } = useSession();
-  const [role, setRole] = useState<Role>(member.role);
-  const [extra, setExtra] = useState<Permission[]>(member.extraPermissions ?? []);
-  const [revoked, setRevoked] = useState<Permission[]>(member.revokedPermissions ?? []);
-  const { run, busy, error } = useMutation('members.update');
-  const toast = useToast();
-  const base = new Set(ROLE_PERMISSIONS[role]);
-  const effective = (p: Permission) => (base.has(p) && !revoked.includes(p)) || extra.includes(p);
-  const toggle = (p: Permission, on: boolean) => {
-    if (base.has(p)) setRevoked(on ? revoked.filter((x) => x !== p) : [...revoked, p]);
-    else setExtra(on ? [...extra, p] : extra.filter((x) => x !== p));
-  };
-  return (
-    <Dialog open onClose={onClose} title={`Edit ${member.name || member.email}`} width="max-w-2xl" footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button><button className="btn-primary" disabled={busy} onClick={async () => { await run({ uid: member.uid, role, extraPermissions: extra.filter((p) => !base.has(p)), revokedPermissions: revoked.filter((p) => base.has(p)) }); toast('Access updated'); onClose(); }}>{busy && <Spinner />}Save</button></>}>
-      <div className="space-y-4">
-        <Field label="Role"><select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>{(Object.keys(ROLE_LABELS) as Role[]).filter((r) => r !== 'owner' || me!.member!.role === 'owner').map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}</select></Field>
-        <fieldset><legend className="label">Permissions</legend><p className="hint -mt-1 mb-2">Adjust individual permissions on top of the role. Changes are recorded in the audit log.</p>
-          <div className="grid sm:grid-cols-2 gap-2">{ALL_PERMS.map((p) => <Checkbox key={p} checked={effective(p)} onChange={(v) => toggle(p, v)} label={humanize(p)} hint={base.has(p) ? 'Included in role' : 'Extra'} />)}</div>
-        </fieldset>
-        <FormError error={error} />
-      </div>
-    </Dialog>
-  );
-}
-
 const NOTIFS: [string, string][] = [
-  ['awaiting_review', 'Document submitted / awaiting review'], ['document_approved', 'Document approved'], ['document_rejected', 'Document rejected'], ['info_requested', 'More information requested'],
-  ['expiring', 'Document approaching expiry'], ['expired', 'Document expired'], ['became_non_compliant', 'Subcontractor became non-compliant'], ['escalation', 'Escalations'], ['project_threshold', 'Project readiness below threshold'],
+  ['awaiting_review', 'A document is submitted for review'], ['document_approved', 'A document is approved'], ['document_rejected', 'A document is rejected'], ['info_requested', 'More information is requested'],
+  ['expiring', 'A document is approaching expiry'], ['expired', 'A document has expired'], ['became_non_compliant', 'A subcontractor stops being ready'], ['escalation', 'A mandatory item stays missing too long'], ['project_threshold', 'A project falls below 80% ready'],
 ];
 
 function Profile() {
@@ -177,104 +96,97 @@ function Profile() {
   const toast = useToast();
   useEffect(() => { const p: any = {}; const np: any = me!.member!.notificationPrefs ?? {}; for (const [k] of NOTIFS) p[k] = { inApp: np[k]?.inApp ?? true, email: np[k]?.email ?? false }; setPrefs(p); }, [me]);
   return (
-    <div className="space-y-6">
-      <Section title="Profile"><div className="p-4 flex flex-wrap gap-3 items-end">
-        <Field label="Name" className="flex-1 min-w-[16rem]"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <button className="btn-secondary" disabled={profile.busy || !name.trim()} onClick={async () => { await profile.run({ name }); await refresh(); toast('Profile saved'); }}>Save</button>
-        <div className="w-full text-sm text-muted">{me!.user.email}</div>
-      </div></Section>
-      <Section title="Notification preferences" description="Choose how you hear about each kind of event. In-app notifications appear under Notifications.">
-        <div className="overflow-x-auto"><table className="w-full"><thead><tr><th className="th">Event</th><th className="th">In app</th><th className="th">Email</th></tr></thead>
+    <div className="space-y-12">
+      <section>
+        <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Profile</h2>
+        <div className="pt-5 flex flex-wrap gap-4 items-end">
+          <Field label="Name" className="flex-1 min-w-[16rem]"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <button className="btn-secondary" disabled={profile.busy || !name.trim()} onClick={async () => { await profile.run({ name }); await refresh(); toast('Profile saved'); }}>Save name</button>
+        </div>
+        <p className="text-sm text-muted mt-3">Signed in as {me!.user.email}. Text size can be changed from the account menu at the top right.</p>
+      </section>
+      <section>
+        <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Notifications</h2>
+        <p className="text-sm text-muted mt-3">Choose how you hear about each event. In-app notifications appear under the bell.</p>
+        <table className="table mt-4"><thead><tr><th className="th">When</th><th className="th w-24">In app</th><th className="th w-24">Email</th></tr></thead>
           <tbody>{NOTIFS.map(([k, l]) => (
-            <tr key={k}><td className="td">{l}</td>
-              <td className="td"><Checkbox checked={prefs[k]?.inApp ?? true} onChange={(v) => setPrefs({ ...prefs, [k]: { ...prefs[k], inApp: v } })} label={<span className="sr-only">In app</span>} /></td>
-              <td className="td"><Checkbox checked={prefs[k]?.email ?? false} onChange={(v) => setPrefs({ ...prefs, [k]: { ...prefs[k], email: v } })} label={<span className="sr-only">Email</span>} /></td></tr>
-          ))}</tbody></table></div>
-        <div className="p-4 flex justify-end"><button className="btn-primary" disabled={save.busy} onClick={async () => { await save.run({ prefs }); await refresh(); toast('Preferences saved'); }}>{save.busy && <Spinner />}Save preferences</button></div>
-      </Section>
-    </div>
-  );
-}
-
-function Billing() {
-  const { data, error, loading, reload } = useApi<any>('billing.get');
-  const [params] = useSearchParams();
-  const [interval, setInterval] = useState<'month' | 'year'>('year');
-  const [busy, setBusy] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  if (loading && !data) return <div className="panel"><Skeleton /></div>;
-  if (error) return <ErrorState error={error} onRetry={reload} />;
-  const s = data.subscription;
-  const go = async (action: string, input: any, key: string) => { setBusy(key); setErr(null); try { const r = await api(action, input); window.location.href = r.url; } catch (e: any) { setErr(e.message); setBusy(null); } };
-  const lim = (n: number | null) => (n === null ? '∞' : n);
-  return (
-    <div className="space-y-6">
-      {params.get('checkout') === 'success' && <Callout tone="ok" title="Thanks — payment received">Your subscription will update in a moment once Stripe confirms it.</Callout>}
-      {!data.configured && <Callout tone="warn" title="Billing isn't connected yet">Stripe keys are not configured for this deployment. Plan limits still apply; see the deployment guide to connect Stripe.</Callout>}
-      <Section title="Current plan"><div className="p-4 grid sm:grid-cols-4 gap-4 text-sm">
-        <div><div className="text-muted">Plan</div><div className="text-lg font-semibold">{data.plan.name}</div><div className="text-muted">{humanize(s.status)}{s.status === 'trialing' && s.trialEndsAt ? ` until ${formatDate(s.trialEndsAt)}` : ''}{s.cancelAtPeriodEnd ? ' · cancels at period end' : ''}</div>{s.currentPeriodEnd && <div className="text-xs text-faint">Renews {formatDate(s.currentPeriodEnd)}</div>}</div>
-        <div><div className="text-muted">Active subcontractors</div><div className="text-lg tabular-nums">{data.usage.activeSubcontractors} / {lim(data.plan.limits.activeSubcontractors)}</div></div>
-        <div><div className="text-muted">Active projects</div><div className="text-lg tabular-nums">{data.usage.activeProjects} / {lim(data.plan.limits.activeProjects)}</div></div>
-        <div><div className="text-muted">Users</div><div className="text-lg tabular-nums">{data.usage.users} / {lim(data.plan.limits.users)}</div></div>
-      </div>{data.canManage && s.stripeCustomerId && <div className="px-4 pb-4"><button className="btn-secondary" disabled={!!busy} onClick={() => go('billing.portal', {}, 'portal')}>{busy === 'portal' && <Spinner />}Manage payment method, invoices and cancellation</button></div>}</Section>
-      {data.canManage && (
-        <Section title="Change plan" actions={<Segmented size="sm" value={interval} onChange={setInterval} options={[{ value: 'month', label: 'Monthly' }, { value: 'year', label: 'Annual' }]} />}>
-          <div className="p-4 grid md:grid-cols-3 gap-4">{data.plans.map((p: any) => {
-            const current = p.id === s.plan && s.status !== 'trialing' && s.interval === interval;
-            return (
-              <div key={p.id} className={cx('rounded border p-4', current ? 'border-accent/50' : 'border-line')}>
-                <div className="font-semibold">{p.name}</div><div className="text-2xl font-semibold mt-1 tabular-nums">${interval === 'year' ? p.annual : p.monthly}<span className="text-sm text-muted font-normal">/mo</span></div>
-                <div className="text-xs text-muted mt-1">{lim(p.limits.activeSubcontractors)} subcontractors · {lim(p.limits.activeProjects)} projects · {lim(p.limits.users)} users</div>
-                <button className={cx('w-full mt-3', current ? 'btn-secondary' : 'btn-primary')} disabled={current || !!busy || !data.configured} onClick={() => go('billing.checkout', { plan: p.id, interval }, p.id)}>{busy === p.id && <Spinner />}{current ? 'Current plan' : s.stripeSubscriptionId ? 'Switch to this plan' : 'Choose plan'}</button>
-              </div>
-            );
-          })}</div>
-          <div className="px-4 pb-4"><FormError error={err} /><p className="text-xs text-faint mt-2">Subcontractors are never charged for submitting documents. Payments are processed by Stripe.</p></div>
-        </Section>
-      )}
-      <Section title="Billing history">{data.history.length === 0 ? <Empty title="No invoices yet" /> : (
-        <table className="w-full"><thead><tr><th className="th">Date</th><th className="th">Invoice</th><th className="th">Amount</th><th className="th">Status</th><th className="th" /></tr></thead>
-          <tbody>{data.history.map((h: any) => <tr key={h.id}><td className="td">{formatDate(h.created)}</td><td className="td">{h.number}</td><td className="td tabular-nums">{(h.amount / 100).toLocaleString('en-GB', { style: 'currency', currency: (h.currency || 'usd').toUpperCase() })}</td><td className={cx('td', h.status === 'paid' ? 'text-ok' : 'text-bad')}>{humanize(h.status)}</td><td className="td text-right">{h.hostedUrl && <a className="link text-sm" href={h.hostedUrl} target="_blank" rel="noreferrer">View</a>}</td></tr>)}</tbody></table>
-      )}</Section>
+            <tr key={k}><td className="td py-3">{l}</td>
+              <td className="td py-3"><Checkbox checked={prefs[k]?.inApp ?? true} onChange={(v) => setPrefs({ ...prefs, [k]: { ...prefs[k], inApp: v } })} label={<span className="sr-only">In app: {l}</span>} /></td>
+              <td className="td py-3"><Checkbox checked={prefs[k]?.email ?? false} onChange={(v) => setPrefs({ ...prefs, [k]: { ...prefs[k], email: v } })} label={<span className="sr-only">Email: {l}</span>} /></td></tr>
+          ))}</tbody></table>
+        <div className="pt-5 flex justify-end"><button className="btn-primary" disabled={save.busy} onClick={async () => { await save.run({ prefs }); await refresh(); toast('Preferences saved'); }}>{save.busy && <Spinner />}Save preferences</button></div>
+      </section>
     </div>
   );
 }
 
 function Delivery() {
   const { data, error, loading, reload } = useApi<any>('deliveryLogs.list');
-  if (loading && !data) return <div className="panel"><Skeleton /></div>;
+  const paged = usePaged(data?.items ?? [], 30);
+  if (loading && !data) return <Skeleton />;
   if (error) return <ErrorState error={error} onRetry={reload} />;
   return (
-    <Section title="Email delivery log" description="Every email SubCleared attempted, with its result. Failed scheduled reminders are retried automatically (up to 3 attempts)." actions={<button className="btn-secondary btn-sm" onClick={() => exportCsv('Delivery log', [{ key: 'updatedAt', label: 'Time' }, { key: 'to', label: 'To' }, { key: 'subject', label: 'Subject' }, { key: 'status', label: 'Status' }, { key: 'attempts', label: 'Attempts' }, { key: 'error', label: 'Error' }], data.items)}>Export CSV</button>}>
+    <section>
+      <div className="flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-charcoal/80"><div><h2 className="text-lg font-semibold">Email delivery</h2><p className="text-sm text-muted mt-0.5">Every email SubCleared tried to send. Failed reminders are retried automatically, up to three times.</p></div>
+        <button className="btn-secondary btn-sm" onClick={() => exportCsv('Email delivery log', [{ key: 'updatedAt', label: 'Time' }, { key: 'to', label: 'To' }, { key: 'subject', label: 'Subject' }, { key: 'status', label: 'Status' }, { key: 'attempts', label: 'Attempts' }, { key: 'error', label: 'Error' }], data.items)}>Export CSV</button></div>
       {data.items.length === 0 ? <Empty title="No emails sent yet" /> : (
-        <div className="overflow-x-auto"><table className="w-full min-w-[760px]"><thead><tr><th className="th">Time</th><th className="th">To</th><th className="th">Subject</th><th className="th">Status</th><th className="th text-right">Attempts</th></tr></thead>
-          <tbody>{data.items.map((l: any) => <tr key={l.id}><td className="td text-muted whitespace-nowrap">{formatDateTime(l.updatedAt)}</td><td className="td">{l.to}</td><td className="td">{l.subject}</td><td className={cx('td', l.status === 'failed' ? 'text-bad' : 'text-ok')}>{l.status === 'dev_logged' ? 'Captured (dev)' : humanize(l.status)}{l.error && <div className="text-xs text-bad">{l.error}</div>}</td><td className="td text-right tabular-nums">{l.attempts}</td></tr>)}</tbody></table></div>
+        <><div className="overflow-x-auto"><table className="table min-w-[720px]"><thead><tr><th className="th">Time</th><th className="th">To</th><th className="th">Subject</th><th className="th">Result</th><th className="th text-right">Attempts</th></tr></thead>
+          <tbody>{paged.slice.map((l: any) => <tr key={l.id}><td className="td text-muted whitespace-nowrap text-sm">{formatDateTime(l.updatedAt)}</td><td className="td text-sm break-all">{l.to}</td><td className="td text-sm">{l.subject}</td><td className={cx('td text-sm', l.status === 'failed' && 'font-medium')}>{l.status === 'dev_logged' ? 'Captured (development)' : humanize(l.status)}{l.error && <div className="text-xs text-muted font-normal">{l.error}</div>}</td><td className="td text-right tnum">{l.attempts}</td></tr>)}</tbody></table></div>
+          <Pagination {...paged} /></>
       )}
-    </Section>
+    </section>
   );
 }
 
 function Audit() {
   const [f, setF] = useState<any>({});
-  const { data, error, loading, reload } = useApi<any>('audit.list', { ...f, limit: 500 });
+  const { data, error, loading, reload } = useApi<any>('audit.list', { ...f, limit: 2000 });
   const [open, setOpen] = useState<string | null>(null);
+  const paged = usePaged(data?.items ?? [], 40);
   return (
-    <Section title="Audit log" description="Append-only. Records cannot be edited or deleted by any user." actions={data && <button className="btn-secondary btn-sm" onClick={() => exportCsv('Audit log', [{ key: 'at', label: 'Time' }, { key: 'actorName', label: 'Actor' }, { key: 'action', label: 'Action' }, { key: 'label', label: 'Record' }, { key: 'source', label: 'Source' }, { key: 'change', label: 'Change' }], data.items.map((e: any) => ({ ...e, actorName: e.actor.name, label: e.entity.label, change: JSON.stringify(e.after ?? '') })))}>Export CSV</button>}>
-      <div className="p-3 border-b border-line grid sm:grid-cols-4 gap-2">
-        <input className="input h-9 text-sm" placeholder="Search" value={f.q ?? ''} onChange={(e) => setF({ ...f, q: e.target.value || undefined })} aria-label="Search audit" />
-        <select className="input h-9 text-sm" value={f.action ?? ''} onChange={(e) => setF({ ...f, action: e.target.value || undefined })} aria-label="Action"><option value="">All actions</option>{['document', 'compliance', 'subcontractor', 'project', 'requirement', 'template', 'request', 'member', 'portal', 'notification', 'billing', 'organisation'].map((a) => <option key={a} value={a}>{humanize(a)}</option>)}</select>
-        <input className="input h-9 text-sm" type="date" value={f.from ?? ''} onChange={(e) => setF({ ...f, from: e.target.value || undefined })} aria-label="From" />
-        <input className="input h-9 text-sm" type="date" value={f.to ?? ''} onChange={(e) => setF({ ...f, to: e.target.value || undefined })} aria-label="To" />
-      </div>
-      {loading && !data ? <Skeleton /> : error ? <div className="p-4"><ErrorState error={error} onRetry={reload} /></div> : data.items.length === 0 ? <Empty title="No events" /> : (
-        <ul className="divide-y divide-line">{data.items.map((e: any) => (
-          <li key={e.id} className="px-4 py-2.5 text-sm">
-            <button className="w-full text-left flex flex-wrap gap-x-3" onClick={() => setOpen(open === e.id ? null : e.id)}><span className="text-faint whitespace-nowrap tabular-nums">{formatDateTime(e.at)}</span><span className="font-mono text-xs text-accent mt-0.5">{e.action}</span><span>{e.entity.label}</span><span className="text-muted">· {e.actor.name} ({e.source})</span></button>
-            {open === e.id && <pre className="mt-2 text-xs bg-raised rounded p-3 overflow-x-auto">{JSON.stringify({ before: e.before, after: e.after, entity: e.entity, ip: e.ip }, null, 2)}</pre>}
+    <section>
+      <div className="flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-charcoal/80"><div><h2 className="text-lg font-semibold">Audit log</h2><p className="text-sm text-muted mt-0.5">Append-only: no one, including owners, can edit or delete entries.</p></div>
+        {data && <button className="btn-secondary btn-sm" onClick={() => exportCsv('Audit log', [{ key: 'at', label: 'Time (UTC)' }, { key: 'actorName', label: 'Who' }, { key: 'action', label: 'Action' }, { key: 'label', label: 'Record' }, { key: 'source', label: 'Source' }, { key: 'change', label: 'Change' }], data.items.map((e: any) => ({ ...e, actorName: e.actor.name, label: e.entity.label, change: JSON.stringify(e.after ?? '') })))}>Export CSV</button>}</div>
+      <Toolbar>
+        <input className="input w-full sm:w-64" placeholder="Search" value={f.q ?? ''} onChange={(e) => setF({ ...f, q: e.target.value || undefined })} aria-label="Search audit log" />
+        <FilterSelect label="Area" value={f.action ?? ''} onChange={(v) => setF({ ...f, action: v || undefined })} options={['document', 'compliance', 'subcontractor', 'project', 'requirement', 'template', 'request', 'member', 'portal', 'notification', 'billing', 'organisation'].map((a) => ({ value: a, label: humanize(a) }))} />
+        <input className="input w-auto" type="date" value={f.from ?? ''} onChange={(e) => setF({ ...f, from: e.target.value || undefined })} aria-label="From date" />
+        <input className="input w-auto" type="date" value={f.to ?? ''} onChange={(e) => setF({ ...f, to: e.target.value || undefined })} aria-label="To date" />
+      </Toolbar>
+      {loading && !data ? <Skeleton /> : error ? <ErrorState error={error} onRetry={reload} /> : data.items.length === 0 ? <Empty title="No entries match" /> : (
+        <><ol className="border-t border-line">{paged.slice.map((e: any) => (
+          <li key={e.id} className="border-b border-line">
+            <button className="w-full text-left py-3 grid sm:grid-cols-[11rem_14rem_1fr] gap-x-4 gap-y-0.5 text-sm" onClick={() => setOpen(open === e.id ? null : e.id)} aria-expanded={open === e.id}>
+              <span className="text-faint tnum">{formatDateTime(e.at)}</span><span className="font-mono text-xs text-field pt-0.5">{e.action}</span><span>{e.entity.label} <span className="text-muted">· {e.actor.name} ({e.source})</span></span>
+            </button>
+            {open === e.id && <pre className="mb-3 text-xs bg-paper border border-line rounded p-3 overflow-x-auto">{JSON.stringify({ before: e.before, after: e.after, entity: e.entity, ip: e.ip }, null, 2)}</pre>}
           </li>
-        ))}</ul>
+        ))}</ol><Pagination {...paged} /></>
       )}
-      {data && data.total > data.items.length && <div className="px-4 py-2 text-xs text-muted">Showing {data.items.length} of {data.total}. Use the audit trail report for a full export.</div>}
-    </Section>
+    </section>
+  );
+}
+
+function SampleData() {
+  const { me, refresh } = useSession();
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const toast = useToast();
+  const has = !!me?.org?.hasSample;
+  const market = me?.org?.settings.market;
+  const act = async (action: string) => { setBusy(true); setErr(null); try { await api(action, {}); await refresh(); toast(action === 'org.loadSample' ? 'Sample data added' : 'Sample data removed'); setConfirm(false); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  return (
+    <section>
+      <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Sample data</h2>
+      <p className="text-muted mt-4 max-w-2xl leading-relaxed">Sample data adds three {market === 'US' ? 'projects in Austin, Dallas and Chicago' : 'projects in London, Manchester and Birmingham'} with five subcontractors in different states of readiness, sample documents and real review decisions. Every sample record is labelled “Sample”, sample contacts are never emailed, and everything can be removed in one step.</p>
+      <div className="mt-6">{has
+        ? <button className="btn-danger" onClick={() => setConfirm(true)}>Remove sample data</button>
+        : <button className="btn-secondary" disabled={busy} onClick={() => act('org.loadSample')}>{busy && <Spinner />}Load sample data</button>}</div>
+      <div className="mt-4"><FormError error={err} /></div>
+      <Confirm open={confirm} onClose={() => setConfirm(false)} danger title="Remove all sample data?" confirmLabel="Remove" busy={busy} onConfirm={() => act('org.clearSample')}>
+        Sample projects, subcontractors, documents and their readiness history are deleted. Your own records aren't touched. The audit log keeps a note that sample data existed.
+      </Confirm>
+    </section>
   );
 }

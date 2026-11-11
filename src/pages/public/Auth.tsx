@@ -7,7 +7,7 @@ import { Callout, Checkbox, Field, FormError, Spinner } from '../../ui';
 import { AuthCard } from './PublicShell';
 
 function Unconfigured() {
-  return auth.mode === 'unconfigured' ? <Callout tone="warn" title="Sign-in isn't configured">This deployment is missing its Firebase settings (VITE_FIREBASE_*). See the deployment guide in the repository README.</Callout> : null;
+  return auth.mode === 'unconfigured' ? <div className="mb-6"><Callout tone="warn" title="Sign-in isn't available yet">This deployment hasn't been connected to its sign-in service. Please try again shortly.</Callout></div> : null;
 }
 
 export function Login() {
@@ -136,19 +136,19 @@ export function VerifyNotice() {
         <button className="btn-primary" onClick={async () => { setError(null); const u = await auth.reload(); await refresh(); if (u?.emailVerified) nav(params.get('next') || '/onboarding'); else setError("We haven't seen the verification yet. Open the link in the email, then try again."); }}>I've verified my email</button>
         <button className="btn-secondary" onClick={async () => { setError(null); try { await auth.resendVerification(); setMsg('A new link is on its way.'); } catch (e: any) { setError(e.message); } }}>Resend link</button>
       </div>
-      {msg && <p className="text-sm text-ok mt-3">{msg}</p>}
+      {msg && <p className="text-sm text-field mt-3">{msg}</p>}
       <div className="mt-3"><FormError error={error} /></div>
-      {auth.mode === 'dev' && <p className="text-xs text-warn mt-6">Local development: verification emails appear in the <a className="underline" href="/dev/mailbox">dev mailbox</a>.</p>}
+      {auth.mode === 'dev' && <p className="text-xs text-faint mt-6">Local development: verification emails appear in the <a className="underline" href="/dev/mailbox">dev mailbox</a>.</p>}
     </AuthCard>
   );
 }
 
-const COUNTRIES = ['United Kingdom', 'Ireland', 'United States', 'Canada', 'Australia', 'New Zealand', 'Nigeria', 'Ghana', 'Kenya', 'South Africa', 'Côte d’Ivoire', 'United Arab Emirates', 'Singapore', 'Other'];
+const COUNTRIES = ['United States', 'United Kingdom', 'Ireland', 'Canada', 'Australia', 'Other'];
 
 export function Onboarding() {
   const { authUser, ready, me, refresh } = useSession();
   const [orgName, setOrgName] = useState('');
-  const [country, setCountry] = useState('United Kingdom');
+  const [country, setCountry] = useState(() => (Intl.DateTimeFormat().resolvedOptions().timeZone?.startsWith('America/') ? 'United States' : 'United Kingdom'));
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const [name, setName] = useState('');
   const [seed, setSeed] = useState(true);
@@ -160,20 +160,20 @@ export function Onboarding() {
   if (!authUser) return <Navigate to="/login?next=/onboarding" replace />;
   if (!authUser.emailVerified) return <Navigate to="/verify-email" replace />;
   if (me?.org) return <Navigate to="/app/overview" replace />;
-  const zones: string[] = (Intl as any).supportedValuesOf ? (Intl as any).supportedValuesOf('timeZone') : [timezone, 'UTC', 'Europe/London', 'America/New_York', 'Africa/Lagos'];
+  const zones: string[] = (Intl as any).supportedValuesOf ? (Intl as any).supportedValuesOf('timeZone') : [timezone, 'UTC', 'Europe/London', 'America/New_York', 'America/Chicago'];
   return (
-    <AuthCard title="Set up your organisation" subtitle="This is your general contractor workspace. You can invite colleagues next.">
+    <AuthCard title="Set up your organisation" subtitle="This is your company's workspace. You can invite colleagues once it's created.">
       <form className="space-y-4" onSubmit={async (e) => {
         e.preventDefault(); setBusy(true); setError(null);
         try { const r = await api('org.register', { orgName, country, timezone, name, seedLibrary: seed }); setOrgId(r.orgId); await refresh(); nav('/app/overview'); } catch (err: any) { setError(err.message); } finally { setBusy(false); }
       }}>
-        <Field label="Company name" required><input className="input" required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="e.g. Ashdown Construction Ltd" /></Field>
+        <Field label="Company name" required><input className="input" required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder={country === 'United States' ? 'e.g. Brazos Builders Inc.' : 'e.g. Ashdown Construction Ltd'} /></Field>
         <Field label="Your name" required><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="Country"><select className="input" value={country} onChange={(e) => setCountry(e.target.value)}>{COUNTRIES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+          <Field label="Country" hint="Sets terminology, date format and currency. You can change these later."><select className="input" value={country} onChange={(e) => setCountry(e.target.value)}>{COUNTRIES.map((c) => <option key={c}>{c}</option>)}</select></Field>
           <Field label="Timezone" hint="Used for expiry dates and reminders."><select className="input" value={timezone} onChange={(e) => setTimezone(e.target.value)}>{zones.map((z) => <option key={z}>{z}</option>)}</select></Field>
         </div>
-        <Checkbox checked={seed} onChange={setSeed} label="Add the starter requirement library" hint="16 common requirements and 8 trade templates you can edit. These are starting points, not legal standards for your jurisdiction." />
+        <Checkbox checked={seed} onChange={setSeed} label="Add the starter requirement library" hint={`${country === 'United States' ? 'US' : country === 'United Kingdom' ? 'UK' : 'Common'} requirements and eight trade templates you can edit — starting points, not legal standards for your jurisdiction.`} />
         <FormError error={error} />
         <button className="btn-primary w-full btn-lg" disabled={busy}>{busy && <Spinner />}Create organisation</button>
       </form>

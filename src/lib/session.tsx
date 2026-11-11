@@ -3,6 +3,7 @@ import type { Member, Organisation, Permission } from '../domain/types';
 import type { Plan } from '../domain/plans';
 import { api, getOrgId, setOrgId } from './api';
 import { auth, type AuthUser } from './auth';
+import { setFormatting } from '../domain/locale';
 
 export interface Me {
   user: { uid: string; email: string; emailVerified: boolean; name: string; textScale?: number; theme?: string; views: { id: string; name: string; path: string }[] };
@@ -42,8 +43,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       const m = await api<Me>('me');
       if (m.org && m.org.id !== getOrgId()) setOrgId(m.org.id);
+      setFormatting(m.org?.settings);
       setMe(m); setError(null);
-      applyPrefs({ theme: m.user.theme, textScale: m.user.textScale });
+      applyPrefs({ textScale: m.user.textScale });
       return m;
     } catch (e: any) {
       setError(e.message);
@@ -63,17 +65,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
 export const useSession = () => useContext(Ctx);
 
-export function applyPrefs(p: { theme?: string; textScale?: number }) {
+export function applyPrefs(p: { textScale?: number }) {
   let stored: any = {};
   try { stored = JSON.parse(localStorage.getItem('sc.prefs') || '{}'); } catch { /* ignore */ }
   const next = { ...stored, ...Object.fromEntries(Object.entries(p).filter(([, v]) => v !== undefined)) };
   try { localStorage.setItem('sc.prefs', JSON.stringify(next)); } catch { /* ignore */ }
-  let t = next.theme || 'dark';
-  if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  document.documentElement.dataset.theme = t;
   document.documentElement.style.fontSize = `${16 * (next.textScale || 1)}px`;
   return next;
 }
-export function readPrefs(): { theme: string; textScale: number } {
-  try { const p = JSON.parse(localStorage.getItem('sc.prefs') || '{}'); return { theme: p.theme || 'dark', textScale: p.textScale || 1 }; } catch { return { theme: 'dark', textScale: 1 }; }
+export function readPrefs(): { textScale: number } {
+  try { const p = JSON.parse(localStorage.getItem('sc.prefs') || '{}'); return { textScale: p.textScale || 1 }; } catch { return { textScale: 1 }; }
 }

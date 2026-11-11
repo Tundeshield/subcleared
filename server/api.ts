@@ -1,3 +1,4 @@
+import { applyOrgFormatting } from '../src/domain/locale';
 // Single API router used by the Netlify function (production) and the local
 // dev server. Every organisation action resolves the caller's membership from
 // the verified ID token and the x-org-id header before any handler runs.
@@ -91,6 +92,7 @@ async function dispatch(svc: Services, req: ApiRequest) {
   const [o, member] = await svc.db.getMany<any>([C.org(orgId), C.doc(orgId, 'members', identity.uid)]) as [Organisation | null, Member | null];
   // Same response for "no such org" and "not a member": no tenant enumeration.
   if (!o || !member || member.status !== 'active') throw new HttpError(403, 'You do not have access to this organisation', 'no_access');
+  applyOrgFormatting(o.settings);
   const ctx: Ctx = { svc, db: svc.db, identity, org: o, member, ip: req.ip, source: 'web' };
   return handler(ctx, input);
 }

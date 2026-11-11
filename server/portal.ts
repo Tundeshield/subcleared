@@ -1,3 +1,4 @@
+import { applyOrgFormatting } from '../src/domain/locale';
 // External subcontractor portal. Access is by a secure link (hashed bearer
 // token) and, for long-lived portal invitations, a one-time email code. Every
 // call re-checks that the link is still valid, unrevoked and in scope, and
@@ -39,6 +40,7 @@ async function resolveLink(svc: Services, db: Db, tokenHash: string) {
   const ref = await db.get<{ orgId: string; linkId: string }>(`portalTokens/${tokenHash}`);
   if (!ref) throw new HttpError(404, 'This link is not valid. Ask the contractor to send you a new one.', 'link_invalid');
   const [org, link] = await db.getMany<any>([C.org(ref.orgId), C.doc(ref.orgId, 'links', ref.linkId)]) as [Organisation, PortalLink];
+  if (org) applyOrgFormatting(org.settings);
   if (!org || !link) throw new HttpError(404, 'This link is not valid.', 'link_invalid');
   if (link.revokedAt) throw new HttpError(410, `This link was withdrawn by ${org.name}. Ask them for a new one if you still need to submit documents.`, 'link_revoked');
   if (new Date(link.expiresAt) < svc.now()) throw new HttpError(410, `This link expired on ${formatDate(link.expiresAt)}. Ask ${org.name} to send a new one.`, 'link_expired');

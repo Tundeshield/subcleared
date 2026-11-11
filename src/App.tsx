@@ -22,6 +22,8 @@ const Compliance = lazy(() => import('./pages/app/Compliance'));
 const Reports = lazy(() => import('./pages/app/Reports'));
 const Notifications = lazy(() => import('./pages/app/Notifications'));
 const Settings = lazy(() => import('./pages/app/Settings'));
+const Team = lazy(() => import('./pages/app/Team'));
+const Billing = lazy(() => import('./pages/app/Billing'));
 const Portal = lazy(() => import('./pages/portal/Portal'));
 const DevMailbox = lazy(() => import('./pages/public/DevMailbox'));
 
@@ -35,7 +37,7 @@ function RequireOrg({ children }: { children: ReactNode }) {
   if (!ready) return <FullScreenLoading />;
   if (!authUser) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname + loc.search)}`} replace />;
   if (!authUser.emailVerified && !me?.user.emailVerified) return <Navigate to="/verify-email" replace />;
-  if (error && !me) return <div className="min-h-screen grid place-items-center p-6 text-center"><div><p className="font-medium">We couldn't load your account.</p><p className="text-muted mt-1">{error}</p><button className="btn-secondary mt-4" onClick={() => location.reload()}>Reload</button></div></div>;
+  if (error && !me) return <div className="min-h-screen grid place-items-center p-6"><div className="max-w-md"><p className="text-lg font-medium">We couldn't load your account.</p><p className="text-muted mt-2">{error}</p><button className="btn-secondary mt-5" onClick={() => location.reload()}>Reload</button></div></div>;
   if (!me?.org) return <Navigate to="/onboarding" replace />;
   return <>{children}</>;
 }
@@ -71,11 +73,15 @@ export default function App() {
           <Route path="compliance" element={<S><Compliance /></S>} />
           <Route path="reports" element={<S><Reports /></S>} />
           <Route path="notifications" element={<S><Notifications /></S>} />
+          <Route path="team" element={<S><Team /></S>} />
+          <Route path="billing" element={<S><Billing /></S>} />
           <Route path="settings" element={<Navigate to="organisation" replace />} />
+          <Route path="settings/users" element={<Navigate to="/app/team" replace />} />
+          <Route path="settings/billing" element={<Navigate to="/app/billing" replace />} />
           <Route path="settings/:section" element={<S><Settings /></S>} />
-          <Route path="*" element={<div className="py-20 text-center"><h1 className="text-xl font-semibold">Page not found</h1></div>} />
+          <Route path="*" element={<div className="py-16"><h1 className="text-2xl font-medium">Page not found</h1><p className="text-muted mt-2">That page doesn't exist. Use the navigation to find what you need.</p></div>} />
         </Route>
-        <Route path="*" element={<div className="min-h-screen grid place-items-center"><div className="text-center"><h1 className="text-xl font-semibold">Page not found</h1><a href="/" className="link mt-2 inline-block">Go home</a></div></div>} />
+        <Route path="*" element={<div className="min-h-screen grid place-items-center px-6"><div><h1 className="text-2xl font-medium">Page not found</h1><p className="text-muted mt-2">That address doesn't match anything in SubCleared.</p><a href="/" className="btn-secondary mt-6">Go to the home page</a></div></div>} />
       </Routes>
     </Suspense>
   );

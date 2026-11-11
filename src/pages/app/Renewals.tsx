@@ -1,70 +1,106 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import { useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
-import { Checkbox, cx, Empty, ErrorState, FormError, humanize, PageHeader, Segmented, Skeleton, Spinner, useToast } from '../../ui';
+import { Checkbox, cx, Empty, ErrorState, FilterSelect, FormError, Glyph, humanize, PageHeader, Pagination, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
 
-const STAGES: Record<string, [string, string]> = {
-  not_requested: ['Not requested', 'text-muted'], requested: ['Requested', 'text-info'], acknowledged: ['Opened by subcontractor', 'text-info'],
-  replacement_received: ['Replacement received', 'text-warn'], replacement_rejected: ['Replacement rejected', 'text-bad'], renewed: ['Renewed', 'text-ok'],
+const STAGES: Record<string, [string, 'none' | 'progress' | 'attention' | 'blocked' | 'ok']> = {
+  not_requested: ['Not requested', 'none'], requested: ['Renewal requested', 'attention'], acknowledged: ['Opened by subcontractor', 'attention'],
+  replacement_received: ['Replacement awaiting review', 'progress'], replacement_rejected: ['Replacement rejected', 'blocked'], renewed: ['Renewed', 'ok'],
 };
+const WINDOWS = [
+  { value: 'expired', label: 'Expired', test: (d: number) => d < 0 }, { value: '7', label: 'Within 7 days', test: (d: number) => d >= 0 && d <= 7 },
+  { value: '30', label: 'Within 30 days', test: (d: number) => d >= 0 && d <= 30 }, { value: '60', label: 'Within 60 days', test: (d: number) => d >= 0 && d <= 60 },
+  { value: '90', label: 'Within 90 days', test: (d: number) => d >= 0 && d <= 90 },
+];
 
 export default function Renewals() {
   const { can, me } = useSession();
-  const [days, setDays] = useState(90);
-  const { data, error, loading, reload } = useApi<any>('renewals.list', { days });
-  const [view, setView] = useState<'open' | 'all'>('open');
+  const [params, setParams] = useSearchParams();
+  const win = params.get('window') ?? 'open';
+  const { data, error, loading, reload } = useApi<any>('renewals.list', { days: 365 });
+  const [project, setProject] = useState('');
+  const [sub, setSub] = useState('');
+  const [category, setCategory] = useState('');
+  const [stage, setStage] = useState('');
   const [sel, setSel] = useState<string[]>([]);
   const request = useMutation('renewals.request');
   const toast = useToast();
-  const rows = useMemo(() => (data?.items ?? []).filter((r: any) => view === 'all' || r.stage !== 'renewed'), [data, view]);
-  const selectable = rows.filter((r: any) => ['not_requested', 'replacement_rejected'].includes(r.stage) && r.contacts.length);
+  const items: any[] = data?.items ?? [];
+  const counts = Object.fromEntries(WINDOWS.map((w) => [w.value, items.filter((i) => i.stage !== 'renewed' && w.test(i.days)).length]));
+  const rows = useMemo(() => items.filter((r) => {
+    if (win === 'completed') { if (r.stage !== 'renewed') return false; }
+    else if (win === 'open') { if (r.stage === 'renewed' || r.days > 90) return false; }
+    else { const w = WINDOWS.find((x) => x.value === win); if (!w || !w.test(r.days) || r.stage === 'renewed') return false; }
+    return (!project || r.projects.some((p: any) => p.id === project)) && (!sub || r.subcontractorId === sub) && (!category || r.category === category) && (!stage || r.stage === stage);
+  }), [items, win, project, sub, category, stage]);
+  const paged = usePaged(rows, 25);
+  const selectable = rows.filter((r) => ['not_requested', 'replacement_rejected'].includes(r.stage) && r.contacts.length);
+  const setWin = (v: string) => { setParams(v === 'open' ? {} : { window: v }); setSel([]); };
+  const sched: number[] = me?.org?.settings.reminderSchedule ?? [];
+  const before = sched.filter((d) => d > 0), after = sched.filter((d) => d < 0).map((d) => -d);
+  const schedule = [before.length ? `${before.join(', ')} days before expiry` : '', sched.includes(0) ? 'on the expiry date' : '', after.length ? `${after.join(', ')} day${after.length === 1 && after[0] === 1 ? '' : 's'} after` : ''].filter(Boolean).join(', ');
+  const projects = [...new Map(items.flatMap((i) => i.projects).map((p: any) => [p.id, p])).values()] as any[];
+  const subs = [...new Map(items.map((i) => [i.subcontractorId, i.subcontractor])).entries()];
+  const cats = [...new Set(items.map((i) => i.category).filter(Boolean))] as string[];
   return (
     <div>
-      <PageHeader title="Renewals" description={`Approved documents expiring within ${days} days, and where each renewal stands. Reminders go out automatically at ${me?.org?.settings.reminderSchedule.map((d: number) => (d > 0 ? `${d}` : d === 0 ? 'expiry' : `${-d} after`)).join(', ')} days.`}
+      <PageHeader title="Renewals" description={`Approved documents approaching or past expiry, and where each renewal stands. Reminders go to subcontractors automatically ${schedule} — once each.`}
         actions={<>
-          <button className="btn-secondary" disabled={!rows.length} onClick={() => exportCsv('Renewals', [{ key: 'subcontractor', label: 'Subcontractor' }, { key: 'title', label: 'Document' }, { key: 'expiryDate', label: 'Expiry' }, { key: 'days', label: 'Days' }, { key: 'stage', label: 'Stage' }], rows)}>Export CSV</button>
+          <button className="btn-secondary" disabled={!rows.length} onClick={() => exportCsv('Renewals', [{ key: 'subcontractor', label: 'Subcontractor' }, { key: 'title', label: 'Document' }, { key: 'category', label: 'Category' }, { key: 'projectsText', label: 'Projects' }, { key: 'expiryDate', label: 'Expiry' }, { key: 'days', label: 'Days' }, { key: 'stageText', label: 'Stage' }], rows.map((r) => ({ ...r, projectsText: r.projects.map((p: any) => p.name).join('; '), stageText: STAGES[r.stage]?.[0] })))}>Export CSV</button>
           {can('requests.send') && <button className="btn-primary" disabled={!sel.length || request.busy} onClick={async () => { const r = await request.run({ versionIds: sel }); const failed = r.results.filter((x: any) => x.error); toast(`${r.results.length - failed.length} renewal request${r.results.length - failed.length === 1 ? '' : 's'} sent${failed.length ? `; ${failed.length} skipped (no contact)` : ''}`); setSel([]); }}>{request.busy && <Spinner />}Request renewal{sel.length ? ` (${sel.length})` : ''}</button>}
         </>} />
-      <div className="flex flex-wrap gap-3 mb-4 items-center">
-        <Segmented value={view} onChange={setView} options={[{ value: 'open', label: 'Open' }, { value: 'all', label: 'Include renewed' }]} />
-        <select className="input h-9 w-auto text-sm" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Window">{[30, 60, 90, 180, 365].map((d) => <option key={d} value={d}>Next {d} days (and expired)</option>)}</select>
+      <div className="flex gap-6 border-b border-line overflow-x-auto mb-6" role="tablist" aria-label="Expiry window">
+        {[{ value: 'open', label: 'All open' }, ...WINDOWS, { value: 'completed', label: 'Completed' }].map((w) => (
+          <button key={w.value} role="tab" aria-selected={win === w.value} onClick={() => setWin(w.value)} className={cx('pb-3 pt-1 border-b-2 -mb-px whitespace-nowrap text-[0.9375rem]', win === w.value ? 'border-field font-medium' : 'border-transparent text-muted hover:text-charcoal')}>
+            {w.label}{counts[w.value] !== undefined && <span className="ml-1.5 text-faint tnum font-normal">{counts[w.value]}</span>}
+          </button>
+        ))}
       </div>
+      <Toolbar>
+        {projects.length > 0 && <FilterSelect label="Project" value={project} onChange={setProject} options={projects.map((p) => ({ value: p.id, label: p.name }))} />}
+        {subs.length > 1 && <FilterSelect label="Subcontractor" value={sub} onChange={setSub} options={subs.map(([id, n]) => ({ value: id, label: n }))} />}
+        {cats.length > 1 && <FilterSelect label="Category" value={category} onChange={setCategory} options={cats.map((c) => ({ value: c, label: c }))} />}
+        <FilterSelect label="Stage" value={stage} onChange={setStage} options={Object.entries(STAGES).map(([k, [l]]) => ({ value: k, label: l }))} />
+      </Toolbar>
       <FormError error={request.error} />
-      <div className="panel overflow-x-auto">
-        {loading && !data ? <Skeleton /> : error ? <div className="p-4"><ErrorState error={error} onRetry={reload} /></div> : rows.length === 0 ? (
-          <Empty title="Nothing to renew">No approved documents expire in this window.</Empty>
-        ) : (
-          <table className="w-full min-w-[900px]">
-            <thead><tr>
-              <th className="th w-10">{can('requests.send') && selectable.length > 0 && <Checkbox checked={sel.length === selectable.length} onChange={(v) => setSel(v ? selectable.map((r: any) => r.versionId) : [])} label={<span className="sr-only">Select all</span>} />}</th>
-              <th className="th">Document</th><th className="th">Subcontractor</th><th className="th">Expiry</th><th className="th">Stage</th><th className="th">Request</th><th className="th" />
-            </tr></thead>
-            <tbody>{rows.map((r: any) => {
-              const [label, tone] = STAGES[r.stage] ?? [humanize(r.stage), 'text-muted'];
-              const canSelect = selectable.includes(r);
-              return (
-                <tr key={r.versionId}>
-                  <td className="td">{canSelect && can('requests.send') && <Checkbox checked={sel.includes(r.versionId)} onChange={(v) => setSel(v ? [...sel, r.versionId] : sel.filter((x) => x !== r.versionId))} label={<span className="sr-only">Select {r.title}</span>} />}</td>
-                  <td className="td"><Link to={`/app/documents/${r.documentId}`} className="font-medium hover:underline">{r.title}</Link><div className="text-xs text-faint">{r.requirement}</div></td>
-                  <td className="td"><Link to={`/app/subcontractors/${r.subcontractorId}`} className="hover:underline">{r.subcontractor}</Link>{!r.contacts.length && <div className="text-xs text-bad">No contact on file</div>}</td>
-                  <td className={cx('td whitespace-nowrap tabular-nums', r.days < 0 ? 'text-bad' : r.days <= 14 ? 'text-bad' : r.days <= 30 ? 'text-warn' : 'text-muted')}>{formatDate(r.expiryDate)}<div className="text-xs">{r.days < 0 ? `${-r.days} days ago` : r.days === 0 ? 'Today' : `in ${r.days} days`}</div></td>
-                  <td className={cx('td', tone)}>{label}</td>
-                  <td className="td text-xs text-muted">{r.request ? <>{r.request.contactEmail}<div>{formatDateTime(r.request.createdAt)}{r.request.acknowledgedAt ? ` · opened ${formatDateTime(r.request.acknowledgedAt)}` : ''}</div></> : '—'}</td>
-                  <td className="td text-right">{r.replacementVersionId && r.stage === 'replacement_received' && <Link className="btn-secondary btn-sm" to={`/app/reviews/${r.replacementVersionId}`}>Review replacement</Link>}</td>
-                </tr>
-              );
-            })}</tbody>
-          </table>
-        )}
-      </div>
+      {loading && !data ? <Skeleton /> : error ? <ErrorState error={error} onRetry={reload} /> : rows.length === 0 ? (
+        <Empty title={win === 'completed' ? 'No completed renewals yet' : 'Nothing to renew here'}>{win === 'completed' ? 'Renewed documents appear here once the replacement is approved.' : 'No approved documents fall in this window.'}</Empty>
+      ) : (
+        <>
+          <div className="overflow-x-auto -mx-4 sm:mx-0">
+            <table className="table min-w-[980px]">
+              <thead><tr>
+                <th className="th w-10">{can('requests.send') && selectable.length > 0 && <Checkbox checked={sel.length > 0 && sel.length === selectable.length} onChange={(v) => setSel(v ? selectable.map((r) => r.versionId) : [])} label={<span className="sr-only">Select all</span>} />}</th>
+                <th className="th">Document</th><th className="th">Subcontractor</th><th className="th">Projects</th><th className="th">Expiry</th><th className="th">Stage</th><th className="th"><span className="sr-only">Next step</span></th>
+              </tr></thead>
+              <tbody>{paged.slice.map((r) => {
+                const [label, tone] = STAGES[r.stage] ?? [humanize(r.stage), 'none'];
+                const canSelect = selectable.includes(r) && can('requests.send');
+                return (
+                  <tr key={r.versionId}>
+                    <td className="td">{canSelect && <Checkbox checked={sel.includes(r.versionId)} onChange={(v) => setSel(v ? [...sel, r.versionId] : sel.filter((x) => x !== r.versionId))} label={<span className="sr-only">Select {r.title}</span>} />}</td>
+                    <td className="td"><Link to={`/app/documents/${r.documentId}`} className="font-medium hover:underline underline-offset-4">{r.title}</Link><div className="text-sm text-faint">{r.category}{r.issuer ? ` · ${r.issuer}` : ''}</div></td>
+                    <td className="td"><Link to={`/app/subcontractors/${r.subcontractorId}`} className="hover:underline underline-offset-4">{r.subcontractor}</Link>{!r.contacts.length && <div className="text-sm font-medium flex items-center gap-1.5 mt-0.5"><Glyph tone="blocked" className="w-3 h-3" />No contact on file</div>}</td>
+                    <td className="td text-sm text-muted">{r.projects.map((p: any) => p.name).join(', ') || '—'}</td>
+                    <td className="td whitespace-nowrap tnum"><div className={cx(r.days <= 14 && 'font-medium')}>{formatDate(r.expiryDate)}</div><div className="text-sm text-muted">{r.days < 0 ? `${-r.days} days ago` : r.days === 0 ? 'Today' : `In ${r.days} days`}</div></td>
+                    <td className="td"><span className={cx('inline-flex items-center gap-2 text-sm', tone === 'ok' && 'text-field', tone === 'blocked' && 'font-medium')}><Glyph tone={tone} className="w-3.5 h-3.5" />{label}</span>{r.request && <div className="text-xs text-faint mt-1">{r.request.contactEmail} · {formatDateTime(r.request.createdAt)}</div>}</td>
+                    <td className="td text-right whitespace-nowrap">{r.replacementVersionId && r.stage === 'replacement_received' ? <Link className="btn-secondary btn-sm" to={`/app/reviews/${r.replacementVersionId}`}>Review replacement</Link> : canSelect ? <button className="btn-quiet" onClick={async () => { await request.run({ versionIds: [r.versionId] }); toast('Renewal requested'); }}>Request renewal</button> : null}</td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+          </div>
+          <Pagination {...paged} />
+        </>
+      )}
       {data?.reminders?.length > 0 && (
-        <details className="mt-6 panel">
-          <summary className="px-4 py-3 cursor-pointer text-sm font-medium">Recent automatic reminders ({data.reminders.length})</summary>
-          <ul className="divide-y divide-line border-t border-line">{data.reminders.map((r: any) => (
-            <li key={r.id} className="px-4 py-2 text-sm flex flex-wrap gap-x-4"><span className={cx(r.status === 'failed' ? 'text-bad' : r.status === 'skipped' ? 'text-faint' : 'text-muted')}>{humanize(r.status)}</span><span>{r.type === 'escalation' ? 'Escalation' : r.offset > 0 ? `${r.offset}-day reminder` : r.offset === 0 ? 'Expiry-day reminder' : `${-r.offset} days after expiry`}</span><span className="text-faint">{formatDateTime(r.at)}</span>{r.error && <span className="text-bad text-xs">{r.error}</span>}</li>
+        <details className="mt-10">
+          <summary className="cursor-pointer font-medium">Automatic reminder log <span className="text-faint font-normal">({data.reminders.length} most recent)</span></summary>
+          <ul className="mt-3 border-t border-line">{data.reminders.map((r: any) => (
+            <li key={r.id} className="py-2.5 border-b border-line text-sm flex flex-wrap gap-x-5"><span className="w-20">{humanize(r.status)}</span><span>{r.type === 'escalation' ? 'Escalation to project manager' : r.offset > 0 ? `${r.offset}-day reminder` : r.offset === 0 ? 'Expiry-day reminder' : `${-r.offset} days after expiry`}</span><span className="text-faint">{formatDateTime(r.at)}</span>{r.error && <span className="font-medium">{r.error}</span>}</li>
           ))}</ul>
         </details>
       )}
