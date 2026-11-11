@@ -36,9 +36,9 @@ Text colours: success and danger colour the label (the two ends of the scale); w
 
 Directions considered: *Site Ivory* (previous; green accent collided with "ready", no distinct status colours) and *Stone & Signal* (orange accent read as hi-vis cliché and competed with warnings). Details on `/design`.
 
-## Typography — IBM Plex Sans (+ Plex Mono for codes)
+## Typography — Inter (+ IBM Plex Mono for codes)
 
-Inter, Geist, Manrope and DM Sans were evaluated; Plex was chosen for its open, engineered forms, true tabular figures and matching mono. Weights 400/500/600 only.
+Inter, IBM Plex Sans, Geist and Manrope were evaluated (Plex was the previous choice). Inter was chosen for the clearest tabular figures in dense tables, strong legibility at small sizes and the widest language coverage for an international product. Self-hosted variable font; weights 400/500/600 only; `cv11` (single-storey a) and `ss03` features on.
 
 | Role | Size / line height · weight |
 |---|---|

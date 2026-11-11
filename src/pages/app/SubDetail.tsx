@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { READINESS_LABELS } from '../../domain/compliance';
+import { displayReadiness, READINESS_LABELS, readinessReason } from '../../domain/compliance';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import type { RequirementStatus } from '../../domain/types';
 import { useApi, useMutation } from '../../lib/api';
@@ -62,7 +62,7 @@ export default function SubDetail() {
                 <ul className="border-t border-line-strong">{data.projects.map((p: any) => (
                   <li key={p.id} className="py-4 border-b border-line">
                     <div className="flex flex-wrap items-baseline justify-between gap-3">{p.visible ? <Link to={`/app/projects/${p.id}`} className="font-medium hover:underline underline-offset-4">{p.name}</Link> : <span className="font-medium">{p.name}</span>}<ReadinessBadge value={p.readiness} results={p.results} size="sm" /></div>
-                    <p className="text-sm text-muted mt-1">{p.summary}</p>
+                    <p className="text-sm text-muted mt-1">{p.results ? readinessReason(p.results, displayReadiness(p.readiness, p.results)) : p.summary}</p>
                   </li>
                 ))}</ul>
               )}

@@ -22,7 +22,7 @@ const ORG_ACTIONS: Record<string, OrgHandler> = {
   'org.settings': org.getSettings, 'org.updateSettings': org.updateSettings, 'members.list': org.listMembers, 'members.invite': org.inviteMember,
   'members.update': org.updateMember, 'invitations.revoke': org.revokeInvitation, 'notifications.list': org.listNotifications,
   'notifications.mark': org.markNotifications, 'notifications.prefs': org.updateNotificationPrefs, 'deliveryLogs.list': org.deliveryLogs,
-  'audit.list': org.listAudit, search: org.search, dashboard: org.dashboard,
+  'audit.list': org.listAudit, search: org.search, dashboard: org.dashboard, 'nav.counts': org.navCounts,
   'projects.list': projects.listProjects, 'projects.get': projects.getProjectDetail, 'projects.create': projects.createProject,
   'projects.update': projects.updateProject, 'projects.archive': projects.setProjectArchived, 'projects.assign': projects.assignSubcontractors,
   'projects.unassign': projects.removeSubcontractor, 'projects.applyTemplate': projects.applyTemplate, 'projects.setRequirement': projects.setProjectRequirement,

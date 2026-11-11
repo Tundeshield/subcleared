@@ -27,12 +27,11 @@ const DIRECTIONS: { id: string; name: string; chosen?: boolean; verdict: string;
 ];
 
 const FONTS: [string, string][] = [
-  ['Inter', 'Excellent legibility, but it is the default of most SaaS products, which works against a distinctive identity.'],
+  ['Inter — chosen', 'The clearest figures in dense tables (true tabular numbers, a distinct 1/l/I), excellent legibility from 13 to 32 px, and the widest language coverage of the four — important for a product used in many countries. Its familiarity is offset by SubCleared’s own mark, colour and layout.'],
+  ['IBM Plex Sans', 'Previous choice. Characterful and precise, but slightly wide in tables and less neutral across languages; still used as the monospace companion (Plex Mono) for references and codes.'],
   ['Geist', 'Crisp and modern; slightly condensed, and its figures are less distinct in dense tables of dates and amounts.'],
   ['Manrope', 'Geometric and friendly; weaker over long tables, and I/l/1 are easy to confuse in reference numbers.'],
-  ['DM Sans', 'Warm, but its small x-height makes 13–14 px metadata harder to read.'],
-  ['IBM Plex Sans — chosen', 'Engineered, open letterforms with a precise, practical character; true tabular figures for dates and limits; a matching Mono for references and codes. One family, three weights.'],
-];
+]
 
 const TYPE: [string, string, string][] = [
   ['Page title', 'text-2xl font-medium', '28 / 34 · 500'],
@@ -88,7 +87,7 @@ export default function Design() {
             <div className="flex items-end gap-6"><Mark className="w-16 h-16" /><Mark className="w-8 h-8" /><Mark className="w-5 h-5" /><p className="text-xs text-faint">Compact symbol</p></div>
             <div className="flex items-end gap-6"><img src="/favicon.svg" alt="" className="w-16 h-16" /><img src="/favicon.svg" alt="" className="w-8 h-8" /><img src="/favicon.svg" alt="" className="w-4 h-4" /><p className="text-xs text-faint">Favicon / app icon</p></div>
           </div>
-          <p className="text-sm text-muted mt-8 max-w-2xl">Wordmark: IBM Plex Sans 600 with −2% tracking. Icon style: 1.5 px outline icons on a 16 px grid, used only where they help recognition (search, notifications, upload). Navigation is text-only.</p>
+          <p className="text-sm text-muted mt-8 max-w-2xl">Wordmark: Inter 600 with −2% tracking. Icon style: 1.5 px outline icons on a 16 px grid, used only where they help recognition (search, notifications, upload). Navigation is text-only.</p>
         </K>
 
         <K title="Colour directions" description="Three directions were evaluated against the same needs: calm, trustworthy, distinct from insurers and document tools, and able to show status clearly.">
@@ -112,7 +111,7 @@ export default function Design() {
           <p className="text-sm text-muted mt-6 max-w-3xl">Each status colour also has a tint used only for callout backgrounds (#E9F4ED, #FBF2E4, #FCECEA, #EBF1FA). All text colours meet WCAG AA on the canvas; primary text, the accent and every status colour exceed 4.5:1.</p>
         </K>
 
-        <K title="Typography" description="One family, three weights. Sizes were chosen for comfortable reading at desktop distance; nothing operational is smaller than 13 px.">
+        <K title="Typography" description="One family (Inter), three weights. Sizes were chosen for comfortable reading at desktop distance; nothing operational is smaller than 13 px.">
           <div className="grid lg:grid-cols-[1fr_1fr] gap-12">
             <div>{TYPE.map(([n, cls, spec]) => <div key={n} className="flex items-baseline justify-between gap-6 py-3 border-b border-line"><span className={cls}>{n === 'Metric' ? '24 of 31' : n}</span><span className="text-xs text-faint font-mono whitespace-nowrap">{spec}</span></div>)}</div>
             <div className="space-y-4">{FONTS.map(([n, t]) => <div key={n}><div className="text-sm font-medium">{n}</div><p className="text-sm text-muted">{t}</p></div>)}</div>

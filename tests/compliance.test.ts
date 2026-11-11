@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dueReminder, evaluate, type EvalInput } from '../src/domain/compliance';
+import { displayReadiness, dueReminder, evaluate, readinessReason, type EvalInput } from '../src/domain/compliance';
 import { addDays, daysBetween, isExpired, todayIn } from '../src/domain/dates';
 import type { DocumentRecord, DocumentVersion, ProjectRequirement, RequirementDefinition } from '../src/domain/types';
 
@@ -232,5 +232,25 @@ describe('reminder scheduling', () => {
     const r = dueReminder(5, schedule, []);
     expect(r?.offset).toBe(7);
     expect(r?.supersedes).toEqual([90, 60, 30, 14]);
+  });
+});
+
+describe('readiness as people see it', () => {
+  const r = (status: string, mandatory = true) => ({ status, mandatory, blocking: mandatory && status !== 'approved' });
+  it('says Not ready when mandatory paperwork has not been submitted, even if other things need attention', () => {
+    expect(displayReadiness('not_ready', [r('missing'), r('rejected'), r('awaiting_review')])).toBe('not_ready');
+    expect(readinessReason([r('missing'), r('requested')], 'not_ready')).toBe('2 mandatory documents haven’t been submitted.');
+  });
+  it('says Action required when something was rejected, expired or is expiring', () => {
+    expect(displayReadiness('not_ready', [r('approved'), r('rejected')])).toBe('action_required');
+    expect(displayReadiness('action_required', [r('approved'), r('expiring_soon')])).toBe('action_required');
+  });
+  it('says Needs review when everything is in and waiting for a decision', () => {
+    expect(displayReadiness('not_ready', [r('approved'), r('awaiting_review')])).toBe('needs_review');
+    expect(readinessReason([r('awaiting_review')], 'needs_review')).toBe('1 document has been submitted and is waiting for review.');
+  });
+  it('leaves Ready and Not assessed untouched', () => {
+    expect(displayReadiness('ready', [r('approved')])).toBe('ready');
+    expect(displayReadiness('not_evaluated', [])).toBe('not_evaluated');
   });
 });

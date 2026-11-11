@@ -490,6 +490,7 @@ describe('Project workflow in one step', () => {
     expect(email.text).toContain('Harbour View');
     expect(email.text).toContain('Reply to this email');
 
+    expect(await ok('owner1', 'nav.counts', {}, o.orgId)).toEqual({ reviews: 0, renewals: 0 });
     const detail = await ok('owner1', 'projects.get', { projectId }, o.orgId);
     const alpha = detail.subcontractors.find((s: any) => s.id === a.subcontractorId);
     expect(alpha.results.every((x: any) => x.status === 'requested')).toBe(true);

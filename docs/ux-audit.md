@@ -85,3 +85,15 @@ Per-project readiness with reasons; secure no-account portal; immutable versions
 - **Add subcontractors in place:** pick existing companies or add new ones (with a contact) from the same panel; duplicates are prevented by name.
 - **Request paperwork in one step** for every subcontractor on a project that has outstanding items.
 - **Overview** leads with a "Needs your attention" list: item, issue, action, each row a direct link.
+
+---
+
+# Refocus audit (brief 5: "make the administrative work disappear into the background")
+
+Most of this brief was already in place after the simplification round: one visible workflow per project, one-step requests, the review inbox, plain statuses, and automatic readiness, reminders and expiry tracking. Remaining gaps:
+
+1. **The sidebar still showed eleven links at once** (four main, four under "More", three under Administration). → Three always-visible items (Overview, Projects, Subcontractors), then collapsible **Work to do** (Documents to review, Renewals — each with a count), **Records & tools** (All documents, Requirements & templates, Reports) and **Administration** (Team and permissions, Settings, Billing). Each person's collapsed state is remembered on their device, and a group always opens when it contains the current page.
+2. **Readiness labels didn't match the brief's meanings.** A rejected or expired document showed as "Not ready". → Display rule: *Not ready* = mandatory paperwork not yet submitted; *Action required* = something was rejected, expired or is about to; *Needs review* = everything is in and waiting for a decision; *Ready* = all mandatory items approved and valid. Each comes with its reason, and the engine's internal states are unchanged.
+3. **The project's subcontractor list had no column headings**, so "6 of 8 approved" and the action column had to be inferred. → Headed table: Subcontractor · Paperwork · Status · Next action.
+4. **Typeface.** Third request to replace it; switched from IBM Plex Sans to Inter (variable). Reasons: the clearest figures in dense tables (tabular numbers), the widest language coverage for a product used in many countries, and it renders well at the small sizes used in tables.
+5. **Renewals counts weren't visible** without opening the page. → The "Work to do" group shows the number of expired and soon-expiring documents next to Renewals; they also already appear on the Overview and project pages.

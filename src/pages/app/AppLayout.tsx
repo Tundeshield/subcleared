@@ -7,17 +7,33 @@ import { auth } from '../../lib/auth';
 import { applyPrefs, readPrefs, useSession } from '../../lib/session';
 import { cx, Dialog, Drawer, Glyph, Icon, Logo, Segmented, Spinner } from '../../ui';
 
-type NavItem = { to: string; label: string; perm?: string; count?: 'reviews' };
-// Daily work: four destinations. Everything else is one click away under "More".
-const WORKSPACE: NavItem[] = [
-  { to: 'overview', label: 'Overview' }, { to: 'projects', label: 'Projects' }, { to: 'subcontractors', label: 'Subcontractors' },
-  { to: 'reviews', label: 'Documents to review', perm: 'documents.review', count: 'reviews' },
+type NavItem = { to: string; label: string; perm?: string; count?: 'reviews' | 'renewals'; icon: keyof typeof NAV_ICON };
+// 16px outline icons, 1.5px stroke — the only icons in the sidebar.
+const P = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+const NAV_ICON = {
+  overview: <path d="M2.5 2.5h4.5v5H2.5zM9 2.5h4.5v3H9zM9 7.5h4.5v6H9zM2.5 9.5h4.5v4H2.5z" {...P} />,
+  projects: <path d="M2 4.5h4.2l1.3 1.5H14v7.5H2z" {...P} />,
+  subs: <><circle cx="6" cy="5.5" r="2.3" {...P} /><path d="M1.8 13.5c.5-2.3 2.2-3.6 4.2-3.6s3.7 1.3 4.2 3.6M10.5 3.6a2.2 2.2 0 010 4.1M12 9.9c1.2.4 2 1.6 2.3 3.6" {...P} /></>,
+  review: <path d="M2 9.5l1.6-6h8.8l1.6 6v4H2zM2 9.5h3.5l.8 1.7h3.4l.8-1.7H14" {...P} />,
+  renewals: <path d="M13.2 6.5A5.5 5.5 0 003 5M2.8 9.5A5.5 5.5 0 0013 11M3 2.5V5h2.5M13 13.5V11h-2.5" {...P} />,
+  documents: <path d="M4 1.8h5l3 3v9.4H4zM9 1.8v3h3M6 8.5h4M6 11h4" {...P} />,
+  requirements: <path d="M6.5 4h7M6.5 8h7M6.5 12h7M2.5 4l.9.9L5 3.2M2.5 8l.9.9L5 7.2M2.5 12l.9.9L5 11.2" {...P} />,
+  reports: <path d="M2.5 13.5h11M4.5 11V7.5M8 11V4.5M11.5 11V8.5" {...P} />,
+  team: <><circle cx="8" cy="5.5" r="2.5" {...P} /><path d="M3.2 13.5c.6-2.6 2.5-4 4.8-4s4.2 1.4 4.8 4" {...P} /></>,
+  settings: <><circle cx="8" cy="8" r="2.1" {...P} /><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2" {...P} /></>,
+  billing: <><rect x="1.8" y="3.5" width="12.4" height="9" rx="1.2" {...P} /><path d="M1.8 6.5h12.4M4.5 10h2.5" {...P} /></>,
+};
+// Everyday work stays visible; everything else sits in collapsible groups.
+const MAIN: NavItem[] = [{ to: 'overview', label: 'Overview', icon: 'overview' }, { to: 'projects', label: 'Projects', icon: 'projects' }, { to: 'subcontractors', label: 'Subcontractors', icon: 'subs' }];
+const GROUPS: { id: string; label: string; items: NavItem[] }[] = [
+  { id: 'work', label: 'Work to do', items: [{ to: 'reviews', label: 'Documents to review', perm: 'documents.review', count: 'reviews', icon: 'review' }, { to: 'renewals', label: 'Renewals', count: 'renewals', icon: 'renewals' }] },
+  { id: 'records', label: 'Records & tools', items: [{ to: 'documents', label: 'All documents', icon: 'documents' }, { to: 'requirements', label: 'Requirements & templates', icon: 'requirements' }, { to: 'reports', label: 'Reports', perm: 'reports.view', icon: 'reports' }] },
+  { id: 'admin', label: 'Administration', items: [{ to: 'team', label: 'Team and permissions', icon: 'team' }, { to: 'settings', label: 'Settings', icon: 'settings' }, { to: 'billing', label: 'Billing', icon: 'billing' }] },
 ];
-const MORE: NavItem[] = [
-  { to: 'documents', label: 'All documents' }, { to: 'renewals', label: 'Renewals' }, { to: 'reports', label: 'Reports', perm: 'reports.view' },
-  { to: 'requirements', label: 'Requirements & templates' },
-];
-const ADMIN: NavItem[] = [{ to: 'team', label: 'Team and permissions' }, { to: 'settings', label: 'Settings' }, { to: 'billing', label: 'Billing' }];
+const COLLAPSE_KEY = 'sc.nav.collapsed';
+function readCollapsed(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '') || { records: true, admin: true }; } catch { return { records: true, admin: true }; }
+}
 
 export default function AppLayout() {
   const { me, can, switchOrg } = useSession();
@@ -27,7 +43,9 @@ export default function AppLayout() {
   const loc = useLocation();
   const nav = useNavigate();
   const notif = useApi<{ unread: number }>('notifications.list', { limit: 1, unreadOnly: true }, [loc.pathname]);
-  const queue = useApi<{ items: any[] }>(can('documents.review') ? 'reviews.queue' : null, {}, [loc.pathname]);
+  const counts = useApi<{ reviews: number; renewals: number }>('nav.counts', {}, [loc.pathname]);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
+  const toggle = (id: string) => setCollapsed((c) => { const next = { ...c, [id]: !c[id] }; try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ } return next; });
   useEffect(() => setNavOpen(false), [loc.pathname]);
   useEffect(() => { window.scrollTo(0, 0); }, [loc.pathname]);
   useEffect(() => {
@@ -42,17 +60,21 @@ export default function AppLayout() {
   const sub = org.subscription;
   const trialDays = sub.status === 'trialing' && sub.trialEndsAt ? Math.ceil((new Date(sub.trialEndsAt).getTime() - Date.now()) / 86_400_000) : null;
   const inactive = ['canceled', 'incomplete'].includes(sub.status) || (trialDays !== null && trialDays <= 0);
-  const reviewCount = queue.data?.items.length ?? 0;
+  const countOf = (k?: 'reviews' | 'renewals') => (k ? counts.data?.[k] ?? 0 : 0);
 
-  const item = (n: NavItem) => (
-    <li key={n.to}>
-      <NavLink to={`/app/${n.to}`} className={({ isActive }) => cx('relative flex items-center justify-between rounded px-3 h-9 text-[0.9375rem] transition-colors',
-        isActive ? 'text-accent font-medium bg-accent-tint before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-accent before:rounded-full' : 'text-muted hover:text-ink')}>
-        {n.label}
-        {n.count === 'reviews' && reviewCount > 0 && <span className="text-xs tnum text-muted" aria-label={`${reviewCount} awaiting review`}>{reviewCount}</span>}
-      </NavLink>
-    </li>
-  );
+  const item = (n: NavItem) => {
+    const c = countOf(n.count);
+    return (
+      <li key={n.to}>
+        <NavLink to={`/app/${n.to}`} className={({ isActive }) => cx('relative flex items-center gap-2.5 rounded px-3 h-9 text-[0.9375rem] transition-colors',
+          isActive ? 'text-accent font-medium bg-accent-tint before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-accent before:rounded-full' : 'text-muted hover:text-ink hover:bg-raised/70')}>
+          <svg viewBox="0 0 16 16" className="w-4 h-4 shrink-0 opacity-80" aria-hidden>{NAV_ICON[n.icon]}</svg>
+          <span className="flex-1 truncate">{n.label}</span>
+          {c > 0 && <span className="min-w-[1.25rem] h-5 px-1.5 rounded-full bg-raised text-[0.75rem] tnum text-ink grid place-items-center" aria-label={`${c} ${n.count === 'reviews' ? 'waiting for review' : 'needing renewal'}`}>{c}</span>}
+        </NavLink>
+      </li>
+    );
+  };
 
   const sidebar = (
     <nav className="flex flex-col h-full" aria-label="Main">
@@ -65,22 +87,35 @@ export default function AppLayout() {
         ) : <div><div className="text-sm font-medium truncate">{org.name}</div><div className="text-xs text-faint">{ROLE_LABELS[me!.member!.role]}</div></div>}
       </div>
       <div className="flex-1 overflow-y-auto px-2.5 pb-6">
-        <div className="eyebrow px-3 pt-3 pb-2">Workspace</div>
-        <ul className="space-y-0.5">{WORKSPACE.filter((n) => !n.perm || can(n.perm as any)).map(item)}</ul>
-        <div className="eyebrow px-3 pt-7 pb-2">More</div>
-        <ul className="space-y-0.5">{MORE.filter((n) => !n.perm || can(n.perm as any)).map(item)}</ul>
-        <div className="eyebrow px-3 pt-7 pb-2">Administration</div>
-        <ul className="space-y-0.5">{ADMIN.map(item)}</ul>
+        <ul className="space-y-0.5 pt-1">{MAIN.map(item)}</ul>
+        {GROUPS.map((g) => {
+          const items = g.items.filter((n) => !n.perm || can(n.perm as any));
+          if (!items.length) return null;
+          const here = items.some((n) => loc.pathname.startsWith(`/app/${n.to}`));
+          const open = here || !collapsed[g.id];
+          const total = items.reduce((t, n) => t + countOf(n.count), 0);
+          return (
+            <div key={g.id} className="mt-5">
+              <button type="button" onClick={() => toggle(g.id)} aria-expanded={open} aria-controls={`nav-${g.id}`} disabled={here}
+                className="w-full flex items-center gap-1.5 px-3 h-7 rounded text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-faint hover:text-ink disabled:cursor-default disabled:hover:text-faint">
+                <span className={cx('inline-block transition-transform', open && 'rotate-90')}>{Icon.chevron('w-3 h-3')}</span>
+                <span className="flex-1 text-left">{g.label}</span>
+                {!open && total > 0 && <span className="normal-case tracking-normal text-[0.75rem] tnum text-ink">{total}</span>}
+              </button>
+              {open && <ul id={`nav-${g.id}`} className="space-y-0.5 mt-0.5">{items.map(item)}</ul>}
+            </div>
+          );
+        })}
       </div>
       {me!.mode === 'memory' && <div className="mx-5 mb-5 text-xs text-faint leading-relaxed">Local development backend · <a className="link" href="/dev/mailbox" target="_blank" rel="noreferrer">dev mailbox</a></div>}
     </nav>
   );
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[15.5rem_minmax(0,1fr)]">
+    <div className="min-h-screen lg:grid lg:grid-cols-[16.5rem_minmax(0,1fr)]">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[70] btn-primary">Skip to content</a>
       <aside className="hidden lg:block border-r border-line h-screen sticky top-0">{sidebar}</aside>
-      {navOpen && <div className="lg:hidden fixed inset-0 z-40"><div className="absolute inset-0 bg-ink/30" onClick={() => setNavOpen(false)} /><aside className="absolute left-0 top-0 bottom-0 w-72 bg-canvas border-r border-line slide-in">{sidebar}</aside></div>}
+      {navOpen && <div className="lg:hidden fixed inset-0 z-40"><div className="absolute inset-0 bg-ink/30" onClick={() => setNavOpen(false)} /><aside className="absolute left-0 top-0 bottom-0 w-72 bg-canvas border-r border-line slide-in" onKeyDown={(e) => e.key === 'Escape' && setNavOpen(false)}><button type="button" className="absolute right-2 top-3.5 btn-ghost px-2" onClick={() => setNavOpen(false)} aria-label="Close navigation" autoFocus>{Icon.x()}</button>{sidebar}</aside></div>}
       <div className="min-w-0 flex flex-col">
         <header className="h-16 bg-canvas/95 backdrop-blur sticky top-0 z-30 flex items-center gap-1.5 sm:gap-3 px-4 sm:px-6 lg:px-10 border-b border-line">
           <button className="lg:hidden btn-ghost -ml-2 px-2" onClick={() => setNavOpen(true)} aria-label="Open navigation">{Icon.menu()}</button>

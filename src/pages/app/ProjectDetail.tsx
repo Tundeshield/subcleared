@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { displayReadiness, readinessReason } from '../../domain/compliance';
 import { addDays, formatDate, formatDateTime } from '../../domain/dates';
 import { api, dataChanged, useApi, useMutation } from '../../lib/api';
 import { exportCsv, exportPdf } from '../../lib/export';
@@ -228,6 +229,7 @@ function ReadinessTab({ data, focus, setFocus, onAssign, goTo }: { data: any; fo
         </div>
         {isOpen && (
           <div id={`req-${s.id}`} className="pb-5 md:pl-10">
+            <p className="text-sm mb-3"><span className="font-medium">Why: </span><span className="text-muted">{readinessReason(s.results, displayReadiness(s.readiness, s.results))}</span></p>
             <ul className="rounded-md border border-line bg-paper divide-y divide-line">
               {[...s.results].sort((a: any, b: any) => Number(b.blocking) - Number(a.blocking)).map((r: any) => {
                 const act = REVIEW.includes(r.status) && r.versionId && can('documents.review') ? <Link className="btn-quiet" to={`/app/reviews/${r.versionId}`}>Review</Link>
@@ -255,8 +257,8 @@ function ReadinessTab({ data, focus, setFocus, onAssign, goTo }: { data: any; fo
       </Toolbar>
       {rows.length === 0 ? <Empty title="No subcontractors match">Try a different search or clear the filter.</Empty> : (
         <div className="space-y-10">
-          {needs.length > 0 && <section><h2 className="text-md font-semibold flex items-center gap-2">Needs action <span className="text-muted font-normal tnum">{needs.length}</span></h2><ul className="mt-2 border-t border-line-strong">{needs.map(row)}</ul></section>}
-          {ready.length > 0 && <section><h2 className="text-md font-semibold flex items-center gap-2">Ready to work <span className="text-muted font-normal tnum">{ready.length}</span></h2><ul className="mt-2 border-t border-line-strong">{ready.map(row)}</ul></section>}
+          {needs.length > 0 && <section><h2 className="text-md font-semibold flex items-center gap-2">Needs action <span className="text-muted font-normal tnum">{needs.length}</span></h2><div className="mt-3"><div className="hidden md:grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_9rem_13rem] gap-x-4 pb-2 text-xs font-medium text-muted" aria-hidden><span className="w-7" /><span>Subcontractor</span><span>Paperwork</span><span>Status</span><span className="text-right pr-10">Next action</span></div></div><ul className="border-t border-line-strong">{needs.map(row)}</ul></section>}
+          {ready.length > 0 && <section><h2 className="text-md font-semibold flex items-center gap-2">Ready to work <span className="text-muted font-normal tnum">{ready.length}</span></h2><div className="mt-3"><div className="hidden md:grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_9rem_13rem] gap-x-4 pb-2 text-xs font-medium text-muted" aria-hidden><span className="w-7" /><span>Subcontractor</span><span>Paperwork</span><span>Status</span><span className="text-right pr-10">Next action</span></div></div><ul className="border-t border-line-strong">{ready.map(row)}</ul></section>}
           {needs.length === 0 && focus === 'all' && <p className="flex gap-2 items-center text-success"><Glyph tone="ok" />Everyone assigned to this project is ready to work.</p>}
         </div>
       )}

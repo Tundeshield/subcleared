@@ -13,7 +13,7 @@ module.exports = {
         'success-tint': v('success-tint'), 'warning-tint': v('warning-tint'), 'danger-tint': v('danger-tint'), 'info-tint': v('info-tint'),
       },
       fontFamily: {
-        sans: ['"IBM Plex Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans: ['"Inter Variable"', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
       },
       fontSize: {

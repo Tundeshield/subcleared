@@ -78,8 +78,8 @@ export default function App() {
           <Route path="team" element={<S><Team /></S>} />
           <Route path="billing" element={<S><Billing /></S>} />
           <Route path="settings" element={<Navigate to="organisation" replace />} />
-          <Route path="settings/users" element={<Navigate to="/app/team" replace />} />
-          <Route path="settings/billing" element={<Navigate to="/app/billing" replace />} />
+          <Route path="settings/users" element={<KeepQuery to="/app/team" />} />
+          <Route path="settings/billing" element={<KeepQuery to="/app/billing" />} />
           <Route path="settings/:section" element={<S><Settings /></S>} />
           <Route path="*" element={<div className="py-16"><h1 className="text-2xl font-medium">Page not found</h1><p className="text-muted mt-2">That page doesn't exist. Use the navigation to find what you need.</p></div>} />
         </Route>
@@ -90,3 +90,9 @@ export default function App() {
 }
 
 function S({ children }: { children: ReactNode }) { return <Suspense fallback={<PageLoading />}>{children}</Suspense>; }
+
+/** Old addresses (in past emails, Stripe settings and bookmarks) keep working, query string included. */
+function KeepQuery({ to }: { to: string }) {
+  const { search, hash } = useLocation();
+  return <Navigate to={`${to}${search}${hash}`} replace />;
+}

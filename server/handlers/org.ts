@@ -477,3 +477,22 @@ export async function dashboard(ctx: Ctx, input: any) {
 type DocumentVersionLite = { id: string; documentId: string; uploadedAt: string };
 
 export { addDays };
+
+/** Small numbers for the sidebar's "Work to do" group: documents waiting for a decision and renewals needing action. */
+export async function navCounts(ctx: Ctx) {
+  const data = await loadOrgData(ctx.db, ctx.org.id, ['subs', 'projects', 'assignments', 'documents', 'versions']);
+  const { visibleSubIds } = await import('./subs');
+  const visible = visibleSubIds(ctx, data);
+  const docs = new Map(data.documents.map((d) => [d.id, d]));
+  const today = todayIn(ctx.org.settings.timezone, ctx.svc.now());
+  const mine = (sid: string) => !visible || visible.has(sid);
+  const reviews = permissionsFor(ctx.member).has('documents.review')
+    ? data.versions.filter((v) => mine(v.subcontractorId) && ['submitted', 'awaiting_review', 'under_review'].includes(v.reviewStatus) && !docs.get(v.documentId)?.archived).length
+    : 0;
+  const renewals = data.versions.filter((v) => {
+    const d = docs.get(v.documentId);
+    if (!d || d.archived || d.approvedVersionId !== v.id || !v.metadata.expiryDate || !mine(v.subcontractorId)) return false;
+    return daysBetween(today, v.metadata.expiryDate) <= ctx.org.settings.expiringSoonDays;
+  }).length;
+  return { reviews, renewals };
+}

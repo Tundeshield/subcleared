@@ -81,14 +81,14 @@ export async function createCheckout(ctx: Ctx, input: any) {
     if (sub.status !== 'canceled') {
       await stripe.subscriptions.update(sub.id, { items: [{ id: sub.items.data[0].id, price }], proration_behavior: 'create_prorations', metadata: { orgId: ctx.org.id, plan } });
       await audit(ctx, { action: 'billing.plan_change_requested', entity: { type: 'organisation', id: ctx.org.id }, after: { plan, interval } });
-      return { url: `${ctx.svc.env.appUrl}/app/settings/billing?updated=1` };
+      return { url: `${ctx.svc.env.appUrl}/app/billing?updated=1` };
     }
   }
   const trialEnd = ctx.org.subscription.status === 'trialing' && ctx.org.subscription.trialEndsAt ? Math.floor(new Date(ctx.org.subscription.trialEndsAt).getTime() / 1000) : undefined;
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription', customer, line_items: [{ price, quantity: 1 }], client_reference_id: ctx.org.id,
     subscription_data: { metadata: { orgId: ctx.org.id, plan }, ...(trialEnd && trialEnd > Date.now() / 1000 + 3600 ? { trial_end: trialEnd } : {}) },
-    success_url: `${ctx.svc.env.appUrl}/app/settings/billing?checkout=success`, cancel_url: `${ctx.svc.env.appUrl}/app/settings/billing?checkout=cancelled`,
+    success_url: `${ctx.svc.env.appUrl}/app/billing?checkout=success`, cancel_url: `${ctx.svc.env.appUrl}/app/billing?checkout=cancelled`,
     allow_promotion_codes: true,
   });
   await audit(ctx, { action: 'billing.checkout_started', entity: { type: 'organisation', id: ctx.org.id }, after: { plan, interval } });
@@ -99,7 +99,7 @@ export async function createPortal(ctx: Ctx) {
   need(ctx, 'billing.manage');
   if (!ctx.org.subscription.stripeCustomerId) throw bad('There is no billing account yet. Choose a plan first.');
   const stripe = await stripeClient(ctx.svc);
-  const s = await stripe.billingPortal.sessions.create({ customer: ctx.org.subscription.stripeCustomerId, return_url: `${ctx.svc.env.appUrl}/app/settings/billing` });
+  const s = await stripe.billingPortal.sessions.create({ customer: ctx.org.subscription.stripeCustomerId, return_url: `${ctx.svc.env.appUrl}/app/billing` });
   return { url: s.url };
 }
 

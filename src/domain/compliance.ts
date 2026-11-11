@@ -41,12 +41,38 @@ export const READINESS_LABELS: Record<Readiness, string> = {
   not_evaluated: 'Not assessed yet',
 };
 
-/** What to show for readiness: when the only things in the way are submissions waiting for a decision, say "Needs review". */
-export function displayReadiness(readiness: Readiness | string, results?: { status: string; blocking?: boolean; mandatory?: boolean }[]): Readiness | 'needs_review' {
+/**
+ * What people see. The engine's result is unchanged; this only chooses the clearest label for it:
+ * - Not ready: mandatory paperwork hasn't been submitted yet.
+ * - Action required: something was rejected, has expired or is about to — someone needs to act.
+ * - Needs review: everything is in; it's waiting for a decision.
+ * - Ready: every mandatory item is approved and valid.
+ */
+export type ShownReadiness = Readiness | 'needs_review';
+export function displayReadiness(readiness: Readiness | string, results?: { status: string; blocking?: boolean; mandatory?: boolean }[]): ShownReadiness {
   if (!results || readiness === 'ready' || readiness === 'not_evaluated') return readiness as Readiness;
+  const NOT_IN = ['missing', 'not_requested', 'requested', 'overdue'];
+  const ACT = ['rejected', 'expired', 'expiring_soon'];
   const REVIEW = ['awaiting_review', 'submitted', 'review_required'];
-  const open = results.filter((r) => r.blocking || ['expiring_soon', 'rejected', 'expired', ...REVIEW].includes(r.status));
-  return open.length > 0 && open.every((r) => REVIEW.includes(r.status)) ? 'needs_review' : (readiness as Readiness);
+  if (results.some((r) => (r.mandatory ?? r.blocking) && NOT_IN.includes(r.status))) return 'not_ready';
+  if (results.some((r) => ACT.includes(r.status))) return 'action_required';
+  if (results.some((r) => REVIEW.includes(r.status))) return 'needs_review';
+  return readiness as Readiness;
+}
+
+/** One plain sentence explaining a readiness result. */
+export function readinessReason(results: { status: string; mandatory?: boolean; requirementName?: string }[], shown: ShownReadiness): string {
+  const n = (f: (r: any) => boolean) => results.filter(f).length;
+  const plural = (c: number, one: string, many: string) => `${c} ${c === 1 ? one : many}`;
+  if (shown === 'ready') return 'All mandatory paperwork is approved and valid.';
+  if (shown === 'not_evaluated') return 'No paperwork has been chosen for this project yet.';
+  if (shown === 'not_ready') {
+    const c = n((r) => r.mandatory && ['missing', 'not_requested', 'requested', 'overdue'].includes(r.status));
+    return `${plural(c, 'mandatory document hasn’t', 'mandatory documents haven’t')} been submitted.`;
+  }
+  if (shown === 'needs_review') { const c = n((r) => ['awaiting_review', 'submitted', 'review_required'].includes(r.status)); return `${plural(c, 'document has', 'documents have')} been submitted and ${c === 1 ? 'is' : 'are'} waiting for review.`; }
+  const rej = n((r) => r.status === 'rejected'), exp = n((r) => r.status === 'expired'), soon = n((r) => r.status === 'expiring_soon');
+  return [rej && `${plural(rej, 'document needs', 'documents need')} changes`, exp && `${plural(exp, 'document has', 'documents have')} expired`, soon && `${plural(soon, 'document expires', 'documents expire')} soon`].filter(Boolean).join('; ') + '.';
 }
 
 const OPEN_REQUEST = new Set(['sent', 'acknowledged', 'partially_fulfilled']);
