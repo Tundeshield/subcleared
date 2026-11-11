@@ -1,14 +1,18 @@
 {
   "name": "subcleared",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "SubCleared — subcontractor compliance and readiness platform",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "tsx watch server/dev.ts",
+    "dev:web": "VITE_AUTH_MODE=dev vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "build:dev": "VITE_AUTH_MODE=dev vite build --outDir dist-dev",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes,storage"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "license": "UNLICENSED",
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
@@ -31,6 +35,7 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.6.2",
+    "concurrently": "^10.0.7",
     "firebase-admin": "^13.10.0",
     "firebase-tools": "^15.35.0",
     "postcss": "^8.5.32",
@@ -40,5 +45,7 @@
     "typescript": "^7.0.2",
     "vite": "^5.4.21",
     "vitest": "^2.1.9"
-  }
+  },
+  "private": true,
+  "type": "module"
 }

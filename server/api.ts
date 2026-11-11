@@ -64,6 +64,8 @@ async function dispatch(svc: Services, req: ApiRequest) {
   const input = req.input ?? {};
   if (typeof action !== 'string' || action.length > 60) throw new HttpError(400, 'Unknown action');
 
+  if (action === 'public.plans') return { plans: svc.env.plans, trialDays: (await import('../src/domain/plans')).TRIAL_DAYS };
+
   if (PORTAL_ACTIONS[action]) {
     if (req.ip) await rateLimit(svc.db, `portal-ip:${req.ip}`, 600, 600, svc.now());
     return PORTAL_ACTIONS[action](svc, svc.db, input, req.ip);
