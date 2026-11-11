@@ -4,7 +4,7 @@ import { formatDate, formatDateTime } from '../../domain/dates';
 import { useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
-import { Checkbox, cx, Empty, ErrorState, FilterSelect, FormError, Glyph, humanize, PageHeader, Pagination, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
+import { Checkbox, cx, Empty, ErrorState, FilterSelect, FormError, Glyph, toneText, humanize, PageHeader, Pagination, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
 
 const STAGES: Record<string, [string, 'none' | 'progress' | 'attention' | 'blocked' | 'ok']> = {
   not_requested: ['Not requested', 'none'], requested: ['Renewal requested', 'attention'], acknowledged: ['Opened by subcontractor', 'attention'],
@@ -54,7 +54,7 @@ export default function Renewals() {
         </>} />
       <div className="flex gap-6 border-b border-line overflow-x-auto mb-6" role="tablist" aria-label="Expiry window">
         {[{ value: 'open', label: 'All open' }, ...WINDOWS, { value: 'completed', label: 'Completed' }].map((w) => (
-          <button key={w.value} role="tab" aria-selected={win === w.value} onClick={() => setWin(w.value)} className={cx('pb-3 pt-1 border-b-2 -mb-px whitespace-nowrap text-[0.9375rem]', win === w.value ? 'border-field font-medium' : 'border-transparent text-muted hover:text-charcoal')}>
+          <button key={w.value} role="tab" aria-selected={win === w.value} onClick={() => setWin(w.value)} className={cx('pb-3 pt-1 border-b-2 -mb-px whitespace-nowrap text-[0.9375rem]', win === w.value ? 'border-accent font-medium' : 'border-transparent text-muted hover:text-ink')}>
             {w.label}{counts[w.value] !== undefined && <span className="ml-1.5 text-faint tnum font-normal">{counts[w.value]}</span>}
           </button>
         ))}
@@ -86,7 +86,7 @@ export default function Renewals() {
                     <td className="td"><Link to={`/app/subcontractors/${r.subcontractorId}`} className="hover:underline underline-offset-4">{r.subcontractor}</Link>{!r.contacts.length && <div className="text-sm font-medium flex items-center gap-1.5 mt-0.5"><Glyph tone="blocked" className="w-3 h-3" />No contact on file</div>}</td>
                     <td className="td text-sm text-muted">{r.projects.map((p: any) => p.name).join(', ') || '—'}</td>
                     <td className="td whitespace-nowrap tnum"><div className={cx(r.days <= 14 && 'font-medium')}>{formatDate(r.expiryDate)}</div><div className="text-sm text-muted">{r.days < 0 ? `${-r.days} days ago` : r.days === 0 ? 'Today' : `In ${r.days} days`}</div></td>
-                    <td className="td"><span className={cx('inline-flex items-center gap-2 text-sm', tone === 'ok' && 'text-field', tone === 'blocked' && 'font-medium')}><Glyph tone={tone} className="w-3.5 h-3.5" />{label}</span>{r.request && <div className="text-xs text-faint mt-1">{r.request.contactEmail} · {formatDateTime(r.request.createdAt)}</div>}</td>
+                    <td className="td"><span className={cx('inline-flex items-center gap-2 text-sm', toneText(tone))}><Glyph tone={tone} className="w-3.5 h-3.5" />{label}</span>{r.request && <div className="text-xs text-faint mt-1">{r.request.contactEmail} · {formatDateTime(r.request.createdAt)}</div>}</td>
                     <td className="td text-right whitespace-nowrap">{r.replacementVersionId && r.stage === 'replacement_received' ? <Link className="btn-secondary btn-sm" to={`/app/reviews/${r.replacementVersionId}`}>Review replacement</Link> : canSelect ? <button className="btn-quiet" onClick={async () => { await request.run({ versionIds: [r.versionId] }); toast('Renewal requested'); }}>Request renewal</button> : null}</td>
                   </tr>
                 );

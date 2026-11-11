@@ -1,3 +1,4 @@
+import { billingCurrency } from '../../src/domain/locale';
 import type Stripe from 'stripe';
 import { getPlan } from '../../src/domain/plans';
 import type { Assignment, Member, Organisation, Project, Subcontractor, Subscription } from '../../src/domain/types';
@@ -64,7 +65,7 @@ export async function createCheckout(ctx: Ctx, input: any) {
   need(ctx, 'billing.manage');
   const plan = oneOf(input.plan, ctx.svc.env.plans.map((p) => p.id), 'Plan');
   const interval = oneOf(input.interval, ['month', 'year'] as const, 'Billing interval');
-  const price = ctx.svc.env.priceId(plan, interval, ctx.org.settings.currency);
+  const price = ctx.svc.env.priceId(plan, interval, billingCurrency(ctx.org.settings.currency));
   if (!price) throw new HttpError(503, `No Stripe price configured for ${plan} (${interval}ly).`, 'billing_unconfigured');
   const stripe = await stripeClient(ctx.svc);
   let customer = ctx.org.subscription.stripeCustomerId;

@@ -7,8 +7,8 @@ import { api, dataChanged, useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
 import {
-  Callout, Checkbox, cx, Dialog, Drawer, Empty, ErrorState, Field, FilterSelect, FormError, humanize, PageHeader, Pagination, ReadinessBadge, SampleTag,
-  SearchInput, Skeleton, SortHeader, sortRows, Spinner, Toolbar, usePaged, useToast,
+  Callout, Checkbox, cx, Dialog, Drawer, Empty, ErrorState, Field, FilterSelect, FormError, Glyph, humanize, PageHeader, Pagination, ReadinessBadge, SampleTag,
+  SearchInput, Skeleton, SortHeader, sortRows, Spinner, toneText, Toolbar, usePaged, useToast,
 } from '../../ui';
 
 const READINESS_FILTERS = [{ value: 'attention', label: 'Requiring attention' }, { value: 'not_ready', label: 'Not ready' }, { value: 'action_required', label: 'Action required' }, { value: 'ready', label: 'Ready' }, { value: 'not_evaluated', label: 'Not evaluated' }];
@@ -22,6 +22,7 @@ export default function Subcontractors() {
   const readiness = params.get('readiness') ?? '';
   const [status, setStatus] = useState('');
   const [trade, setTrade] = useState('');
+  const [issue, setIssue] = useState(params.get('issue') ?? '');
   const [sort, setSort] = useState<[string, 1 | -1]>(['legalName', 1]);
   const [open, setOpen] = useState(params.get('new') === '1');
   const [importing, setImporting] = useState(false);
@@ -31,17 +32,17 @@ export default function Subcontractors() {
   const setReadiness = (v: string) => { const p = new URLSearchParams(params); if (v) p.set('readiness', v); else p.delete('readiness'); setParams(p); };
   const rows = useMemo(() => sortRows((data?.items ?? []).filter((s: any) =>
     (!readiness || (readiness === 'attention' ? ['not_ready', 'action_required'].includes(s.readiness) : s.readiness === readiness)) &&
-    (status ? s.status === status : s.status !== 'archived') && (!trade || s.trade === trade) &&
-    `${s.legalName} ${s.tradingName ?? ''} ${s.trade} ${s.contact?.email ?? ''} ${s.contact?.name ?? ''} ${s.tags.join(' ')}`.toLowerCase().includes(q.toLowerCase())), sort), [data, q, readiness, status, trade, sort]);
+    (status ? s.status === status : s.status !== 'archived') && (!trade || s.trade === trade) && (!issue || (issue === 'outstanding' ? (s.issues?.missing ?? 0) + (s.issues?.requested ?? 0) + (s.issues?.rejected ?? 0) > 0 : s.issues?.[issue] > 0)) &&
+    `${s.legalName} ${s.tradingName ?? ''} ${s.trade} ${s.contact?.email ?? ''} ${s.contact?.name ?? ''} ${s.tags.join(' ')}`.toLowerCase().includes(q.toLowerCase())), sort), [data, q, readiness, status, trade, issue, sort]);
   const paged = usePaged(rows, 25);
-  useEffect(() => setSel([]), [readiness, status, trade, q]);
+  useEffect(() => setSel([]), [readiness, status, trade, issue, q]);
   const trades = [...new Set((data?.items ?? []).map((s: any) => s.trade))].sort() as string[];
   const allOnPage = paged.slice.length > 0 && paged.slice.every((s: any) => sel.includes(s.id));
   const cols = [{ key: 'legalName', label: 'Subcontractor' }, { key: 'trade', label: 'Trade' }, { key: 'status', label: 'Status' }, { key: 'readiness', label: 'Readiness' }, { key: 'projects', label: 'Projects' }, { key: 'outstanding', label: 'Outstanding items' }, { key: 'contactName', label: 'Contact' }, { key: 'contactEmail', label: 'Email' }];
-  const flat = (list: any[]) => list.map((r) => ({ ...r, contactName: r.contact?.name, contactEmail: r.contact?.email, readiness: humanize(r.readiness) }));
+  const flat = (list: any[]) => list.map((r) => ({ ...r, contactName: r.contact?.name, contactEmail: r.contact?.email, readiness: humanize(r.readiness), outstanding: subIssues(r).join('; ') }));
   return (
     <div>
-      <PageHeader title="Subcontractors" description="One record per company, shared across every project. Readiness shown here is each company's position on its weakest project."
+      <PageHeader title="Subcontractors" description="One record per company, shared across every project. Readiness is always worked out per project — open a company to see where it is and isn't ready."
         actions={<>
           {can('subs.manage') && <button className="btn-secondary" onClick={() => setImporting(true)}>Import CSV</button>}
           {can('subs.manage') && <button className="btn-primary" onClick={() => setOpen(true)}>Add subcontractor</button>}
@@ -56,6 +57,7 @@ export default function Subcontractors() {
         <SearchInput value={q} onChange={setQ} placeholder="Search company, contact, tag" className="w-full sm:w-72" />
         <FilterSelect label="Readiness" value={readiness} onChange={setReadiness} options={READINESS_FILTERS} />
         <FilterSelect label="Status" all="Current" value={status} onChange={setStatus} options={['onboarding', 'active', 'attention', 'suspended', 'archived'].map((s) => ({ value: s, label: s === 'attention' ? 'Attention required' : humanize(s) }))} />
+ <FilterSelect label="Issue" value={issue} onChange={setIssue} options={[{ value: 'outstanding', label: 'Anything outstanding' }, { value: 'missing', label: 'Missing documents' }, { value: 'requested', label: 'Requested, not received' }, { value: 'expired', label: 'Expired documents' }, { value: 'rejected', label: 'Rejected documents' }, { value: 'review', label: 'Awaiting review' }, { value: 'expiring', label: 'Expiring soon' }]} />
         {trades.length > 1 && <FilterSelect label="Trade" value={trade} onChange={setTrade} options={trades.map((t) => ({ value: t, label: t }))} />}
       </Toolbar>
       {loading && !data ? <Skeleton /> : error ? <ErrorState error={error} onRetry={reload} /> : rows.length === 0 ? (
@@ -69,18 +71,17 @@ export default function Subcontractors() {
               <thead><tr>
                 <th className="th w-10"><Checkbox checked={allOnPage} onChange={(v) => setSel(v ? [...new Set([...sel, ...paged.slice.map((s: any) => s.id)])] : sel.filter((id) => !paged.slice.some((s: any) => s.id === id)))} label={<span className="sr-only">Select all on page</span>} /></th>
                 <SortHeader label="Subcontractor" k="legalName" sort={sort} setSort={setSort} /><th className="th">Primary contact</th>
-                <SortHeader label="Readiness" k="readiness" sort={sort} setSort={setSort} /><SortHeader label="Projects" k="projects" sort={sort} setSort={setSort} className="text-right" />
-                <SortHeader label="Outstanding" k="outstanding" sort={sort} setSort={setSort} className="text-right" /><SortHeader label="Status" k="status" sort={sort} setSort={setSort} />
+                <SortHeader label="Project readiness" k="readiness" sort={sort} setSort={setSort} />
+                <SortHeader label="Issues" k="outstanding" sort={sort} setSort={setSort} /><SortHeader label="Status" k="status" sort={sort} setSort={setSort} />
                 <SortHeader label="Last activity" k="lastActivityAt" sort={sort} setSort={setSort} />
               </tr></thead>
               <tbody>{paged.slice.map((s: any) => (
                 <tr key={s.id} className={cx('tr-link', sel.includes(s.id) && 'bg-raised/60')} onClick={() => nav(`/app/subcontractors/${s.id}`)}>
                   <td className="td" onClick={(e) => e.stopPropagation()}><Checkbox checked={sel.includes(s.id)} onChange={(v) => setSel(v ? [...sel, s.id] : sel.filter((x) => x !== s.id))} label={<span className="sr-only">Select {s.legalName}</span>} /></td>
-                  <td className="td"><div className="font-medium">{s.legalName} {s.tags.includes('Sample') && <SampleTag />}</div><div className="text-sm text-faint">{[s.trade, s.tradingName && `t/a ${s.tradingName}`].filter(Boolean).join(' · ')}</div></td>
+                  <td className="td"><div className="font-medium">{s.legalName}</div><div className="text-sm text-faint">{[s.trade, s.tradingName && `t/a ${s.tradingName}`].filter(Boolean).join(' · ')}{s.tags.includes('Sample') && <> <SampleTag /></>}</div></td>
                   <td className="td">{s.contact ? <><div>{s.contact.name}</div><div className="text-sm text-faint truncate max-w-[15rem]" title={s.contact.email}>{s.contact.email}</div></> : <span className="text-faint">No contact</span>}</td>
-                  <td className="td"><ReadinessBadge value={s.readiness} size="sm" /></td>
-                  <td className="td text-right tnum">{s.projects}</td>
-                  <td className="td text-right tnum">{s.outstanding || <span className="text-faint">—</span>}</td>
+                  <td className="td"><ProjectReadiness s={s} /></td>
+                  <td className="td text-sm">{s.projects === 0 ? <span className="text-faint">—</span> : subIssues(s).length ? subIssues(s).join(' · ') : <span className="text-faint">None</span>}</td>
                   <td className="td text-sm">{s.status === 'attention' ? 'Attention required' : humanize(s.status)}</td>
                   <td className="td text-muted whitespace-nowrap">{formatDate(s.lastActivityAt)}</td>
                 </tr>
@@ -168,12 +169,12 @@ export function SubDrawer({ open, onClose, sub }: { open: boolean; onClose: () =
                 <input className="input" type="email" placeholder="Email" value={c.email} onChange={(e) => setContact(i, 'email', e.target.value)} aria-label="Contact email" />
                 <input className="input" type="tel" placeholder="Telephone" value={c.phone ?? ''} onChange={(e) => setContact(i, 'phone', e.target.value)} aria-label="Contact telephone" />
               </div>
-              {touched && badEmail(c.email) && <p className="hint text-charcoal font-medium">That email address doesn't look right.</p>}
+              {touched && badEmail(c.email) && <p className="hint text-ink font-medium">That email address doesn't look right.</p>}
               <div className="flex flex-wrap gap-x-5 gap-y-2 mt-3 items-center">
                 {CONTACT_ROLES.map(([r, l]) => <Checkbox key={r} checked={c.roles.includes(r)} onChange={(v) => setContact(i, 'roles', v ? [...c.roles, r] : c.roles.filter((x: string) => x !== r))} label={<span className="text-sm">{l}</span>} />)}
               </div>
               <div className="flex gap-4 mt-2.5"><Checkbox checked={!!c.primary} onChange={(v) => setContact(i, 'primary', v)} label={<span className="text-sm">Primary contact</span>} />
-                {f.contacts.length > 1 && <button className="btn-quiet text-charcoal" onClick={() => set('contacts', f.contacts.filter((_: any, j: number) => j !== i))}>Remove contact</button>}</div>
+                {f.contacts.length > 1 && <button className="btn-quiet text-ink" onClick={() => set('contacts', f.contacts.filter((_: any, j: number) => j !== i))}>Remove contact</button>}</div>
             </div>
           ))}</div>
           <button className="btn-secondary btn-sm mt-5" onClick={() => set('contacts', [...f.contacts, { name: '', email: '', phone: '', roles: ['submission'], primary: false }])}>Add another contact</button>
@@ -212,7 +213,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
       {result ? <Callout tone="ok" title={`${result.created} imported`}>{result.skipped.length ? `${result.skipped.length} skipped because they're already in your directory. ` : ''}{result.errors.length ? `${result.errors.length} rows had problems and were left out.` : ''}</Callout> : preview ? (
         <div className="space-y-4">
           <p>{preview.preview.length} ready to import{preview.skipped.length ? `, ${preview.skipped.length} already in your directory` : ''}{preview.errors.length ? `, ${preview.errors.length} with problems` : ''}.</p>
-          {preview.errors.length > 0 && <div className="border-l-2 border-charcoal pl-3 text-sm max-h-32 overflow-y-auto space-y-1">{preview.errors.map((e: any, i: number) => <div key={i}>Line {e.line}: {e.message}</div>)}</div>}
+          {preview.errors.length > 0 && <div className="border-l-2 border-ink pl-3 text-sm max-h-32 overflow-y-auto space-y-1">{preview.errors.map((e: any, i: number) => <div key={i}>Line {e.line}: {e.message}</div>)}</div>}
           <div className="max-h-64 overflow-auto"><table className="table"><thead><tr><th className="th">Company</th><th className="th">Trade</th><th className="th">Contact</th></tr></thead><tbody>{preview.preview.map((r: any) => <tr key={r.legalName}><td className="td py-2.5">{r.legalName}</td><td className="td py-2.5">{r.trade}</td><td className="td py-2.5 text-muted">{r.contactEmail}</td></tr>)}</tbody></table></div>
           <button className="btn-ghost btn-sm" onClick={() => setPreview(null)}>Back</button>
         </div>
@@ -229,4 +230,16 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
       <div className="mt-3"><FormError error={error} /></div>
     </Dialog>
   );
+}
+
+function subIssues(s: any): string[] {
+  const i = s.issues ?? {};
+  return ([['missing', 'missing'], ['requested', 'requested'], ['expired', 'expired'], ['rejected', 'rejected'], ['review', 'awaiting review'], ['expiring', 'expiring soon']] as const)
+    .filter(([k]) => i[k] > 0).map(([k, l]) => `${i[k]} ${l}`);
+}
+
+function ProjectReadiness({ s }: { s: any }) {
+  if (!s.projects) return <span className="text-sm text-faint">Not on a project</span>;
+  const tone = s.readyOn === s.projects ? 'ok' : s.readiness === 'not_evaluated' ? 'none' : s.readyOn === 0 ? 'blocked' : 'attention';
+  return <span className={cx('inline-flex items-center gap-2 text-sm whitespace-nowrap', toneText(tone))}><Glyph tone={tone} className="w-[13px] h-[13px]" />Ready on {s.readyOn} of {s.projects} project{s.projects === 1 ? '' : 's'}</span>;
 }

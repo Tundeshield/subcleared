@@ -74,7 +74,7 @@ export default function DocumentDetail() {
         </div>
         <div className="space-y-10 min-w-0">
           <section>
-            <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Confirmed details</h2>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Confirmed details</h2>
             <KeyValue items={metadataRows(current.metadata)} />
             <div className="mt-4 space-y-1.5">
               <VerificationLabel value={current.verification} />
@@ -84,16 +84,16 @@ export default function DocumentDetail() {
             </div>
           </section>
           <section>
-            <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Versions</h2>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Versions</h2>
             <ol>{versions.map((v: any) => (
               <li key={v.id}><button onClick={() => setSelected(v.id)} aria-current={v.id === current.id} className={cx('w-full text-left py-3 border-b border-line flex items-start justify-between gap-3 hover:bg-raised/50 -mx-2 px-2 rounded', v.id === current.id && 'bg-raised/70')}>
-                <span className="min-w-0"><span className="block">Version {v.versionNumber}{v.id === d.approvedVersionId && <span className="text-field text-sm"> · in force</span>}</span><span className="block text-sm text-faint truncate">{v.fileName} · {formatDateTime(v.uploadedAt)} · {v.uploadedBy.name}</span></span>
+                <span className="min-w-0"><span className="block">Version {v.versionNumber}{v.id === d.approvedVersionId && <span className="text-success text-sm"> · in force</span>}</span><span className="block text-sm text-faint truncate">{v.fileName} · {formatDateTime(v.uploadedAt)} · {v.uploadedBy.name}</span></span>
                 <DocStatus value={v.reviewStatus} />
               </button></li>
             ))}</ol>
           </section>
           <section>
-            <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Review history</h2>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Review history</h2>
             {data.reviews.length === 0 ? <p className="text-muted mt-4">Not reviewed yet.</p> : <ol>{data.reviews.map((r: any) => (
               <li key={r.id} className="py-3.5 border-b border-line">
                 <div><span className="font-medium">{humanize(r.decision)}</span> <span className="text-muted">by {r.reviewerName} · version {versions.find((v: any) => v.id === r.versionId)?.versionNumber}</span></div>

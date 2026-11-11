@@ -108,7 +108,28 @@ function base(market: Market): Starter[] {
   ] as Starter[];
 }
 
-export function starterRequirements(market: Market = 'OTHER') { return base(market); }
+/** Neutral wording for countries without a tailored library: no national forms, schemes or assumed limits. */
+const NEUTRAL: Record<string, Partial<Starter>> = {
+  gl: { name: 'Public liability insurance', description: 'Insurance certificate or policy schedule showing current public liability cover.', instructions: 'Upload your current insurance certificate or policy schedule. It must show the insurer, policy number, policy dates and limits.' },
+  wc: { name: "Workers' compensation or employers' liability insurance", description: 'Evidence of the workplace injury cover required where the work takes place.', instructions: 'Upload your current certificate, or evidence of an exemption where one applies.' },
+  auto: { name: 'Vehicle insurance' },
+  umbrella: { name: 'Excess liability insurance' },
+  ai: { name: 'Additional insured or indemnity to principal', description: 'Endorsement extending cover to the main contractor (and client, where required) when the contract asks for it.', defaultMandatory: false },
+  biz: { name: 'Business registration', category: 'Registration', description: 'Company registration, trade licence or equivalent showing the business may operate where the project is.', documentType: 'Registration', expiryRequired: false, renewal: 'none' },
+  elec: { name: 'Electrical licence or registration', category: 'Registration', description: 'The licence or competent-person registration required for electrical work where the project is.', documentType: 'Registration' },
+  plumb: { name: 'Plumbing or gas licence or registration', category: 'Registration', description: 'The licence or registration required for plumbing or gas work where the project is.', documentType: 'Registration' },
+  safety: { name: 'Health and safety accreditation', description: 'A recognised health and safety accreditation or a written safety management system.' },
+  training: { name: 'Site safety training records', description: 'Confirm every worker attending site holds the safety training or card required locally.' },
+  rams: { name: 'Risk assessment and method statement', description: 'Project-specific risk assessment and method statement for the scope of work.', documentType: 'RAMS' },
+  tax: { name: 'Tax registration details', kind: 'document', description: 'The tax registration or withholding form needed to pay the subcontractor.', documentType: 'Tax form', reviewRequired: true },
+};
+
+export function starterRequirements(market: Market = 'OTHER', currency?: string) {
+  const list = base(market);
+  if (market !== 'OTHER') return list;
+  // Coverage amounts differ by country and contract, so the neutral library sets none; organisations add their own limits.
+  return list.map((r) => ({ ...r, ...NEUTRAL[r.key], criteria: (r.criteria ?? []).filter((c) => c.type !== 'min_amount').map((c) => (currency ? { ...c, currency } : c)) }));
+}
 /** @deprecated use starterRequirements(market) */
 export const STARTER_REQUIREMENTS: Starter[] = base('US');
 

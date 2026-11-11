@@ -26,16 +26,16 @@ export default function Compliance() {
       </Toolbar>
       {data.projects.length === 0 || data.subcontractors.length === 0 ? <Empty title="Nothing to show yet">Assign subcontractors to active projects to see the matrix.</Empty> : (
         <div className="grid xl:grid-cols-[1fr_22rem] gap-10 items-start">
-          <div className="overflow-auto max-h-[72vh] border-t border-charcoal/80">
+          <div className="overflow-auto max-h-[72vh] border-t border-line-strong">
             <table className="border-separate border-spacing-0">
-              <thead><tr><th className="th sticky left-0 top-0 z-[3] min-w-[15rem]">Subcontractor</th>{data.projects.map((p: any) => <th key={p.id} className="th sticky top-0 z-[2] min-w-[9.5rem] whitespace-normal align-bottom"><Link to={`/app/projects/${p.id}`} className="hover:text-charcoal">{p.name}</Link></th>)}</tr></thead>
+              <thead><tr><th className="th sticky left-0 top-0 z-[3] min-w-[15rem]">Subcontractor</th>{data.projects.map((p: any) => <th key={p.id} className="th sticky top-0 z-[2] min-w-[9.5rem] whitespace-normal align-bottom"><Link to={`/app/projects/${p.id}`} className="hover:text-ink">{p.name}</Link></th>)}</tr></thead>
               <tbody>{subs.map((s: any) => (
                 <tr key={s.id}>
-                  <td className="td sticky left-0 bg-ivory z-[1]"><Link to={`/app/subcontractors/${s.id}`} className="font-medium hover:underline underline-offset-4">{s.legalName}</Link><div className="text-sm text-faint">{s.trade}</div></td>
+                  <td className="td sticky left-0 bg-canvas z-[1]"><Link to={`/app/subcontractors/${s.id}`} className="font-medium hover:underline underline-offset-4">{s.legalName}</Link><div className="text-sm text-faint">{s.trade}</div></td>
                   {data.projects.map((p: any) => {
                     const k = `${p.id}__${s.id}`; const c = data.cells[k];
                     return <td key={p.id} className="td py-2.5 px-2">{c ? (
-                      <button onClick={() => setFocus(k)} aria-pressed={focus === k} className={cx('w-full rounded px-2.5 py-2 text-sm text-left flex items-center gap-2 hover:bg-raised', focus === k && 'bg-raised ring-1 ring-charcoal/40', c.readiness === 'ready' && 'text-field')}>
+                      <button onClick={() => setFocus(k)} aria-pressed={focus === k} className={cx('w-full rounded px-2.5 py-2 text-sm text-left flex items-center gap-2 hover:bg-raised', focus === k && 'bg-raised ring-1 ring-ink/40', c.readiness === 'ready' && 'text-accent')}>
                         <Glyph tone={TONE[c.readiness]} className="w-3.5 h-3.5" /><span>{(READINESS_LABELS as any)[c.readiness]}{c.blocking.length ? <span className="text-faint"> · {c.blocking.length}</span> : ''}</span>
                       </button>
                     ) : <span className="block text-center text-line-strong text-sm" aria-label="Not assigned">—</span>}</td>;

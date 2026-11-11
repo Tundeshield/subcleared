@@ -10,12 +10,14 @@ Stack: **React 18 + TypeScript + Vite + Tailwind** (frontend), **Netlify Functio
 
 ## Brand and design system
 
-- **Palette — three colours only.** Warm Ivory `#F6F5F0` (canvas), Deep Charcoal `#252B27` (text, structure), Field Green `#52745F` (primary actions, active navigation, positive readiness, progress). Every other tone is one of these at a set opacity. There are no red/amber/blue status colours: status is carried by wording plus a small glyph (filled = done, half = in progress, outline = attention, solid "!" = blocking), so it never relies on colour alone.
-- **Type.** IBM Plex Sans (400/500/600, self-hosted via `@fontsource`), Plex Mono for codes. Plex was kept after evaluation: it is legible in dense tables at 15–16 px, has an engineered, construction-appropriate character, and avoids the generic feel of Inter.
-- **Mark.** A raised site barrier — a post with a boom lifting clear — meaning "the way is clear to work". No shields, hard hats or checkmarks. Implemented as the `Mark`/`Logo` components and `public/favicon.svg`.
-- **Tokens and components** live in `tailwind.config.cjs`, `src/styles.css` and `src/ui/index.tsx` (buttons, inputs, tables, tabs, drawers, dialogs, toasts, status glyphs, filters, pagination, empty states, progress, page headers). Drawers are used for contextual editing; dialogs only for short decisions.
-- **Markets.** Organisations are US, UK or other (`settings.market`), which sets terminology (general/principal contractor, COI/insurance certificate, licence/license), date format, currency (USD/GBP pricing and Stripe prices) and a market-specific starter requirement library. Everything stays editable — the library is a starting point, not a legal standard.
-- **Sample data.** Settings → Sample data loads a labelled US or UK set (Austin, Dallas, Chicago / London, Manchester, Birmingham) through the real handlers, so readiness, reviews and renewals are genuinely computed. It can be removed in one step; sample subcontractors never receive email.
+- **Design kit:** live at `/design` (built from the real components) and written up in `docs/design-system.md`. UX audit and information architecture: `docs/ux-audit.md`.
+- **Colour — "Graphite & Deep Cyan".** Cool neutral surfaces, one deep cyan accent (#155E75) for actions, links, focus and active navigation, and four restrained status colours (success #1E784A, warning #9B5800, danger #B22218, info #295999) that always appear with an icon and words. Two other directions were evaluated and rejected; reasons are on `/design`.
+- **Type:** IBM Plex Sans (400/500/600) plus Plex Mono for references, chosen after comparing Inter, Geist, Manrope and DM Sans.
+- **Mark:** a site barrier with its arm raised ("clear to start work"); wordmark, compact symbol and favicon.
+- **Navigation:** Workspace (Overview, Projects, Subcontractors, Documents, Reviews, Renewals, Reports) · Configuration (Requirements & templates) · Administration (Team and permissions, Settings, Billing).
+- **Project page:** one Readiness view with a readiness strip whose counts filter the list, a concise issue summary and a specific next action per subcontractor, and every blocking requirement linked to its review, document or request.
+- **Any country:** set-up offers a range of countries that propose a date format, currency and timezone (all editable). US and UK organisations get tailored terminology and starter libraries; everyone else gets neutral wording with no assumed national forms or coverage limits. Subscriptions bill in GBP or USD.
+- **Sample data:** Settings → Sample data loads a labelled set through the real handlers; it can be removed in one step and sample contacts never receive email.
 
 ---
 
@@ -42,7 +44,7 @@ Stack: **React 18 + TypeScript + Vite + Tailwind** (frontend), **Netlify Functio
 | Audit | Append-only events for every meaningful action with actor, source, IP, before/after |
 | Search | Global ⌘K search across subcontractors, contacts, projects, documents, reference numbers, requirements |
 | Billing | Stripe Checkout, plan switching with proration, customer portal, webhook-driven subscription state, invoice history, 14-day trial, server-enforced plan limits (subcontractors, projects, users). Plans configurable via `PLANS_JSON` |
-| Design | Light, three-colour brand system (see above); 4 text sizes saved per user; open layouts with tables for operational data; empty, loading and error states throughout; responsive from 390 px |
+| Design | Light "Graphite & Deep Cyan" design system (see above); 4 text sizes saved per user; open layouts with tables for operational data; empty, loading and error states throughout; responsive from 390 px |
 
 ### Not completed / known limitations — read before launch
 
@@ -83,7 +85,7 @@ Per organisation `orgs/{orgId}/…`: `members`, `invitations`, `projects`, `subc
 
 ### Tests performed
 
-- `npm test` — **51 passing** (Vitest), including US/UK market setup and sample data:
+- `npm test` — **52 passing** (Vitest), including US, UK and international set-up and sample data:
   - Compliance engine: missing ≠ compliant, review required before counting, optional never blocks, expiring window, expired, replacement pending keeps approval in force, uploaded-after-expiry, rejection reasons, per-project readiness, project-scoped documents, N/A with actor, suspended, criteria change after approval (blocking and non-blocking), requested/overdue, type applicability, rule snapshots, declarations, timezone-aware "today", reminder de-duplication.
   - API end to end (real handlers, in-memory DB): unauthenticated/unverified rejection, **tenant isolation**, role enforcement, PM scoping, deactivation, last-owner protection, full request → portal upload → review → readiness → notifications → audit → history → report flow, multi-project readiness, **two reviewers racing**, malicious/disguised/oversized uploads, versioning & supersession, link expiry, revocation, suspension killing live sessions, forged tokens, email codes, reminders sent once / retried after failure / stopped on archive, template versioning, requirement criteria changes, CSV import, plan limits after trial.
   - File safety, permissions, CSV parsing.

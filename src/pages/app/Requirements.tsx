@@ -24,7 +24,7 @@ export default function Requirements() {
   const byCat = useMemo(() => { const m = new Map<string, any[]>(); for (const r of reqs) m.set(r.category, [...(m.get(r.category) ?? []), r]); return [...m.entries()]; }, [reqs]);
   return (
     <div>
-      <PageHeader title="Requirements" description="What subcontractors must provide. Templates group requirements for a type of work; each project copies what it needs and can adjust it. Every change is versioned, so past decisions keep the rules they were made under."
+      <PageHeader title="Requirements &amp; templates" description="What subcontractors must provide. Templates group requirements for a type of work; each project copies what it needs and can adjust it. Every change is versioned, so past decisions keep the rules they were made under."
         actions={editable && (tab === 'library' ? <button className="btn-primary" onClick={() => setEdit({})}>New requirement</button> : <button className="btn-primary" onClick={() => setTpl({ items: [] })}>New template</button>)} />
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'library', label: 'Requirement library', count: data?.requirements.length }, { value: 'templates', label: 'Templates', count: data?.templates.length }]} />
       <div className="mt-8">
@@ -34,9 +34,9 @@ export default function Requirements() {
             {reqs.length === 0 ? <Empty title={data.requirements.length ? 'No requirements match' : 'No requirements yet'} action={editable && !data.requirements.length ? <button className="btn-primary" onClick={() => setEdit({})}>Create a requirement</button> : undefined} /> : (
               <div className="space-y-12">{byCat.map(([cat, items]) => (
                 <section key={cat}>
-                  <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">{cat}</h2>
+                  <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">{cat}</h2>
                   <ul>{items.map((r: any) => (
-                    <li key={r.id} className={cx('py-5 border-b border-line grid md:grid-cols-[1fr_auto] gap-x-8 gap-y-3', highlight === r.id && 'bg-field/[0.05] -mx-3 px-3 rounded', !r.active && 'opacity-60')}>
+                    <li key={r.id} className={cx('py-5 border-b border-line grid md:grid-cols-[1fr_auto] gap-x-8 gap-y-3', highlight === r.id && 'bg-accent/[0.05] -mx-3 px-3 rounded', !r.active && 'opacity-60')}>
                       <div className="min-w-0">
                         <div className="font-medium">{r.name}{!r.active && <span className="text-sm text-faint font-normal ml-2">Inactive</span>}</div>
                         <p className="text-muted mt-1 max-w-2xl">{r.description}</p>
@@ -62,7 +62,7 @@ export default function Requirements() {
           </>
         ) : (
           data.templates.length === 0 ? <Empty title="No templates yet" action={editable ? <button className="btn-primary" onClick={() => setTpl({ items: [] })}>Create a template</button> : undefined}>Templates are reusable sets of requirements for a type of work.</Empty> : (
-            <ul className="border-t border-charcoal/80">{data.templates.map((t: any) => (
+            <ul className="border-t border-line-strong">{data.templates.map((t: any) => (
               <li key={t.id} className={cx('py-6 border-b border-line grid md:grid-cols-[18rem_1fr_auto] gap-x-10 gap-y-3', !t.active && 'opacity-60')}>
                 <div><div className="font-medium">{t.name}</div><p className="text-sm text-muted mt-1">{t.description}</p><p className="text-xs text-faint mt-2">Version {t.version} · updated {formatDate(t.updatedAt)}{!t.active && ' · inactive'}</p></div>
                 <ul className="text-sm grid sm:grid-cols-2 gap-x-6 gap-y-1">{t.items.map((it: any) => { const r = data.requirements.find((x: any) => x.id === it.requirementId); return <li key={it.requirementId} className="flex justify-between gap-3"><span className="truncate">{r?.name ?? 'Removed requirement'}</span><span className="text-faint shrink-0">{it.mandatory ? 'Mandatory' : 'Optional'}</span></li>; })}</ul>

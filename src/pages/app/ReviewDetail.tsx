@@ -82,7 +82,7 @@ export default function ReviewDetail() {
         <div className="space-y-10 min-w-0">
           {data.requirement && (
             <section>
-              <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Against the requirement <span className="text-sm text-faint font-normal">version {data.requirement.version}</span></h2>
+              <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Against the requirement <span className="text-sm text-faint font-normal">version {data.requirement.version}</span></h2>
               <p className="text-muted mt-3">{data.requirement.description}</p>
               <ul className="mt-4 space-y-2.5">
                 {data.requirement.expiryRequired && <li className="flex gap-2.5 items-start"><Glyph tone={missingExpiry ? 'blocked' : expired ? 'attention' : 'ok'} className="w-4 h-4 mt-0.5" /><span>Expiry date recorded{expired ? ' — already expired' : ''}</span></li>}
@@ -103,7 +103,7 @@ export default function ReviewDetail() {
 
           {(v.extraction.status !== 'not_configured' || proposed.length > 0) && (
             <section>
-              <div className="flex items-end justify-between gap-3 pb-3 border-b border-charcoal/80">
+              <div className="flex items-end justify-between gap-3 pb-3 border-b border-line-strong">
                 <div><h2 className="text-lg font-semibold">Extracted from the document</h2><p className="text-sm text-muted mt-0.5">{v.extraction.status === 'completed' ? `Read automatically by ${v.extraction.model}. Nothing becomes official until you confirm it.` : v.extraction.status === 'failed' ? 'The document couldn’t be read automatically — enter the details below.' : 'Reading the document…'}</p></div>
                 {proposed.length > 0 && pending && <button className="btn-secondary btn-sm" onClick={applyProposed}>Use these values</button>}
               </div>
@@ -117,12 +117,12 @@ export default function ReviewDetail() {
           )}
 
           <section>
-            <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Confirmed details</h2>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Confirmed details</h2>
             <p className="text-sm text-muted mt-3">These become the official record when you decide.</p>
             <div className="mt-5 grid sm:grid-cols-2 gap-x-5 gap-y-4">
               {data.metadataFields.map((f: any) => (
                 <Field key={f.key} label={f.label} required={f.key === 'expiryDate' && data.requirement?.expiryRequired}>
-                  <input className={cx('input', fields[f.key] && fields[f.key].confidence < 0.7 && 'border-charcoal')} type={f.type === 'date' ? 'date' : 'text'} value={meta[f.key] ?? ''} onChange={(e) => setM(f.key, e.target.value)} disabled={!pending} />
+                  <input className={cx('input', fields[f.key] && fields[f.key].confidence < 0.7 && 'border-ink')} type={f.type === 'date' ? 'date' : 'text'} value={meta[f.key] ?? ''} onChange={(e) => setM(f.key, e.target.value)} disabled={!pending} />
                 </Field>
               ))}
               {data.valueFields.map((f: any) => f.type === 'amount' ? (
@@ -135,7 +135,7 @@ export default function ReviewDetail() {
           </section>
 
           {pending && data.canReview ? (
-            <section className="border-t border-charcoal/80 pt-6">
+            <section className="border-t border-line-strong pt-6">
               <h2 className="text-lg font-semibold">Decision</h2>
               <div className="mt-4 space-y-5">
                 <Segmented label="Decision" value={decision} onChange={setDecision} options={[{ value: 'approve', label: 'Approve' }, { value: 'reject', label: 'Reject' }, { value: 'request_info', label: 'Ask for more' }]} />
@@ -150,7 +150,7 @@ export default function ReviewDetail() {
               </div>
             </section>
           ) : (
-            <section className="border-t border-charcoal/80 pt-6">
+            <section className="border-t border-line-strong pt-6">
               <h2 className="text-lg font-semibold">Outcome</h2>
               <div className="mt-3 space-y-2">
                 {v.review ? <p><span className="font-medium">{humanize(v.review.decision)}</span> by {v.review.reviewerName}, {formatDateTime(v.review.at)}</p> : <p className="text-muted">{humanize(v.reviewStatus)}</p>}
@@ -161,7 +161,7 @@ export default function ReviewDetail() {
               </div>
             </section>
           )}
-          {data.reviews.length > 0 && <section><h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Earlier decisions and notes</h2><ul>{data.reviews.map((r: any) => <li key={r.id} className="py-3 border-b border-line"><span className="font-medium">{humanize(r.decision)}</span> · {r.reviewerName} <span className="text-xs text-faint">{formatDateTime(r.at)}</span>{r.reason && <div className="text-sm text-muted">{r.reason}</div>}{r.internalComment && <div className="text-sm text-muted">Internal: {r.internalComment}</div>}</li>)}</ul></section>}
+          {data.reviews.length > 0 && <section><h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Earlier decisions and notes</h2><ul>{data.reviews.map((r: any) => <li key={r.id} className="py-3 border-b border-line"><span className="font-medium">{humanize(r.decision)}</span> · {r.reviewerName} <span className="text-xs text-faint">{formatDateTime(r.at)}</span>{r.reason && <div className="text-sm text-muted">{r.reason}</div>}{r.internalComment && <div className="text-sm text-muted">Internal: {r.internalComment}</div>}</li>)}</ul></section>}
         </div>
       </div>
       {verify && <VerifyDialog versionId={v.id} market={market} onClose={() => { setVerify(false); reload(); }} />}

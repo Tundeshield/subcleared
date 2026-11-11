@@ -8,28 +8,39 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Brand tokens.
-   Warm Ivory #F6F5F0 · Deep Charcoal #252B27 · Field Green #52745F
-   Derived tones are charcoal at fixed opacities over ivory. */
+/* SubCleared design tokens — "Graphite & Deep Cyan".
+   Neutrals carry the interface; one accent marks actions and location; four
+   status colours carry meaning and always appear with an icon and words.
+   Full rationale and usage: docs/design-system.md and /design. */
 :root {
-  --ivory: 246 245 240;
-  --charcoal: 37 43 39;
-  --field: 82 116 95;
-  --paper: 251 250 247;       /* ivory, lifted — inputs, drawers, popovers */
-  --raised: 236 235 229;      /* charcoal 5% on ivory — hover, selected rows */
-  --line: 221 221 214;        /* charcoal 11% on ivory — dividers */
-  --line-strong: 196 198 191; /* charcoal 22% — input borders */
-  --muted: 82 87 83;          /* charcoal 76% — secondary text (AA) */
-  --faint: 108 112 107;       /* charcoal 64% — metadata (AA on ivory) */
+  /* Neutrals */
+  --canvas: 247 248 248;      /* #F7F8F8 app background */
+  --paper: 255 255 255;       /* #FFFFFF inputs, drawers, dialogs, raised surfaces */
+  --raised: 238 241 242;      /* #EEF1F2 hover, selected rows, subtle fills */
+  --line: 226 230 232;        /* #E2E6E8 dividers */
+  --line-strong: 199 205 209; /* #C7CDD1 input borders, section rules */
+  --ink: 22 27 31;            /* #161B1F primary text */
+  --muted: 75 85 94;          /* #4B555E secondary text (8.0:1 on canvas) */
+  --faint: 98 108 118;        /* #626C76 metadata (5.4:1 on canvas) */
+  /* Accent — actions, active navigation, focus, links */
+  --accent: 21 94 117;        /* #155E75 (7.0:1 on white) */
+  --accent-hover: 14 76 95;   /* #0E4C5F */
+  --accent-tint: 231 240 243; /* #E7F0F3 */
+  /* Status — meaning only */
+  --success: 30 120 74;       /* #1E784A ready, approved, in date */
+  --warning: 155 88 0;        /* #9B5800 expiring, attention */
+  --danger: 178 34 24;        /* #B22218 not ready, expired, rejected */
+  --info: 41 89 153;          /* #295999 awaiting review, in progress */
+  --success-tint: 233 244 237; --warning-tint: 251 242 228; --danger-tint: 252 236 234; --info-tint: 235 241 250;
   color-scheme: light;
 }
 
 @layer base {
   html { -webkit-text-size-adjust: 100%; }
-  body { @apply bg-ivory text-charcoal font-sans text-base antialiased; font-feature-settings: 'kern'; }
+  body { @apply bg-canvas text-ink font-sans text-base antialiased; font-feature-settings: 'kern'; }
   h1, h2, h3 { letter-spacing: -0.012em; }
-  :focus-visible { outline: 2px solid rgb(var(--field)); outline-offset: 2px; border-radius: 3px; }
-  ::selection { background: rgb(var(--field) / 0.22); }
+  :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; border-radius: 3px; }
+  ::selection { background: rgb(var(--accent) / 0.18); }
   table { font-variant-numeric: tabular-nums; }
   .tnum { font-variant-numeric: tabular-nums; }
 }
@@ -37,28 +48,28 @@
 @layer components {
   /* Buttons: one filled (primary), one outlined (secondary), one text (ghost). */
   .btn { @apply inline-flex items-center justify-center gap-2 rounded h-10 px-4 text-sm font-medium transition-colors whitespace-nowrap select-none disabled:opacity-45 disabled:pointer-events-none; }
-  .btn-primary { @apply btn bg-field text-ivory hover:bg-[#476653]; }
-  .btn-secondary { @apply btn bg-transparent text-charcoal border border-line-strong hover:border-charcoal/50 hover:bg-charcoal/[0.03]; }
-  .btn-ghost { @apply btn text-muted hover:text-charcoal hover:bg-charcoal/[0.05] px-3; }
-  .btn-quiet { @apply inline-flex items-center gap-1 text-sm font-medium text-field hover:underline underline-offset-4 disabled:opacity-45; }
-  .btn-danger { @apply btn bg-charcoal text-ivory hover:bg-charcoal/90; }
+  .btn-primary { @apply btn bg-accent text-white hover:bg-accent-hover; }
+  .btn-secondary { @apply btn bg-transparent text-ink border border-line-strong hover:border-ink/50 hover:bg-ink/[0.03]; }
+  .btn-ghost { @apply btn text-muted hover:text-ink hover:bg-ink/[0.05] px-3; }
+  .btn-quiet { @apply inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline underline-offset-4 disabled:opacity-45; }
+  .btn-danger { @apply btn bg-danger text-white hover:bg-danger/90; }
   .btn-sm { @apply h-8 px-3 text-xs; }
   .btn-lg { @apply h-12 px-6 text-md; }
 
-  .input { @apply w-full h-10 rounded border border-line-strong bg-paper px-3 text-base text-charcoal placeholder:text-faint transition-colors hover:border-charcoal/40 focus:border-field focus:outline-none focus:ring-2 focus:ring-field/20 disabled:opacity-60 disabled:bg-raised; }
+  .input { @apply w-full h-10 rounded border border-line-strong bg-paper px-3 text-base text-ink placeholder:text-faint transition-colors hover:border-ink/40 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:opacity-60 disabled:bg-raised; }
   textarea.input { @apply h-auto py-2.5 min-h-[5rem] leading-relaxed; }
-  select.input { @apply pr-9 appearance-none bg-no-repeat cursor-pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23525753' stroke-width='1.5'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E"); background-position: right 0.8rem center; }
-  .label { @apply block text-sm font-medium text-charcoal mb-1.5; }
+  select.input { @apply pr-9 appearance-none bg-no-repeat cursor-pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%234B555E' stroke-width='1.5'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E"); background-position: right 0.8rem center; }
+  .label { @apply block text-sm font-medium text-ink mb-1.5; }
   .hint { @apply text-xs text-faint mt-1.5 leading-relaxed; }
 
   /* Tables: hairline row dividers, no outer boxes, generous rows. */
   .table { @apply relative w-full border-collapse; }
-  .th { @apply text-left text-xs font-medium text-faint px-4 py-3 border-b border-line whitespace-nowrap bg-ivory; }
+  .th { @apply text-left text-xs font-medium text-muted px-4 py-3 border-b border-line-strong whitespace-nowrap bg-canvas; }
   .td { @apply px-4 py-4 border-b border-line align-top text-base; }
   .tr-link { @apply cursor-pointer transition-colors hover:bg-raised/60; }
 
   .eyebrow { @apply text-2xs font-medium uppercase tracking-[0.12em] text-faint; }
-  .link { @apply text-field underline-offset-4 hover:underline; }
+  .link { @apply text-accent underline-offset-4 hover:underline; }
   .kbd { @apply font-mono text-[0.7rem] px-1.5 py-px rounded border border-line text-faint; }
   .rule { @apply border-t border-line; }
   .panel { @apply bg-paper border border-line rounded-md; }

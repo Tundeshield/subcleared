@@ -49,14 +49,14 @@ export default function Team() {
             <div className="mt-3"><FormError error={update.error} /></div>
           </section>
           {manage && data.invitations.length > 0 && (
-            <section><h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Pending invitations</h2>
+            <section><h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Pending invitations</h2>
               <ul>{data.invitations.map((i: any) => (
                 <li key={i.id} className="py-3.5 border-b border-line flex flex-wrap justify-between items-center gap-3"><span>{i.email} <span className="text-muted">· {ROLE_LABELS[i.role as Role]}</span> <span className="text-sm text-faint">· expires {formatDate(i.expiresAt)}</span></span><button className="btn-ghost btn-sm" onClick={() => revoke.run({ invitationId: i.id }).then(() => toast('Invitation withdrawn'))}>Withdraw</button></li>
               ))}</ul>
             </section>
           )}
           <section>
-            <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Roles</h2>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Roles</h2>
             <dl className="grid md:grid-cols-2 gap-x-12">{(Object.keys(ROLE_LABELS) as Role[]).map((r) => <div key={r} className="py-4 border-b border-line"><dt className="font-medium">{ROLE_LABELS[r]}</dt><dd className="text-muted mt-1">{ROLE_DESCRIPTIONS[r]}</dd></div>)}</dl>
           </section>
         </div>

@@ -446,3 +446,27 @@ describe('US/UK markets and sample data', () => {
     expect(usp.items.map((p: any) => p.location).sort()).toEqual(['Austin, TX', 'Chicago, IL', 'Dallas, TX']);
   });
 });
+
+describe('Countries without a tailored library', () => {
+  it('uses local formats, neutral wording and no assumed limits; sample data still evaluates', async () => {
+    h.users.au = { email: 'ops@harbourline.example', verified: true };
+    const { orgId } = await ok('au', 'org.register', { orgName: 'Harbourline Construction', country: 'Australia', timezone: 'Australia/Sydney' });
+    const me = await ok('au', 'me', {}, orgId);
+    expect(me.org.settings).toMatchObject({ market: 'OTHER', locale: 'en-AU', currency: 'AUD' });
+    const lib = await ok('au', 'requirements.list', {}, orgId);
+    const names = lib.requirements.map((r: any) => r.name);
+    expect(names).toContain('Public liability insurance');
+    expect(names).toContain('Business registration');
+    expect(names.join(' ')).not.toMatch(/W-9|OSHA|CIS|Gas Safe|CSCS/);
+    expect(lib.requirements.flatMap((r: any) => r.criteria ?? []).some((c: any) => c.type === 'min_amount')).toBe(false);
+    await ok('au', 'org.updateSettings', { locale: 'en-NZ', currency: 'NZD' }, orgId);
+    expect((await ok('au', 'me', {}, orgId)).org.settings).toMatchObject({ locale: 'en-NZ', currency: 'NZD' });
+    expect((await call('au', 'org.updateSettings', { currency: 'XX1' }, orgId)).status).toBe(400);
+    await ok('au', 'org.loadSample', {}, orgId);
+    const dash = await ok('au', 'dashboard', {}, orgId);
+    expect(dash.metrics.activeSubcontractors).toBe(5);
+    expect(dash.metrics.ready).toBeGreaterThan(0);
+    const subs = await ok('au', 'subs.list', {}, orgId);
+    expect(subs.items.every((s: any) => typeof s.readyOn === 'number' && s.issues && typeof s.issues.missing === 'number')).toBe(true);
+  });
+});

@@ -90,11 +90,13 @@ export async function listSubs(ctx: Ctx, input: any) {
       contact: primary ? { name: primary.name, email: primary.email } : null, projects: assignments.length,
       readiness: worst ?? 'not_evaluated', outstanding: rs.reduce((n, r) => n + r.results.filter((x) => x.blocking).length, 0),
       expiring: rs.reduce((n, r) => n + r.results.filter((x) => x.status === 'expiring_soon').length, 0),
+      readyOn: rs.filter((r) => r.readiness === 'ready').length, issues: issueCounts(rs),
       lastActivityAt: s.lastActivityAt ?? s.updatedAt, country: s.country, jurisdiction: s.jurisdiction,
     };
   });
   if (input?.status) items = items.filter((i) => i.status === input.status);
   if (input?.readiness) items = items.filter((i) => i.readiness === input.readiness);
+  if (input?.issue) items = items.filter((i) => (i.issues as any)[input.issue] > 0);
   return { items: items.sort((a, b) => a.legalName.localeCompare(b.legalName)) };
 }
 
@@ -214,4 +216,15 @@ export async function importSubs(ctx: Ctx, input: any) {
   }
   await audit({ ...ctx, source: 'import' }, { action: 'subcontractor.imported', entity: { type: 'organisation', id: ctx.org.id }, after: { created: created.length, skipped: skipped.length, errors: parsed.errors.length } });
   return { created: created.length, errors: parsed.errors, skipped };
+}
+
+/** Distinct requirements in each problem state across a subcontractor's live projects (a requirement shared by two projects counts once). */
+function issueCounts(rs: OrgData['readiness']) {
+  const sets: Record<string, Set<string>> = { missing: new Set(), requested: new Set(), expired: new Set(), rejected: new Set(), review: new Set(), expiring: new Set() };
+  for (const r of rs) for (const x of r.results) {
+    const k = x.mandatory && ['missing', 'not_requested'].includes(x.status) ? 'missing' : x.mandatory && ['requested', 'overdue'].includes(x.status) ? 'requested'
+      : x.status === 'expired' ? 'expired' : x.status === 'rejected' ? 'rejected' : ['awaiting_review', 'submitted', 'review_required'].includes(x.status) ? 'review' : x.status === 'expiring_soon' ? 'expiring' : null;
+    if (k) sets[k].add(x.requirementId);
+  }
+  return Object.fromEntries(Object.entries(sets).map(([k, v]) => [k, v.size])) as Record<'missing' | 'requested' | 'expired' | 'rejected' | 'review' | 'expiring', number>;
 }

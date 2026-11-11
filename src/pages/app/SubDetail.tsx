@@ -58,7 +58,7 @@ export default function SubDetail() {
             <section>
               <h2 className="text-lg font-semibold mb-2">Readiness by project</h2>
               {data.projects.length === 0 ? <p className="text-muted">Not assigned to any project yet. Assign from a project's page.</p> : (
-                <ul className="border-t border-charcoal/80">{data.projects.map((p: any) => (
+                <ul className="border-t border-line-strong">{data.projects.map((p: any) => (
                   <li key={p.id} className="py-4 border-b border-line">
                     <div className="flex flex-wrap items-baseline justify-between gap-3">{p.visible ? <Link to={`/app/projects/${p.id}`} className="font-medium hover:underline underline-offset-4">{p.name}</Link> : <span className="font-medium">{p.name}</span>}<ReadinessBadge value={p.readiness} size="sm" /></div>
                     <p className="text-sm text-muted mt-1">{p.summary}</p>
@@ -75,9 +75,9 @@ export default function SubDetail() {
             <section>
               <h2 className="text-lg font-semibold mb-2">Contacts</h2>
               {s.contacts.length === 0 ? <p className="text-muted">No contacts yet. Add one to send document requests.</p> : (
-                <ul className="border-t border-charcoal/80">{s.contacts.map((c: any) => (
+                <ul className="border-t border-line-strong">{s.contacts.map((c: any) => (
                   <li key={c.id} className="py-4 border-b border-line">
-                    <div className="flex items-center gap-2"><span className="font-medium">{c.name}</span>{c.id === primary?.id && <span className="text-xs text-field">Primary</span>}{c.portalAccess && <span className="text-xs text-faint">· Portal access</span>}</div>
+                    <div className="flex items-center gap-2"><span className="font-medium">{c.name}</span>{c.id === primary?.id && <span className="text-xs text-accent">Primary</span>}{c.portalAccess && <span className="text-xs text-faint">· Portal access</span>}</div>
                     <div className="text-muted mt-0.5 break-all">{c.email}</div>{c.phone && <div className="text-muted">{c.phone}</div>}
                     <div className="text-xs text-faint mt-1">{c.roles.map(humanize).join(', ')}</div>
                   </li>
@@ -112,7 +112,7 @@ function ProjectsTab({ data, onRequest }: { data: any; onRequest: (projectId: st
     <div className="space-y-12">
       {data.projects.map((p: any) => (
         <section key={p.id}>
-          <div className="flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-charcoal/80">
+          <div className="flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-line-strong">
             <div><h2 className="text-lg font-semibold">{p.visible ? <Link to={`/app/projects/${p.id}`} className="hover:underline underline-offset-4">{p.name}</Link> : p.name}</h2><div className="mt-1 flex flex-wrap items-center gap-x-3 text-sm"><ReadinessBadge value={p.readiness} size="sm" /><span className="text-faint">{p.evaluatedAt && `Checked ${formatDateTime(p.evaluatedAt)}`}</span></div></div>
             <div className="flex gap-2"><button className="btn-ghost btn-sm" onClick={() => setHist(p.id)}>History</button>{can('requests.send') && p.readiness !== 'ready' && <button className="btn-secondary btn-sm" onClick={() => onRequest(p.id)}>Request outstanding</button>}</div>
           </div>
@@ -157,7 +157,7 @@ function DocumentsTab({ data }: { data: any }) {
   const docs = data.documents.filter((d: any) => d.versions.some((v: any) => v.reviewStatus !== 'uploading'));
   return (
     <section>
-      <div className="flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-charcoal/80">
+      <div className="flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-line-strong">
         <div><h2 className="text-lg font-semibold">Documents</h2><p className="text-sm text-muted mt-0.5">The evidence in force and every earlier version. Nothing is deleted when a replacement arrives.</p></div>
         {can('documents.upload') && <button className="btn-secondary btn-sm" onClick={() => setUpload(true)}>Upload on their behalf</button>}
       </div>
@@ -226,13 +226,13 @@ function RequirementsTab({ data, onRequest }: { data: any; onRequest: (rid: stri
         if (!items.length) return null;
         return (
           <section key={label}>
-            <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">{label} <span className="text-faint font-normal tnum">{items.length}</span></h2>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">{label} <span className="text-faint font-normal tnum">{items.length}</span></h2>
             {items.map((r) => {
               const def: any = defs.get(r.requirementId);
               const overrides = data.overrides.filter((o: any) => o.requirementId === r.requirementId);
               const needed = r.perProject.some((x: any) => x.status !== 'approved' && x.status !== 'not_applicable');
               return (
-                <div key={r.requirementId} className={cx('py-5 border-b border-line', focus && r.perProject.some((x: any) => x.projectId === focus) && 'bg-field/[0.04] -mx-3 px-3 rounded')}>
+                <div key={r.requirementId} className={cx('py-5 border-b border-line', focus && r.perProject.some((x: any) => x.projectId === focus) && 'bg-accent/[0.04] -mx-3 px-3 rounded')}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div><div className="font-medium">{r.name}</div><div className="text-sm text-faint">{def?.category}{def?.kind !== 'document' ? ` · ${def?.kind === 'declaration' ? 'Declaration' : 'Manual check'}` : ''}</div></div>
                     <div className="flex flex-wrap gap-1">
@@ -298,7 +298,7 @@ function ActivityTab({ data }: { data: any }) {
   return (
     <div className="grid xl:grid-cols-2 gap-x-14 gap-y-12">
       <section>
-        <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Requests and upload links</h2>
+        <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Requests and upload links</h2>
         {data.requests.length === 0 ? <p className="text-muted mt-4">No requests sent yet.</p> : (
           <ul>{data.requests.map((r: any) => {
             const l = data.links.find((x: any) => x.id === r.linkId);
@@ -311,7 +311,7 @@ function ActivityTab({ data }: { data: any }) {
                 {l && <div className="text-xs mt-1 text-muted">{l.revokedAt ? `Link withdrawn ${formatDateTime(l.revokedAt)}` : l.expiresAt < now ? `Link expired ${formatDate(l.expiresAt)}` : `Link active until ${formatDate(l.expiresAt)}`}{l.useCount ? ` · opened ${l.useCount}×` : ''}</div>}
                 {can('requests.send') && (
                   <div className="mt-2.5 flex gap-4">
-                    {live && <button className="btn-quiet text-charcoal" onClick={() => revoke.run({ linkId: l.id }).then(() => toast('Link withdrawn'))}>Withdraw link</button>}
+                    {live && <button className="btn-quiet text-ink" onClick={() => revoke.run({ linkId: l.id }).then(() => toast('Link withdrawn'))}>Withdraw link</button>}
                     {['sent', 'acknowledged', 'partially_fulfilled', 'expired'].includes(r.status) && <button className="btn-quiet" onClick={() => resend.run({ requestId: r.id }).then(() => toast('Sent again with a new link'))}>Send again</button>}
                   </div>
                 )}
@@ -322,7 +322,7 @@ function ActivityTab({ data }: { data: any }) {
         <div className="mt-3"><FormError error={revoke.error || resend.error} /></div>
       </section>
       <section>
-        <h2 className="text-lg font-semibold pb-3 border-b border-charcoal/80">Activity</h2>
+        <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Activity</h2>
         {!audit.data ? <Spinner /> : audit.data.items.length === 0 ? <p className="text-muted mt-4">No activity yet.</p> : (
           <ol className="max-h-[720px] overflow-y-auto">{audit.data.items.map((e: any) => (
             <li key={e.id} className="py-3 border-b border-line"><div>{activityLine(e)}</div>{e.after?.reason && <div className="text-sm text-muted">“{e.after.reason}”</div>}<div className="text-xs text-faint mt-0.5">{formatDateTime(e.at)}</div></li>
@@ -344,7 +344,7 @@ function NotesTab({ data }: { data: any }) {
         <div className="flex justify-end"><button className="btn-primary btn-sm" disabled={busy || !text.trim()} onClick={async () => { await run({ subcontractorId: data.subcontractor.id, text }); setText(''); }}>{busy && <Spinner />}Add note</button></div>
         <FormError error={error} />
       </div>
-      {data.notes.length === 0 ? <p className="text-faint mt-6">No notes yet.</p> : <ul className="mt-6 border-t border-charcoal/80">{data.notes.map((n: any) => <li key={n.id} className="py-4 border-b border-line"><p className="whitespace-pre-wrap">{n.text}</p><div className="text-xs text-faint mt-1.5">{n.by.name} · {formatDateTime(n.at)}</div></li>)}</ul>}
+      {data.notes.length === 0 ? <p className="text-faint mt-6">No notes yet.</p> : <ul className="mt-6 border-t border-line-strong">{data.notes.map((n: any) => <li key={n.id} className="py-4 border-b border-line"><p className="whitespace-pre-wrap">{n.text}</p><div className="text-xs text-faint mt-1.5">{n.by.name} · {formatDateTime(n.at)}</div></li>)}</ul>}
     </section>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, setOrgId } from '../../lib/api';
 import { auth } from '../../lib/auth';
+import { COUNTRIES, countryDefaults } from '../../domain/locale';
 import { useSession } from '../../lib/session';
 import { Callout, Checkbox, Field, FormError, Spinner } from '../../ui';
 import { AuthCard } from './PublicShell';
@@ -136,19 +137,19 @@ export function VerifyNotice() {
         <button className="btn-primary" onClick={async () => { setError(null); const u = await auth.reload(); await refresh(); if (u?.emailVerified) nav(params.get('next') || '/onboarding'); else setError("We haven't seen the verification yet. Open the link in the email, then try again."); }}>I've verified my email</button>
         <button className="btn-secondary" onClick={async () => { setError(null); try { await auth.resendVerification(); setMsg('A new link is on its way.'); } catch (e: any) { setError(e.message); } }}>Resend link</button>
       </div>
-      {msg && <p className="text-sm text-field mt-3">{msg}</p>}
+      {msg && <p className="text-sm text-accent mt-3">{msg}</p>}
       <div className="mt-3"><FormError error={error} /></div>
       {auth.mode === 'dev' && <p className="text-xs text-faint mt-6">Local development: verification emails appear in the <a className="underline" href="/dev/mailbox">dev mailbox</a>.</p>}
     </AuthCard>
   );
 }
 
-const COUNTRIES = ['United States', 'United Kingdom', 'Ireland', 'Canada', 'Australia', 'Other'];
+
 
 export function Onboarding() {
   const { authUser, ready, me, refresh } = useSession();
   const [orgName, setOrgName] = useState('');
-  const [country, setCountry] = useState(() => (Intl.DateTimeFormat().resolvedOptions().timeZone?.startsWith('America/') ? 'United States' : 'United Kingdom'));
+  const [country, setCountry] = useState(() => { const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? ''; return COUNTRIES.find((c) => c.timezone === tz)?.name ?? (/^America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix)/.test(tz) ? 'United States' : 'Other'); });
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const [name, setName] = useState('');
   const [seed, setSeed] = useState(true);
@@ -167,13 +168,13 @@ export function Onboarding() {
         e.preventDefault(); setBusy(true); setError(null);
         try { const r = await api('org.register', { orgName, country, timezone, name, seedLibrary: seed }); setOrgId(r.orgId); await refresh(); nav('/app/overview'); } catch (err: any) { setError(err.message); } finally { setBusy(false); }
       }}>
-        <Field label="Company name" required><input className="input" required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder={country === 'United States' ? 'e.g. Brazos Builders Inc.' : 'e.g. Ashdown Construction Ltd'} /></Field>
+        <Field label="Company name" required><input className="input" required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="e.g. Harbourline Construction" /></Field>
         <Field label="Your name" required><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="Country" hint="Sets terminology, date format and currency. You can change these later."><select className="input" value={country} onChange={(e) => setCountry(e.target.value)}>{COUNTRIES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+          <Field label="Country" hint="Sets terminology, date format and currency. You can change these later."><select className="input" value={country} onChange={(e) => { setCountry(e.target.value); const d = countryDefaults(e.target.value); if (d.name !== 'Other' && zones.includes(d.timezone)) setTimezone(d.timezone); }}>{COUNTRIES.map((c) => <option key={c.name}>{c.name}</option>)}</select></Field>
           <Field label="Timezone" hint="Used for expiry dates and reminders."><select className="input" value={timezone} onChange={(e) => setTimezone(e.target.value)}>{zones.map((z) => <option key={z}>{z}</option>)}</select></Field>
         </div>
-        <Checkbox checked={seed} onChange={setSeed} label="Add the starter requirement library" hint={`${country === 'United States' ? 'US' : country === 'United Kingdom' ? 'UK' : 'Common'} requirements and eight trade templates you can edit — starting points, not legal standards for your jurisdiction.`} />
+        <Checkbox checked={seed} onChange={setSeed} label="Add the starter requirement library" hint={`${country === 'United States' ? 'US-style' : country === 'United Kingdom' ? 'UK-style' : 'Internationally worded'} requirements and eight trade templates you can edit — starting points, not legal standards for your jurisdiction.`} />
         <FormError error={error} />
         <button className="btn-primary w-full btn-lg" disabled={busy}>{busy && <Spinner />}Create organisation</button>
       </form>

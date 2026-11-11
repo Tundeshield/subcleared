@@ -3,11 +3,30 @@
 // optional starter library an organisation can adopt and edit.
 import type { Market, OrgSettings } from './types';
 
-export const MARKETS: { id: Market; label: string; locale: 'en-US' | 'en-GB'; currency: 'USD' | 'GBP'; timezone: string }[] = [
-  { id: 'US', label: 'United States', locale: 'en-US', currency: 'USD', timezone: 'America/Chicago' },
-  { id: 'UK', label: 'United Kingdom', locale: 'en-GB', currency: 'GBP', timezone: 'Europe/London' },
-  { id: 'OTHER', label: 'Other', locale: 'en-GB', currency: 'USD', timezone: 'UTC' },
+export const MARKETS: { id: Market; label: string; locale: string; currency: string; timezone: string }[] = [
+  { id: 'US', label: 'United States conventions', locale: 'en-US', currency: 'USD', timezone: 'America/Chicago' },
+  { id: 'UK', label: 'United Kingdom conventions', locale: 'en-GB', currency: 'GBP', timezone: 'Europe/London' },
+  { id: 'OTHER', label: 'Neutral (international)', locale: 'en-GB', currency: 'USD', timezone: 'UTC' },
 ];
+
+/** Countries offered at set-up. Each only proposes defaults — every value can be changed in Settings. */
+export const COUNTRIES: { name: string; locale: string; currency: string; timezone: string }[] = [
+  ['Australia', 'en-AU', 'AUD', 'Australia/Sydney'], ['Canada', 'en-CA', 'CAD', 'America/Toronto'], ['Denmark', 'en-DK', 'DKK', 'Europe/Copenhagen'],
+  ['France', 'en-FR', 'EUR', 'Europe/Paris'], ['Germany', 'en-DE', 'EUR', 'Europe/Berlin'], ['Hong Kong', 'en-HK', 'HKD', 'Asia/Hong_Kong'],
+  ['India', 'en-IN', 'INR', 'Asia/Kolkata'], ['Ireland', 'en-IE', 'EUR', 'Europe/Dublin'], ['Malaysia', 'en-MY', 'MYR', 'Asia/Kuala_Lumpur'],
+  ['Netherlands', 'en-NL', 'EUR', 'Europe/Amsterdam'], ['New Zealand', 'en-NZ', 'NZD', 'Pacific/Auckland'], ['Norway', 'en-NO', 'NOK', 'Europe/Oslo'],
+  ['Philippines', 'en-PH', 'PHP', 'Asia/Manila'], ['Qatar', 'en-QA', 'QAR', 'Asia/Qatar'], ['Saudi Arabia', 'en-SA', 'SAR', 'Asia/Riyadh'],
+  ['Singapore', 'en-SG', 'SGD', 'Asia/Singapore'], ['South Africa', 'en-ZA', 'ZAR', 'Africa/Johannesburg'], ['Spain', 'en-ES', 'EUR', 'Europe/Madrid'],
+  ['Sweden', 'en-SE', 'SEK', 'Europe/Stockholm'], ['Switzerland', 'en-CH', 'CHF', 'Europe/Zurich'], ['United Arab Emirates', 'en-AE', 'AED', 'Asia/Dubai'],
+  ['United Kingdom', 'en-GB', 'GBP', 'Europe/London'], ['United States', 'en-US', 'USD', 'America/Chicago'], ['Other', 'en-GB', 'USD', 'UTC'],
+].map(([name, locale, currency, timezone]) => ({ name, locale, currency, timezone }));
+export const countryDefaults = (country: string) => COUNTRIES.find((c) => c.name.toLowerCase() === country.toLowerCase()) ?? COUNTRIES[COUNTRIES.length - 1];
+export const LOCALES = [...new Set(COUNTRIES.map((c) => c.locale))].sort();
+export const CURRENCIES = [...new Set(COUNTRIES.map((c) => c.currency))].sort();
+export const validLocale = (l: string) => { try { return Intl.DateTimeFormat.supportedLocalesOf([l]).length > 0; } catch { return false; } };
+export const validCurrency = (c: string) => { try { new Intl.NumberFormat('en', { style: 'currency', currency: c }); return /^[A-Z]{3}$/.test(c); } catch { return false; } };
+/** Stripe prices exist in USD and GBP; every other organisation currency bills in USD. */
+export const billingCurrency = (c?: string): 'USD' | 'GBP' => (c === 'GBP' ? 'GBP' : 'USD');
 
 export function marketFromCountry(country: string): Market {
   const c = country.toLowerCase();
@@ -26,8 +45,8 @@ export type TermKey = keyof (typeof TERMS)['US'];
 export function term(market: Market | undefined, k: TermKey): string { return TERMS[market ?? 'OTHER'][k]; }
 
 // Formatting locale, set once from the signed-in organisation.
-let activeLocale: 'en-US' | 'en-GB' = 'en-GB';
-let activeCurrency: 'USD' | 'GBP' = 'USD';
+let activeLocale = 'en-GB';
+let activeCurrency = 'USD';
 export function setFormatting(s?: Partial<Pick<OrgSettings, 'locale' | 'currency'>>) {
   if (s?.locale) activeLocale = s.locale;
   if (s?.currency) activeCurrency = s.currency;

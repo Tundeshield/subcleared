@@ -12,7 +12,7 @@ export default function DevMailbox() {
   return (
     <div className="max-w-4xl mx-auto px-5 py-8">
       <div className="flex items-center justify-between mb-6"><Logo /><span className="text-xs text-faint">Development mailbox — not available in production</span></div>
-      {err && <p className="text-charcoal">{err}</p>}
+      {err && <p className="text-ink">{err}</p>}
       {items?.length === 0 && <p className="text-muted">No emails yet.</p>}
       <div className="panel divide-y divide-line">
         {items?.map((m) => (

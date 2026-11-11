@@ -52,7 +52,11 @@ export default function Overview() {
           <h1 className="text-2xl font-medium mt-1">{greeting(org.settings.timezone)}{data.firstName ? `, ${data.firstName}` : ''}.</h1>
           <p className="text-muted mt-1.5">{fresh ? `Let's get your first project ready to ${term(org.settings.market, 'mobilise')}.` : `Here's where your subcontractor readiness stands today.`}</p>
         </div>
-        {data.hasProjects && <FilterSelect label="Project" all="All active" value={f.projectId ?? ''} onChange={(v) => setF({ projectId: v || undefined })} options={(projects.data?.items ?? []).filter((p: any) => !['archived', 'completed'].includes(p.status)).map((p: any) => ({ value: p.id, label: p.name }))} />}
+<div className="flex flex-wrap items-center gap-2">
+          {data.hasProjects && <FilterSelect label="Project" all="All active" value={f.projectId ?? ''} onChange={(v) => setF({ projectId: v || undefined })} options={(projects.data?.items ?? []).filter((p: any) => !['archived', 'completed'].includes(p.status)).map((p: any) => ({ value: p.id, label: p.name }))} />}
+          {!fresh && can('projects.create') && <Link to="/app/projects?new=1" className="btn-secondary">{Icon.plus()}New project</Link>}
+          {!fresh && can('subs.manage') && <Link to="/app/subcontractors?new=1" className="btn-secondary">{Icon.plus()}Add subcontractor</Link>}
+        </div>
       </header>
 
       {fresh && <Onboarding data={data} onSample={can('settings.manage') && !data.hasSample ? async () => { try { await sample.run({}); toast('Sample projects and subcontractors added'); } catch (e: any) { toast(e.message, 'bad'); } } : undefined} sampleBusy={sample.busy} market={org.settings.market} />}
@@ -62,8 +66,8 @@ export default function Overview() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-y-6 pb-8 border-b border-line">
             <Metric label="Active projects" value={m.activeProjects} to="/app/projects" />
             <Metric label="Active subcontractors" value={m.activeSubcontractors} to="/app/subcontractors" />
-            <Metric label="Ready to work" value={m.ready} emphasis="field" to="/app/subcontractors?readiness=ready" hint="on every assigned project" />
-            <Metric label="Requiring attention" value={m.attention} to="/app/subcontractors?readiness=attention" hint={`${m.notReady} not ready`} />
+            <Metric label="Ready to work" value={m.ready} emphasis="success" to="/app/subcontractors?readiness=ready" hint="on every assigned project" />
+            <Metric label="Requiring attention" value={m.attention} emphasis={m.attention > 0 ? 'danger' : undefined} to="/app/subcontractors?readiness=attention" hint={`${m.notReady} not ready`} />
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] [&>section]:min-w-0 gap-x-14 gap-y-12 mt-10">
@@ -73,13 +77,13 @@ export default function Overview() {
                 <div className="mt-4 flex gap-3 items-start border-t border-line pt-4"><Glyph tone="ok" className="w-4 h-4 mt-1" /><p className="text-muted">Nothing needs your attention. Every assigned subcontractor is ready or has nothing outstanding.</p></div>
               ) : (
                 <>
-                  <ul className="mt-4 border-t border-charcoal/80">
+                  <ul className="mt-4 border-t border-line-strong">
                     {attention.map((a: any) => (
                       <li key={a.key} className="border-b border-line">
                         <Link to={a.link} className="group flex items-center gap-4 py-4 hover:bg-raised/50 -mx-3 px-3 rounded">
                           <span className="text-2xl w-12 tnum font-normal">{a.count}</span>
                           <span className="flex-1">{a.label}</span>
-                          <span className="text-sm text-field font-medium flex items-center gap-1 opacity-80 group-hover:opacity-100">{a.action}{Icon.arrow()}</span>
+                          <span className="text-sm text-accent font-medium flex items-center gap-1 opacity-80 group-hover:opacity-100">{a.action}{Icon.arrow()}</span>
                         </Link>
                       </li>
                     ))}
@@ -102,7 +106,7 @@ export default function Overview() {
             <section aria-labelledby="ren-h">
               <div className="flex items-baseline justify-between"><h2 id="ren-h" className="text-lg font-semibold">Upcoming renewals</h2><Link to="/app/renewals" className="btn-quiet">Manage renewals</Link></div>
               {data.upcoming.length === 0 ? <p className="mt-4 border-t border-line pt-4 text-muted">No approved documents expire in the next 60 days.</p> : (
-                <ul className="mt-4 border-t border-charcoal/80">{data.upcoming.map((u: any) => (
+                <ul className="mt-4 border-t border-line-strong">{data.upcoming.map((u: any) => (
                   <li key={u.versionId} className="border-b border-line">
                     <Link to={u.replacementVersionId ? `/app/reviews/${u.replacementVersionId}` : `/app/documents/${u.documentId}`} className="flex items-start justify-between gap-4 py-3.5 hover:bg-raised/50 -mx-3 px-3 rounded">
                       <span className="min-w-0"><span className="block truncate">{u.title}</span><span className="block text-sm text-muted truncate">{u.subcontractor}{u.projects.length ? ` · ${u.projects.join(', ')}` : ''}</span><span className="block text-xs text-faint mt-0.5">{STAGE[u.stage] ?? humanize(u.stage)}</span></span>
@@ -116,7 +120,7 @@ export default function Overview() {
             <section aria-labelledby="proj-h" className="xl:col-span-1">
               <div className="flex items-baseline justify-between"><h2 id="proj-h" className="text-lg font-semibold">Project readiness</h2><Link to="/app/projects" className="btn-quiet">All projects</Link></div>
               {data.projects.length === 0 ? <p className="mt-4 border-t border-line pt-4 text-muted">No active projects.</p> : (
-                <ul className="mt-4 border-t border-charcoal/80">{data.projects.map((p: any) => (
+                <ul className="mt-4 border-t border-line-strong">{data.projects.map((p: any) => (
                   <li key={p.id} className="border-b border-line">
                     <Link to={`/app/projects/${p.id}`} className="block py-4 hover:bg-raised/50 -mx-3 px-3 rounded">
                       <div className="flex items-baseline justify-between gap-4">
@@ -134,7 +138,7 @@ export default function Overview() {
             <section aria-labelledby="act-h">
               <h2 id="act-h" className="text-lg font-semibold">Recent activity</h2>
               {data.recent.length === 0 ? <p className="mt-4 border-t border-line pt-4 text-muted">No activity yet.</p> : (
-                <ol className="mt-4 border-t border-charcoal/80">{data.recent.map((e: any) => (
+                <ol className="mt-4 border-t border-line-strong">{data.recent.map((e: any) => (
                   <li key={e.id} className="py-3 border-b border-line"><div className="leading-snug">{describe(e)}</div><div className="text-xs text-faint mt-1">{formatDateTime(e.at)}</div></li>
                 ))}</ol>
               )}
@@ -156,10 +160,10 @@ function Onboarding({ data, onSample, sampleBusy, market }: { data: any; onSampl
   const next = steps.findIndex((s) => !s.done);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-14">
-      <ol className="border-t border-charcoal/80">
+      <ol className="border-t border-line-strong">
         {steps.map((s, i) => (
           <li key={i} className="flex gap-5 py-6 border-b border-line">
-            <span className={cx('w-7 h-7 rounded-full grid place-items-center text-sm shrink-0 tnum', s.done ? 'bg-field text-ivory' : i === next ? 'border-2 border-charcoal font-medium' : 'border border-line-strong text-faint')}>{s.done ? Icon.check('w-3.5 h-3.5') : i + 1}</span>
+            <span className={cx('w-7 h-7 rounded-full grid place-items-center text-sm shrink-0 tnum', s.done ? 'bg-accent text-canvas' : i === next ? 'border-2 border-ink font-medium' : 'border border-line-strong text-faint')}>{s.done ? Icon.check('w-3.5 h-3.5') : i + 1}</span>
             <div className="flex-1">
               <div className={cx('font-medium', s.done && 'text-muted')}>{s.title}</div>
               <p className="text-muted mt-1">{s.body}</p>

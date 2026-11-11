@@ -6,7 +6,7 @@ import { useParams } from 'react-router-dom';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import { api } from '../../lib/api';
 import { ACCEPT, precheck, uploadDocument } from '../../lib/upload';
-import { cx, Field, FormError, Glyph, Icon, Logo, Progress, Spinner, Tabs } from '../../ui';
+import { cx, Field, FormError, Glyph, toneText, Icon, Logo, Progress, Spinner, Tabs } from '../../ui';
 
 type Phase = { k: 'opening' } | { k: 'code'; hint: string; org: string; devCode?: string } | { k: 'ready' } | { k: 'error'; title: string; message: string };
 
@@ -53,17 +53,17 @@ export default function Portal() {
         <p className="text-sm text-muted">{s.organisation.name} has asked for documents from</p>
         <h1 className="text-2xl font-medium mt-1 leading-tight">{s.subcontractor.legalName}</h1>
         {s.projects.length > 0 && <p className="text-muted mt-2">For {s.projects.join(', ')}</p>}
-        <dl className="grid grid-cols-3 mt-7 border-t border-charcoal">
+        <dl className="grid grid-cols-3 mt-7 border-t border-ink">
           {[['Still needed', s.summary.needed], ['Being reviewed', s.summary.review], ['Accepted', s.summary.accepted]].map(([l, n]) => (
-            <div key={l as string} className="pt-3"><dd className={cx('text-2xl tnum', l === 'Accepted' && Number(n) > 0 && 'text-field')}>{n}</dd><dt className="text-sm text-muted">{l}</dt></div>
+            <div key={l as string} className="pt-3"><dd className={cx('text-2xl tnum', l === 'Accepted' && Number(n) > 0 && 'text-success')}>{n}</dd><dt className="text-sm text-muted">{l}</dt></div>
           ))}
         </dl>
         {s.openRequests.filter((r: any) => r.message || r.dueDate).map((r: any) => (
-          <div key={r.id} className="mt-6 border-l-2 border-field pl-4 text-[0.9375rem]">{r.message && <p>“{r.message}” <span className="text-muted">— {r.from}</span></p>}{r.dueDate && <p className="text-muted mt-0.5">Please send by <span className="text-charcoal font-medium">{formatDate(r.dueDate)}</span>.</p>}</div>
+          <div key={r.id} className="mt-6 border-l-2 border-accent pl-4 text-[0.9375rem]">{r.message && <p>“{r.message}” <span className="text-muted">— {r.from}</span></p>}{r.dueDate && <p className="text-muted mt-0.5">Please send by <span className="text-ink font-medium">{formatDate(r.dueDate)}</span>.</p>}</div>
         ))}
       </div>
       {notice && (
-        <div className="mb-6 rounded-md bg-field/[0.09] px-4 py-3.5 flex gap-3" role="status">
+        <div className="mb-6 rounded-md bg-accent/[0.09] px-4 py-3.5 flex gap-3" role="status">
           <Glyph tone="ok" className="w-5 h-5 mt-0.5" />
           <div className="flex-1"><div className="font-medium">Received: {notice.req}</div><p className="text-sm text-muted mt-0.5">{notice.file} passed our security checks and is now with {s.organisation.name} for review.</p></div>
           <button className="text-faint self-start p-1" onClick={() => setNotice(null)} aria-label="Dismiss">{Icon.x()}</button>
@@ -84,9 +84,9 @@ export default function Portal() {
         ))}</ul>)}
         {tab === 'history' && (s.history.length === 0 ? <p className="text-muted">Nothing sent yet.</p> : <ol className="border-t border-line">{s.history.map((h: any) => (
           <li key={h.versionId} className="py-4 border-b border-line">
-            <div className="flex justify-between gap-3"><span className="font-medium">{h.requirement}</span><span className={cx('text-sm whitespace-nowrap', h.status === 'Accepted' ? 'text-field' : /Not accepted|Blocked|More information/.test(h.status) ? 'font-medium' : 'text-muted')}>{h.status}</span></div>
+            <div className="flex justify-between gap-3"><span className="font-medium">{h.requirement}</span><span className={cx('text-sm whitespace-nowrap', h.status === 'Accepted' ? 'text-success' : /Not accepted|Blocked|More information/.test(h.status) ? 'text-danger font-medium' : 'text-muted')}>{h.status}</span></div>
             <div className="text-sm text-muted mt-0.5 break-all">{h.fileName} · version {h.versionNumber}</div><div className="text-xs text-faint">{formatDateTime(h.uploadedAt)} · {h.uploadedBy}</div>
-            {h.reason && <p className="text-sm mt-1.5 border-l-2 border-charcoal pl-3">{h.reason}</p>}
+            {h.reason && <p className="text-sm mt-1.5 border-l-2 border-ink pl-3">{h.reason}</p>}
           </li>
         ))}</ol>)}
         {tab === 'contact' && <ContactForm s={s} session={session!} onSaved={() => load(session!)} />}
@@ -99,7 +99,7 @@ export default function Portal() {
 function Shell({ children, org }: { children: React.ReactNode; org?: string }) {
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line bg-ivory/95 backdrop-blur sticky top-0 z-10"><div className="max-w-xl mx-auto px-5 h-14 flex items-center justify-between gap-3"><Logo /><span className="text-xs text-faint truncate">{org ? `Secure upload for ${org}` : 'Secure document upload'}</span></div></header>
+      <header className="border-b border-line bg-canvas/95 backdrop-blur sticky top-0 z-10"><div className="max-w-xl mx-auto px-5 h-14 flex items-center justify-between gap-3"><Logo /><span className="text-xs text-faint truncate">{org ? `Secure upload for ${org}` : 'Secure document upload'}</span></div></header>
       <main className="max-w-xl mx-auto px-5">{children}</main>
     </div>
   );
@@ -112,7 +112,7 @@ function CodeStep({ phase, onSubmit, onResend }: { phase: { hint: string; org: s
   return (
     <div className="py-16">
       <h1 className="text-2xl font-medium">Confirm it's you</h1>
-      <p className="text-muted mt-3 leading-relaxed">We've sent a 6-digit code to <span className="text-charcoal">{phase.hint}</span> to open {phase.org}'s portal.</p>
+      <p className="text-muted mt-3 leading-relaxed">We've sent a 6-digit code to <span className="text-ink">{phase.hint}</span> to open {phase.org}'s portal.</p>
       <form className="mt-8 space-y-5" onSubmit={async (e) => { e.preventDefault(); setBusy(true); setErr(null); try { await onSubmit(code.trim()); } catch (x: any) { setErr(x.message); } finally { setBusy(false); } }}>
         <Field label="Code"><input className="input h-14 text-2xl tracking-[0.5em] font-mono text-center" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} autoFocus /></Field>
         <FormError error={err} />
@@ -145,21 +145,21 @@ function RequirementCard({ r, session, onDone, compact }: { r: any; session: str
   const header = (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0"><h3 className="font-medium text-md">{r.name}{!r.mandatory && <span className="text-sm text-faint font-normal"> · optional</span>}</h3>{r.projects.length > 0 && !compact && <p className="text-sm text-faint">{r.projects.join(', ')}</p>}</div>
-      <span className={cx('inline-flex items-center gap-1.5 text-sm whitespace-nowrap', TONE[r.status] === 'ok' ? 'text-field' : TONE[r.status] === 'blocked' && 'font-medium')}><Glyph tone={TONE[r.status] ?? 'none'} className="w-3.5 h-3.5" />{r.label}</span>
+      <span className={cx('inline-flex items-center gap-1.5 text-sm whitespace-nowrap', toneText(TONE[r.status] ?? 'none'))}><Glyph tone={TONE[r.status] ?? 'none'} className="w-3.5 h-3.5" />{r.label}</span>
     </div>
   );
   if (compact && !expanded) return <div className="py-4 border-b border-line">{header}{canUpload && <button className="btn-quiet mt-2" onClick={() => setExpanded(true)}>{r.status === 'approved' || r.status === 'expiring_soon' ? 'Send a newer version' : 'Replace what you sent'}</button>}</div>;
   return (
     <div className={cx(compact ? 'py-4 border-b border-line' : 'rounded-md border border-line-strong bg-paper p-5')}>
       {header}
-      {r.rejectionReason && <div className="mt-3 border-l-2 border-charcoal pl-3"><div className="text-sm font-medium">Why it wasn't accepted</div><p className="text-sm text-muted mt-0.5">{r.rejectionReason}</p></div>}
+      {r.rejectionReason && <div className="mt-3 border-l-2 border-ink pl-3"><div className="text-sm font-medium">Why it wasn't accepted</div><p className="text-sm text-muted mt-0.5">{r.rejectionReason}</p></div>}
       {r.expiryDate && <p className="text-sm text-muted mt-2">{r.status === 'expired' ? 'Expired' : 'Expires'} {formatDate(r.expiryDate)}</p>}
       {(r.instructions || r.description) && r.needsAction && <p className="text-[0.9375rem] text-muted mt-3 leading-relaxed">{r.instructions || r.description}</p>}
       {!canUpload && r.needsAction && <p className="text-sm text-muted mt-3">This is checked directly by the contractor — they'll be in touch if they need anything.</p>}
       {canUpload && (
         <div className="mt-5">
           <input ref={input} type="file" accept={ACCEPT} className="sr-only" onChange={(e) => { pick(e.target.files?.[0] ?? null); e.target.value = ''; }} aria-label={`Choose a file for ${r.name}`} />
-          {file && !stage && <div className="flex items-center gap-2.5 mb-3 py-2.5 border-y border-line"><span className="text-field">{Icon.file()}</span><span className="truncate flex-1">{file.name}</span><span className="text-sm text-faint tnum">{(file.size / 1024 / 1024).toFixed(1)} MB</span></div>}
+          {file && !stage && <div className="flex items-center gap-2.5 mb-3 py-2.5 border-y border-line"><span className="text-accent">{Icon.file()}</span><span className="truncate flex-1">{file.name}</span><span className="text-sm text-faint tnum">{(file.size / 1024 / 1024).toFixed(1)} MB</span></div>}
           {stage && <div className="mb-4"><div className="text-sm text-muted mb-1.5">{stage === 'preparing' ? 'Getting ready…' : stage === 'uploading' ? `Uploading… ${Math.round(progress * 100)}%` : 'Checking the file and saving…'}</div><Progress value={stage === 'verifying' ? 1 : progress} /></div>}
           <FormError error={err} />
           <div className="flex gap-2 mt-2">
@@ -189,7 +189,7 @@ function ContactForm({ s, session, onSaved }: { s: any; session: string; onSaved
       <Field label="Your name"><input className="input h-12" value={name} onChange={(e) => setName(e.target.value)} required /></Field>
       <Field label="Telephone"><input className="input h-12" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
       <Field label="Email" hint={`To change your email address, ask ${s.organisation.name} — it's how we confirm it's you.`}><input className="input h-12" value={s.contact.email} disabled /></Field>
-      <FormError error={err} />{msg && <p className="text-sm text-field flex items-center gap-2"><Glyph tone="ok" className="w-4 h-4" />{msg}</p>}
+      <FormError error={err} />{msg && <p className="text-sm text-success flex items-center gap-2"><Glyph tone="ok" className="w-4 h-4" />{msg}</p>}
       <button className="btn-primary btn-lg w-full" disabled={busy}>{busy && <Spinner />}Save your details</button>
     </form>
   );

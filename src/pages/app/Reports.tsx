@@ -52,7 +52,7 @@ export default function Reports() {
           {groups.map((g) => (
             <div key={g}><div className="eyebrow mb-2">{g}</div>
               <ul>{REPORTS.filter((r) => r.group === g && (!r.perm || can(r.perm as any))).map((r) => (
-                <li key={r.id}><button onClick={() => { setType(r.id); setResult(null); }} aria-current={type === r.id} className={cx('relative w-full text-left px-3 py-2 rounded text-[0.9375rem]', type === r.id ? 'bg-charcoal/[0.05] font-medium before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-field' : 'text-muted hover:text-charcoal')}>{r.name}</button></li>
+                <li key={r.id}><button onClick={() => { setType(r.id); setResult(null); }} aria-current={type === r.id} className={cx('relative w-full text-left px-3 py-2 rounded text-[0.9375rem]', type === r.id ? 'bg-ink/[0.05] font-medium before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-accent' : 'text-muted hover:text-ink')}>{r.name}</button></li>
               ))}</ul>
             </div>
           ))}
@@ -78,7 +78,7 @@ export default function Reports() {
           <div className="mt-4"><FormError error={error} /></div>
           {result && (
             <div className="mt-10">
-              <div className="flex flex-wrap items-baseline justify-between gap-2 pb-3 border-b border-charcoal/80"><span className="font-medium tnum">{result.rows.length} row{result.rows.length === 1 ? '' : 's'}</span><span className="text-sm text-faint">Generated {formatDateTime(result.generatedAt)}{result.filters.length ? ` · ${result.filters.join(' · ')}` : ''}</span></div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2 pb-3 border-b border-line-strong"><span className="font-medium tnum">{result.rows.length} row{result.rows.length === 1 ? '' : 's'}</span><span className="text-sm text-faint">Generated {formatDateTime(result.generatedAt)}{result.filters.length ? ` · ${result.filters.join(' · ')}` : ''}</span></div>
               {result.rows.length === 0 ? <Empty title="No rows">Nothing matches these filters.</Empty> : (
                 <>
                   <div className="overflow-x-auto -mx-4 sm:mx-0"><table className="table min-w-[760px]"><thead><tr>{result.columns.map((c: any) => <th key={c.key} className="th">{c.label}</th>)}</tr></thead>

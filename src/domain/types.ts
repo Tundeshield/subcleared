@@ -24,8 +24,8 @@ export interface OrgSettings {
   remindArchived: boolean;
   defaultLinkExpiryDays: number;
   market?: Market; // drives terminology and starter templates
-  locale?: 'en-US' | 'en-GB'; // date format and spelling
-  currency?: 'USD' | 'GBP';
+  locale?: string; // BCP 47, e.g. en-US, en-GB, en-AU — date format and spelling
+  currency?: string; // ISO 4217, used for coverage limits
 }
 
 export type Market = 'US' | 'UK' | 'OTHER';

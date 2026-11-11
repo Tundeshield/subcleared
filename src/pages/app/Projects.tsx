@@ -136,7 +136,7 @@ export function ProjectDrawer({ open, onClose, project }: { open: boolean; onClo
           <Field label="Project manager" hint="Project managers see the projects they manage."><select className="input" value={f.managerUid} onChange={(e) => set('managerUid', e.target.value)}><option value="">Unassigned</option>{active.map((m: any) => <option key={m.uid} value={m.uid}>{m.name || m.email}</option>)}</select></Field>
           <div><div className="label">Project administrators</div>
             {active.length === 0 ? <p className="text-sm text-faint">Loading team…</p> : <div className="grid sm:grid-cols-2 gap-2">{active.map((m: any) => (
-              <label key={m.uid} className="flex items-center gap-2.5 text-base"><input type="checkbox" className="h-4 w-4 accent-[rgb(var(--field))]" checked={f.adminUids.includes(m.uid)} onChange={(e) => set('adminUids', e.target.checked ? [...f.adminUids, m.uid] : f.adminUids.filter((x) => x !== m.uid))} />{m.name || m.email}</label>
+              <label key={m.uid} className="flex items-center gap-2.5 text-base"><input type="checkbox" className="h-4 w-4 accent-[rgb(var(--accent))]" checked={f.adminUids.includes(m.uid)} onChange={(e) => set('adminUids', e.target.checked ? [...f.adminUids, m.uid] : f.adminUids.filter((x) => x !== m.uid))} />{m.name || m.email}</label>
             ))}</div>}
           </div>
         </fieldset>

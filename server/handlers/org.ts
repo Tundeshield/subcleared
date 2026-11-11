@@ -1,7 +1,7 @@
 import { readinessRank } from '../../src/domain/compliance';
 import { addDays, daysBetween, todayIn } from '../../src/domain/dates';
 import { starterRequirements, STARTER_TEMPLATES } from '../../src/domain/library';
-import { MARKETS, marketFromCountry } from '../../src/domain/locale';
+import { countryDefaults, MARKETS, marketFromCountry, validCurrency, validLocale } from '../../src/domain/locale';
 import { canAssignRole, canSeeProject, isProjectScoped, permissionsFor, ROLE_PERMISSIONS } from '../../src/domain/permissions';
 import { getPlan, TRIAL_DAYS } from '../../src/domain/plans';
 import type {
@@ -19,11 +19,13 @@ import type { Identity, Services } from '../services';
 const ROLES = Object.keys(ROLE_PERMISSIONS) as Role[];
 const ALL_PERMS = ROLE_PERMISSIONS.owner;
 
-export const DEFAULT_SETTINGS = (timezone: string, market: Market = 'OTHER'): OrgSettings => {
+export const DEFAULT_SETTINGS = (timezone: string, market: Market = 'OTHER', country?: string): OrgSettings => {
   const m = MARKETS.find((x) => x.id === market)!;
+  const c = country ? countryDefaults(country) : null;
+  const local = c && c.name !== 'Other';
   return {
     timezone, expiringSoonDays: 30, reminderSchedule: [90, 60, 30, 14, 7, 0, -7], escalationDays: 14,
-    retentionYears: 7, remindArchived: false, defaultLinkExpiryDays: 14, market, locale: m.locale, currency: m.currency,
+    retentionYears: 7, remindArchived: false, defaultLinkExpiryDays: 14, market, locale: local ? c!.locale : m.locale, currency: local ? c!.currency : m.currency,
   };
 };
 
@@ -110,7 +112,7 @@ export async function registerOrg(svc: Services, db: Db, identity: Identity, inp
   const orgId = db.newId();
   const trialEnds = new Date(now.getTime() + TRIAL_DAYS * 86_400_000).toISOString();
   const org: Organisation = {
-    id: orgId, name, country, createdAt: now.toISOString(), ownerUid: identity.uid, settings: DEFAULT_SETTINGS(timezone, market),
+    id: orgId, name, country, createdAt: now.toISOString(), ownerUid: identity.uid, settings: DEFAULT_SETTINGS(timezone, market, country),
     subscription: { plan: 'growth', interval: 'month', status: 'trialing', trialEndsAt: trialEnds },
   };
   const member: Member = { uid: identity.uid, email: identity.email, name: personName, role: 'owner', status: 'active', joinedAt: now.toISOString() };
@@ -141,8 +143,8 @@ export async function updateSettings(ctx: Ctx, input: any) {
   if (input.defaultLinkExpiryDays !== undefined) s.defaultLinkExpiryDays = n(input.defaultLinkExpiryDays, 'Link expiry', 1, 30);
   if (input.remindArchived !== undefined) s.remindArchived = !!input.remindArchived;
   if (input.market !== undefined) s.market = oneOf(input.market, ['US', 'UK', 'OTHER'] as const, 'Market');
-  if (input.locale !== undefined) s.locale = oneOf(input.locale, ['en-US', 'en-GB'] as const, 'Date format');
-  if (input.currency !== undefined) s.currency = oneOf(input.currency, ['USD', 'GBP'] as const, 'Currency');
+  if (input.locale !== undefined) { if (typeof input.locale !== 'string' || !validLocale(input.locale)) throw bad('Choose a supported date format'); s.locale = input.locale; }
+  if (input.currency !== undefined) { const cur = String(input.currency).toUpperCase(); if (!validCurrency(cur)) throw bad('Choose a valid currency'); s.currency = cur; }
   if (input.reminderSchedule !== undefined) {
     if (!Array.isArray(input.reminderSchedule) || !input.reminderSchedule.length || input.reminderSchedule.length > 12) throw bad('Reminder schedule needs 1–12 entries');
     s.reminderSchedule = [...new Set(input.reminderSchedule.map((x: any) => n(x, 'Reminder offset', -90, 365)))].sort((a: any, b: any) => b - a) as number[];
@@ -404,7 +406,7 @@ export async function dashboard(ctx: Ctx, input: any) {
 
   const attention = [
     { key: 'reviews', label: 'Documents awaiting review', count: pending.length, link: '/app/reviews', action: 'Review' },
-    { key: 'missing', label: 'Subcontractors with missing requirements', count: missingSubs.size, link: '/app/subcontractors?readiness=not_ready', action: 'Chase' },
+    { key: 'missing', label: 'Subcontractors with missing requirements', count: missingSubs.size, link: '/app/subcontractors?issue=outstanding', action: 'Request documents' },
     { key: 'expired', label: 'Expired insurance documents', count: expired.filter((x) => isInsurance(x.v.documentId)).length, link: '/app/renewals?window=expired', action: 'Request renewal' },
     { key: 'expiring', label: 'Documents expiring within 30 days', count: expiring30.length, link: '/app/renewals?window=30', action: 'Plan renewals' },
     { key: 'projects', label: 'Projects with subcontractors not ready', count: projectsNotReady.length, link: '/app/projects?readiness=not_ready', action: 'Open projects' },

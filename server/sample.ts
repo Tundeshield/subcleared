@@ -116,9 +116,16 @@ export async function loadSample(ctx: Ctx) {
 
   // Requirement keys → this organisation's requirement ids (by starter name).
   const { starterRequirements } = await import('../src/domain/library');
-  const starters = starterRequirements(market);
+  const starters = starterRequirements(ctx.org.settings.market ?? 'OTHER');
   const reqId = (key: string) => reqs.find((r) => r.name === starters.find((x) => x.key === key)?.name)?.id;
-  for (const [si, key, outcome, expiry] of set.documents) {
+  // Where a requirement the sample set treats as a manual check is a document in this organisation's library
+  // (the neutral library asks for tax registration as a document), confirmed subcontractors get an approved copy.
+  const documents = [...set.documents];
+  for (const si of set.confirmed) for (const key of ['tax']) {
+    const def = reqs.find((r) => r.id === reqId(key));
+    if (def?.kind === 'document' && !documents.some(([d, k]) => d === si && k === key)) documents.push([si, key, 'approved', null] as (typeof documents)[number]);
+  }
+  for (const [si, key, outcome, expiry] of documents) {
     const rid = reqId(key);
     const def = reqs.find((r) => r.id === rid);
     if (!rid || !def || def.kind !== 'document') continue;

@@ -23,19 +23,19 @@ export default function Pricing() {
           <p className="mt-4 text-lg text-muted max-w-2xl leading-relaxed">One subscription per organisation. Every plan starts with a {trial}-day free trial, and subcontractors never pay to submit documents.</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Segmented label="Billing interval" value={interval} onChange={setInterval} options={[{ value: 'month', label: 'Monthly' }, { value: 'year', label: 'Annual — save about 17%' }]} />
-            <Segmented label="Currency" value={currency} onChange={setCurrency} options={[{ value: 'USD', label: 'US $' }, { value: 'GBP', label: 'UK £' }]} />
+            <Segmented label="Currency" value={currency} onChange={setCurrency} options={[{ value: 'USD', label: 'USD $' }, { value: 'GBP', label: 'GBP £' }]} />
           </div>
         </section>
-        <section className="max-w-6xl mx-auto px-5 sm:px-8 grid md:grid-cols-3 gap-x-12 border-t border-charcoal">
+        <section className="max-w-6xl mx-auto px-5 sm:px-8 grid md:grid-cols-3 gap-x-12 border-t border-ink">
           {plans.map((p, i) => (
             <div key={p.id} className="py-8 flex flex-col border-b border-line md:border-b-0">
-              <div className="flex items-baseline justify-between"><h2 className="text-lg font-semibold">{p.name}</h2>{i === 1 && <span className="text-xs text-field font-medium uppercase tracking-[0.1em]">Most chosen</span>}</div>
+              <div className="flex items-baseline justify-between"><h2 className="text-lg font-semibold">{p.name}</h2>{i === 1 && <span className="text-xs text-accent font-medium uppercase tracking-[0.1em]">Most chosen</span>}</div>
               <p className="text-muted mt-1 min-h-[3rem]">{p.description}</p>
               <div className="mt-6"><span className="text-4xl tnum tracking-[-0.02em]">{money(planPrice(p, interval, currency), currency)}</span><span className="text-muted"> / month</span></div>
               <div className="text-sm text-faint mt-1">{interval === 'year' ? `Billed annually, ${money(planPrice(p, interval, currency) * 12, currency)} a year` : 'Billed monthly'}</div>
               <ul className="mt-8 space-y-2.5">
                 {[lim(p.limits.activeSubcontractors, 'active subcontractors'), lim(p.limits.activeProjects, 'active projects'), lim(p.limits.users, 'team members'), p.limits.storageGb ? `${p.limits.storageGb} GB document storage` : 'Unlimited storage', ...p.features].map((f) => (
-                  <li key={f} className="flex gap-2.5"><span className="text-field mt-0.5">{Icon.check()}</span><span>{f}</span></li>
+                  <li key={f} className="flex gap-2.5"><span className="text-accent mt-0.5">{Icon.check()}</span><span>{f}</span></li>
                 ))}
               </ul>
               <div className="flex-1" />
@@ -45,7 +45,7 @@ export default function Pricing() {
         </section>
         <section className="max-w-3xl mx-auto px-5 sm:px-8 mt-24">
           <h2 className="text-2xl font-medium">Questions</h2>
-          <dl className="mt-6 border-t border-charcoal">
+          <dl className="mt-6 border-t border-ink">
             {[
               ['What counts as an active subcontractor?', 'Any company in your directory that isn’t archived. Archived records keep their full history and don’t count toward your limit.'],
               ['Do subcontractors need an account?', 'No. They get a secure, expiring link for exactly what you asked for. Contacts invited to the full portal confirm their email with a one-time code.'],

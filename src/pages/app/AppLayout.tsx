@@ -10,9 +10,10 @@ import { cx, Dialog, Drawer, Glyph, Icon, Logo, Segmented, Spinner } from '../..
 type NavItem = { to: string; label: string; perm?: string; count?: 'reviews' };
 const WORKSPACE: NavItem[] = [
   { to: 'overview', label: 'Overview' }, { to: 'projects', label: 'Projects' }, { to: 'subcontractors', label: 'Subcontractors' },
-  { to: 'requirements', label: 'Requirements' }, { to: 'documents', label: 'Documents' }, { to: 'reviews', label: 'Reviews', perm: 'documents.review', count: 'reviews' },
+  { to: 'documents', label: 'Documents' }, { to: 'reviews', label: 'Reviews', perm: 'documents.review', count: 'reviews' },
   { to: 'renewals', label: 'Renewals' }, { to: 'reports', label: 'Reports', perm: 'reports.view' },
 ];
+const CONFIG: NavItem[] = [{ to: 'requirements', label: 'Requirements & templates' }];
 const ADMIN: NavItem[] = [{ to: 'team', label: 'Team and permissions' }, { to: 'settings', label: 'Settings' }, { to: 'billing', label: 'Billing' }];
 
 export default function AppLayout() {
@@ -43,7 +44,7 @@ export default function AppLayout() {
   const item = (n: NavItem) => (
     <li key={n.to}>
       <NavLink to={`/app/${n.to}`} className={({ isActive }) => cx('relative flex items-center justify-between rounded px-3 h-9 text-[0.9375rem] transition-colors',
-        isActive ? 'text-charcoal font-medium bg-charcoal/[0.05] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-field before:rounded-full' : 'text-muted hover:text-charcoal')}>
+        isActive ? 'text-accent font-medium bg-accent-tint before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-accent before:rounded-full' : 'text-muted hover:text-ink')}>
         {n.label}
         {n.count === 'reviews' && reviewCount > 0 && <span className="text-xs tnum text-muted" aria-label={`${reviewCount} awaiting review`}>{reviewCount}</span>}
       </NavLink>
@@ -63,6 +64,8 @@ export default function AppLayout() {
       <div className="flex-1 overflow-y-auto px-2.5 pb-6">
         <div className="eyebrow px-3 pt-3 pb-2">Workspace</div>
         <ul className="space-y-0.5">{WORKSPACE.filter((n) => !n.perm || can(n.perm as any)).map(item)}</ul>
+        <div className="eyebrow px-3 pt-7 pb-2">Configuration</div>
+        <ul className="space-y-0.5">{CONFIG.map(item)}</ul>
         <div className="eyebrow px-3 pt-7 pb-2">Administration</div>
         <ul className="space-y-0.5">{ADMIN.map(item)}</ul>
       </div>
@@ -74,9 +77,9 @@ export default function AppLayout() {
     <div className="min-h-screen lg:grid lg:grid-cols-[15.5rem_minmax(0,1fr)]">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[70] btn-primary">Skip to content</a>
       <aside className="hidden lg:block border-r border-line h-screen sticky top-0">{sidebar}</aside>
-      {navOpen && <div className="lg:hidden fixed inset-0 z-40"><div className="absolute inset-0 bg-charcoal/30" onClick={() => setNavOpen(false)} /><aside className="absolute left-0 top-0 bottom-0 w-72 bg-ivory border-r border-line slide-in">{sidebar}</aside></div>}
+      {navOpen && <div className="lg:hidden fixed inset-0 z-40"><div className="absolute inset-0 bg-ink/30" onClick={() => setNavOpen(false)} /><aside className="absolute left-0 top-0 bottom-0 w-72 bg-canvas border-r border-line slide-in">{sidebar}</aside></div>}
       <div className="min-w-0 flex flex-col">
-        <header className="h-16 bg-ivory/95 backdrop-blur sticky top-0 z-30 flex items-center gap-1.5 sm:gap-3 px-4 sm:px-6 lg:px-10 border-b border-line">
+        <header className="h-16 bg-canvas/95 backdrop-blur sticky top-0 z-30 flex items-center gap-1.5 sm:gap-3 px-4 sm:px-6 lg:px-10 border-b border-line">
           <button className="lg:hidden btn-ghost -ml-2 px-2" onClick={() => setNavOpen(true)} aria-label="Open navigation">{Icon.menu()}</button>
           <Link to="/app/overview" className="lg:hidden" aria-label="Overview"><Logo /></Link>
           <button onClick={() => setSearchOpen(true)} className="hidden sm:flex flex-1 max-w-md h-10 rounded border border-line bg-paper px-3 items-center gap-2.5 text-sm text-faint hover:border-line-strong transition-colors" aria-label="Search">
@@ -86,14 +89,14 @@ export default function AppLayout() {
           <button className="sm:hidden btn-ghost px-2" onClick={() => setSearchOpen(true)} aria-label="Search">{Icon.search('w-5 h-5')}</button>
           <button className="btn-ghost px-2" onClick={() => setHelpOpen(true)} aria-label="Help">{Icon.help()}</button>
           <Link to="/app/notifications" className="btn-ghost px-2 relative" aria-label={`Notifications${notif.data?.unread ? `, ${notif.data.unread} unread` : ''}`}>
-            {Icon.bell()}{notif.data?.unread ? <span className="absolute top-2 right-1.5 min-w-[1rem] h-4 px-1 rounded-full bg-field text-ivory text-[0.625rem] leading-4 text-center tnum">{notif.data.unread > 9 ? '9+' : notif.data.unread}</span> : null}
+            {Icon.bell()}{notif.data?.unread ? <span className="absolute top-2 right-1.5 min-w-[1rem] h-4 px-1 rounded-full bg-accent text-canvas text-[0.625rem] leading-4 text-center tnum">{notif.data.unread > 9 ? '9+' : notif.data.unread}</span> : null}
           </Link>
           <UserMenu />
         </header>
         {(trialDays !== null || inactive || sub.status === 'past_due' || org.hasSample) && (
           <div className="px-4 sm:px-6 lg:px-10 py-2.5 text-sm border-b border-line flex flex-wrap items-center gap-x-6 gap-y-1 text-muted">
             {org.hasSample && <span className="flex items-center gap-2"><Glyph tone="none" className="w-3.5 h-3.5" />This workspace includes sample data, labelled “Sample”. <Link className="link" to="/app/settings/data">Remove it</Link></span>}
-            {(inactive || sub.status === 'past_due') ? <span className="flex items-center gap-2 text-charcoal font-medium"><Glyph tone="blocked" className="w-3.5 h-3.5" />{inactive ? 'Subscription inactive — existing records stay available; adding new records is paused.' : 'Your last payment failed.'} {can('billing.manage') && <Link className="link font-normal" to="/app/billing">Manage billing</Link>}</span>
+            {(inactive || sub.status === 'past_due') ? <span className="flex items-center gap-2 text-ink font-medium"><Glyph tone="blocked" className="w-3.5 h-3.5" />{inactive ? 'Subscription inactive — existing records stay available; adding new records is paused.' : 'Your last payment failed.'} {can('billing.manage') && <Link className="link font-normal" to="/app/billing">Manage billing</Link>}</span>
               : trialDays !== null && <span>Free trial · {trialDays} day{trialDays === 1 ? '' : 's'} left {can('billing.manage') && <Link className="link ml-1" to="/app/billing">Choose a plan</Link>}</span>}
           </div>
         )}
@@ -122,7 +125,7 @@ function UserMenu() {
   const initials = (me!.user.name || me!.user.email).split(/[\s@.]+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('');
   return (
     <div className="relative" ref={ref}>
-      <button className="h-9 w-9 rounded-full bg-charcoal text-ivory text-xs font-medium tracking-wide ml-1" onClick={() => setOpen((o) => !o)} aria-label="Account and display settings" aria-expanded={open}>{initials}</button>
+      <button className="h-9 w-9 rounded-full bg-ink text-canvas text-xs font-medium tracking-wide ml-1" onClick={() => setOpen((o) => !o)} aria-label="Account and display settings" aria-expanded={open}>{initials}</button>
       {open && (
         <div className="absolute right-0 mt-2 w-72 rounded-md bg-paper border border-line shadow-pop p-4 fade-in z-40">
           <div className="pb-3 border-b border-line"><div className="font-medium truncate">{me!.user.name || me!.user.email}</div><div className="text-sm text-muted truncate">{me!.user.email}</div><div className="text-xs text-faint mt-0.5">{ROLE_LABELS[me!.member!.role]} · {me!.org!.name}</div></div>

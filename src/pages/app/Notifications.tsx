@@ -17,9 +17,9 @@ export default function Notifications() {
       <div className="mt-6">
         {loading && !data ? <Skeleton /> : error ? <ErrorState error={error} onRetry={reload} /> : data.items.length === 0 ? <Empty title={view === 'unread' ? "You're all caught up" : 'No notifications yet'} /> : (
           <>
-            <ul className="border-t border-charcoal/80">{paged.slice.map((n: any) => (
+            <ul className="border-t border-line-strong">{paged.slice.map((n: any) => (
               <li key={n.id} className="flex gap-4 py-4 border-b border-line">
-                <span className={cx('mt-2 w-2 h-2 rounded-full shrink-0', n.readAt ? 'bg-transparent' : 'bg-field')} aria-label={n.readAt ? undefined : 'Unread'} />
+                <span className={cx('mt-2 w-2 h-2 rounded-full shrink-0', n.readAt ? 'bg-transparent' : 'bg-accent')} aria-label={n.readAt ? undefined : 'Unread'} />
                 <div className="flex-1 min-w-0">
                   {n.link ? <Link to={n.link} onClick={() => !n.readAt && mark.run({ ids: [n.id] })} className={cx('hover:underline underline-offset-4', !n.readAt && 'font-medium')}>{n.title}</Link> : <div className={cx(!n.readAt && 'font-medium')}>{n.title}</div>}
                   <p className="text-sm text-muted whitespace-pre-line mt-0.5">{n.body}</p>

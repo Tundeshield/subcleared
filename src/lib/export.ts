@@ -22,10 +22,11 @@ export function exportCsv(title: string, columns: Column[], rows: Record<string,
 }
 
 // Brand colours for print.
-const CHARCOAL: [number, number, number] = [37, 43, 39];
-const FIELD: [number, number, number] = [82, 116, 95];
-const IVORY: [number, number, number] = [246, 245, 240];
-const MUTED: [number, number, number] = [108, 112, 107];
+const CHARCOAL: [number, number, number] = [22, 27, 31];
+const FIELD: [number, number, number] = [21, 94, 117];
+const SUCCESS: [number, number, number] = [30, 120, 74];
+const IVORY: [number, number, number] = [244, 246, 247];
+const MUTED: [number, number, number] = [98, 108, 118];
 
 /** A business report: branded header, context, summary figures and a clean table. */
 export async function exportPdf(o: {
@@ -73,7 +74,7 @@ export async function exportPdf(o: {
     const colW = (W - 2 * M) / o.summary.length;
     o.summary.forEach(([k, v], i) => {
       const x = M + i * colW;
-      doc.setFontSize(20); doc.setTextColor(...(k.toLowerCase() === 'ready' ? FIELD : CHARCOAL)); doc.text(String(v), x, y + 30);
+      doc.setFontSize(20); doc.setTextColor(...(k.toLowerCase() === "ready" ? SUCCESS : CHARCOAL)); doc.text(String(v), x, y + 30);
       doc.setFontSize(8.5); doc.setTextColor(...MUTED); doc.text(k, x, y + 44);
     });
     y += 62;

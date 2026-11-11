@@ -1,22 +1,43 @@
-import { Fragment, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import { api, useApi, useMutation } from '../../lib/api';
 import { exportCsv, exportPdf } from '../../lib/export';
 import { useSession } from '../../lib/session';
 import {
-  Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Empty, ErrorState, FilterSelect, FormError, Glyph, humanize, Icon, KeyValue, Menu, Metric, MoreButton,
+  Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Empty, ErrorState, FormError, Glyph, HelpTip, humanize, Icon, KeyValue, Menu, MoreButton,
   PageHeader, PageLoading, ReadinessBadge, ReadinessBar, SampleTag, SearchInput, Spinner, StatusText, Tabs, Toolbar, useToast,
 } from '../../ui';
 import { ProjectDrawer } from './Projects';
 import { activityLine, RequestDialog } from './shared';
 
-type Tab = 'overview' | 'subcontractors' | 'requirements' | 'documents' | 'activity' | 'details';
+type Tab = 'readiness' | 'requirements' | 'documents' | 'activity' | 'details';
+type Focus = 'all' | 'not_ready' | 'review' | 'expiring';
+
+const MISSING = ['missing', 'not_requested'];
+const REQUESTED = ['requested', 'overdue'];
+const REVIEW = ['awaiting_review', 'submitted', 'review_required'];
+
+/** Concise issue summary for one subcontractor on one project. */
+export function issueSummary(results: any[]) {
+  const n = (f: (r: any) => boolean) => results.filter(f).length;
+  const parts: [number, string][] = [
+    [n((r) => r.mandatory && MISSING.includes(r.status)), 'missing'],
+    [n((r) => r.mandatory && REQUESTED.includes(r.status)), 'requested, not received'],
+    [n((r) => r.status === 'expired'), 'expired'],
+    [n((r) => r.status === 'rejected'), 'rejected'],
+    [n((r) => REVIEW.includes(r.status)), 'awaiting review'],
+    [n((r) => r.status === 'expiring_soon'), 'expiring soon'],
+  ];
+  return parts.filter(([c]) => c > 0).map(([c, l]) => `${c} ${l}`);
+}
 
 export default function ProjectDetail() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) || 'overview';
+  const raw = params.get('tab');
+  const tab: Tab = raw === 'requirements' || raw === 'documents' || raw === 'activity' || raw === 'details' ? raw : 'readiness';
+  const focus = (params.get('show') as Focus) || 'all';
   const { can } = useSession();
   const { data, error, loading, reload } = useApi<any>('projects.get', { projectId: id });
   const [edit, setEdit] = useState(false);
@@ -31,6 +52,10 @@ export default function ProjectDetail() {
   const c = data.counts;
   const archived = p.status === 'archived';
   const setTab = (t: Tab) => setParams({ tab: t });
+  const setFocus = (f: Focus) => setParams(f === 'all' ? {} : { show: f });
+  const reviewSubs = data.subcontractors.filter((s: any) => s.results.some((r: any) => REVIEW.includes(r.status))).length;
+  const expiringSubs = data.subcontractors.filter((s: any) => s.results.some((r: any) => r.status === 'expiring_soon')).length;
+  const notReadySubs = c.notReady + c.action;
   const report = async () => {
     setExporting(true);
     try {
@@ -42,6 +67,12 @@ export default function ProjectDetail() {
       });
     } catch (e: any) { toast(e.message, 'bad'); } finally { setExporting(false); }
   };
+  const chip = (f: Focus, label: string, n: number) => (
+    <button type="button" onClick={() => setParams(f === 'all' || (focus === f && tab === 'readiness') ? {} : { show: f })} aria-pressed={focus === f}
+      className={cx('inline-flex items-baseline gap-1.5 rounded px-2.5 py-1.5 text-sm transition-colors', focus === f ? 'bg-accent-tint text-accent font-medium' : 'text-muted hover:bg-raised hover:text-ink', n === 0 && focus !== f && 'opacity-60')}>
+      <span className="tnum font-medium text-ink">{n}</span>{label}
+    </button>
+  );
   return (
     <div>
       <PageHeader crumbs={[{ label: 'Projects', to: '/app/projects' }, { label: p.name }]}
@@ -49,7 +80,7 @@ export default function ProjectDetail() {
         meta={<>{p.code && <span>{p.code}</span>}{p.location && <span>{p.location}</span>}<span>{p.managerName ? `Managed by ${p.managerName}` : 'No project manager'}</span><span>{humanize(p.status)}</span>{p.startDate && <span>{formatDate(p.startDate)} – {formatDate(p.endDate)}</span>}</>}
         actions={<>
           <button className="btn-secondary" onClick={report} disabled={exporting}>{exporting && <Spinner />}Export readiness report</button>
-          {!archived && can('projects.edit') && <button className="btn-primary" onClick={() => setAssign(true)}>Assign subcontractors</button>}
+          {!archived && can('projects.edit') && <button className="btn-primary" onClick={() => setAssign(true)}>{Icon.plus()}Assign subcontractors</button>}
           <Menu trigger={(t) => <MoreButton label="More project actions" {...t} />} items={[
             !archived && can('projects.edit') && { label: 'Edit project details', onClick: () => setEdit(true) },
             can('requirements.manage') && { label: 'Manage requirements', onClick: () => setTab('requirements') },
@@ -57,20 +88,23 @@ export default function ProjectDetail() {
           ]} />
         </>} />
       {archived && <div className="mb-8"><Callout title="Archived">Readiness is frozen as it was when the project was archived, and reminders stop for documents only this project needs.</Callout></div>}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-y-6 pb-8 mb-8 border-b border-line">
-        <Metric label="Assigned" value={c.total} />
-        <Metric label="Ready" value={c.ready} emphasis="field" />
-        <Metric label="Not ready" value={c.notReady} />
-        <Metric label="Awaiting review" value={c.awaitingReview} />
-        <Metric label="Expiring soon" value={c.expiring} />
-      </div>
+      {c.total > 0 && (
+        <section aria-label="Project readiness" className="mb-8 rounded-md border border-line bg-paper px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-3">
+          <div className="min-w-[14rem]">
+            <div className="flex items-baseline gap-2"><span className={cx('text-2xl tnum font-medium', c.ready === c.total ? 'text-success' : 'text-ink')}>{c.ready} of {c.total}</span><span className="text-muted">ready to work</span><HelpTip>A subcontractor is ready when every mandatory requirement on this project is approved and in date. The same company can be ready on one project and not another.</HelpTip></div>
+            <ReadinessBar className="mt-2 w-full max-w-xs" ready={c.ready} action={c.action} notReady={c.notReady} total={c.total} />
+          </div>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Show subcontractors">
+            {chip('all', 'all', c.total)}{chip('not_ready', 'not ready', notReadySubs)}{chip('review', 'with documents to review', reviewSubs)}{chip('expiring', 'with documents expiring', expiringSubs)}
+          </div>
+        </section>
+      )}
       <Tabs value={tab} onChange={setTab} tabs={[
-        { value: 'overview', label: 'Overview' }, { value: 'subcontractors', label: 'Subcontractors', count: c.total }, { value: 'requirements', label: 'Requirements', count: data.requirements.length },
+        { value: 'readiness', label: 'Readiness', count: c.total }, { value: 'requirements', label: 'Requirements', count: data.requirements.length },
         { value: 'documents', label: 'Documents' }, { value: 'activity', label: 'Activity' }, { value: 'details', label: 'Details' },
       ]} />
-      <div className="mt-8">
-        {tab === 'overview' && <OverviewTab data={data} onAssign={() => setAssign(true)} goTo={setTab} />}
-        {tab === 'subcontractors' && <SubsTab data={data} onAssign={() => setAssign(true)} />}
+      <div className="mt-6">
+        {tab === 'readiness' && <ReadinessTab data={data} focus={focus} setFocus={setFocus} onAssign={() => setAssign(true)} goTo={setTab} />}
         {tab === 'requirements' && <RequirementsTab data={data} />}
         {tab === 'documents' && <DocumentsTab projectId={p.id} />}
         {tab === 'activity' && <ActivityTab projectId={p.id} />}
@@ -93,106 +127,92 @@ export default function ProjectDetail() {
   );
 }
 
-function OverviewTab({ data, onAssign, goTo }: { data: any; onAssign: () => void; goTo: (t: Tab) => void }) {
-  const { can } = useSession();
-  if (data.requirements.length === 0) return <Empty title="This project has no requirements yet" action={can('requirements.manage') && <button className="btn-primary" onClick={() => goTo('requirements')}>Add requirements</button>}>Readiness can't be worked out until the project says what each subcontractor must provide.</Empty>;
-  if (data.subcontractors.length === 0) return <Empty title="No subcontractors assigned" action={can('projects.edit') && data.project.status !== 'archived' && <button className="btn-primary" onClick={onAssign}>Assign subcontractors</button>}>Assign subcontractors to see who is ready to work on this project and what is holding the others back.</Empty>;
-  const blocked = data.subcontractors.filter((s: any) => s.readiness === 'not_ready');
-  const attention = data.subcontractors.filter((s: any) => s.readiness === 'action_required');
-  const ready = data.subcontractors.filter((s: any) => s.readiness === 'ready');
-  const c = data.counts;
-  return (
-    <div className="grid lg:grid-cols-[1.4fr_1fr] gap-x-14 gap-y-10">
-      <section>
-        <h2 className="text-lg font-semibold">What's stopping subcontractors being ready</h2>
-        <div className="mt-3 text-sm text-muted tnum">{c.ready} of {c.total} ready</div>
-        <ReadinessBar className="mt-2 max-w-md" ready={c.ready} action={c.action} notReady={c.notReady} total={c.total} />
-        {blocked.length + attention.length === 0 ? <p className="mt-6 flex gap-2 items-center text-field"><Glyph tone="ok" />Everyone assigned to this project is ready to work.</p> : (
-          <ul className="mt-6 border-t border-charcoal/80">
-            {[...blocked, ...attention].map((s: any) => (
-              <li key={s.id} className="py-5 border-b border-line">
-                <div className="flex flex-wrap items-baseline justify-between gap-3"><Link to={`/app/subcontractors/${s.id}?tab=requirements&project=${data.project.id}`} className="font-medium hover:underline underline-offset-4">{s.legalName}</Link><ReadinessBadge value={s.readiness} size="sm" /></div>
-                <ul className="mt-2.5 space-y-1.5">{s.results.filter((r: any) => r.blocking || ['expiring_soon', 'awaiting_review', 'review_required'].includes(r.status)).map((r: any) => (
-                  <li key={r.requirementId} className="grid sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] gap-x-6 gap-y-0.5 text-sm"><StatusText wrap value={r.status} label={r.requirementName} /><span className="text-muted pl-[21px] sm:pl-0">{r.reason}</span></li>
-                ))}</ul>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      <section>
-        <h2 className="text-lg font-semibold">Ready to work</h2>
-        {ready.length === 0 ? <p className="mt-4 text-muted">No one is ready yet.</p> : (
-          <ul className="mt-4 border-t border-charcoal/80">{ready.map((s: any) => (
-            <li key={s.id} className="py-3 border-b border-line flex justify-between gap-3"><Link to={`/app/subcontractors/${s.id}`} className="hover:underline underline-offset-4">{s.legalName}</Link><span className="text-sm text-faint">{s.trade}</span></li>
-          ))}</ul>
-        )}
-        <button className="btn-quiet mt-5" onClick={() => goTo('subcontractors')}>See all subcontractors {Icon.arrow()}</button>
-      </section>
-    </div>
-  );
-}
+const ORDER: Record<string, number> = { not_ready: 0, action_required: 1, not_evaluated: 2, ready: 3 };
 
-function SubsTab({ data, onAssign }: { data: any; onAssign: () => void }) {
+function ReadinessTab({ data, focus, setFocus, onAssign, goTo }: { data: any; focus: Focus; setFocus: (f: Focus) => void; onAssign: () => void; goTo: (t: Tab) => void }) {
   const { can } = useSession();
   const [q, setQ] = useState('');
-  const [filter, setFilter] = useState('');
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [request, setRequest] = useState<string | null>(null);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [request, setRequest] = useState<{ sub: string; reqs?: string[] } | null>(null);
   const [remove, setRemove] = useState<any>(null);
   const unassign = useMutation('projects.unassign');
   const toast = useToast();
   const nav = useNavigate();
-  const rows = useMemo(() => data.subcontractors.filter((s: any) => (!filter || s.readiness === filter) && `${s.legalName} ${s.trade} ${s.contact?.name ?? ''} ${s.contact?.email ?? ''}`.toLowerCase().includes(q.toLowerCase())), [data, q, filter]);
-  const flat = rows.map((s: any) => ({ ...s, contactText: s.contact ? `${s.contact.name} <${s.contact.email}>` : '', satisfied: `${s.required - s.missing.length - s.expired.length} of ${s.required}`, outstanding: [...s.missing, ...s.expired.map((e: string) => `${e} (expired)`)].join('; '), readinessText: humanize(s.readiness), last: formatDate(s.lastActivityAt) }));
-  if (data.subcontractors.length === 0) return <Empty title="No subcontractors assigned" action={can('projects.edit') && data.project.status !== 'archived' && <button className="btn-primary" onClick={onAssign}>Assign subcontractors</button>}>Assign subcontractors to see who is ready to work on this project.</Empty>;
+  const editable = can('projects.edit') && data.project.status !== 'archived';
+  const rows = useMemo(() => data.subcontractors
+    .filter((s: any) => focus === 'all' || (focus === 'not_ready' && s.readiness !== 'ready') || (focus === 'review' && s.results.some((r: any) => REVIEW.includes(r.status))) || (focus === 'expiring' && s.results.some((r: any) => r.status === 'expiring_soon')))
+    .filter((s: any) => `${s.legalName} ${s.trade} ${s.contact?.name ?? ''} ${s.contact?.email ?? ''}`.toLowerCase().includes(q.toLowerCase()))
+    .sort((a: any, b: any) => (ORDER[a.readiness] ?? 9) - (ORDER[b.readiness] ?? 9) || a.legalName.localeCompare(b.legalName)), [data, q, focus]);
+  if (data.requirements.length === 0) return <Empty title="This project has no requirements yet" action={can('requirements.manage') && <button className="btn-primary" onClick={() => goTo('requirements')}>Add requirements</button>}>Readiness can't be worked out until the project says what each subcontractor must provide. Start from a template — you can adjust it afterwards.</Empty>;
+  if (data.subcontractors.length === 0) return <Empty title="No subcontractors on this project yet" action={editable && <button className="btn-primary" onClick={onAssign}>Assign subcontractors</button>}>Assign the companies working on this project. SubCleared then shows who is ready and exactly what is holding the others back.</Empty>;
+  const flat = rows.map((s: any) => ({ ...s, contactText: s.contact ? `${s.contact.name} <${s.contact.email}>` : '', issues: issueSummary(s.results).join('; '), readinessText: humanize(s.readiness), last: formatDate(s.lastActivityAt) }));
+  const needs = rows.filter((s: any) => s.readiness !== 'ready');
+  const ready = rows.filter((s: any) => s.readiness === 'ready');
+  const row = (s: any) => {
+    const issues = issueSummary(s.results);
+    const toReview = s.results.find((r: any) => REVIEW.includes(r.status) && r.versionId);
+    const outstanding = s.results.filter((r: any) => r.mandatory && [...MISSING, ...REQUESTED, 'expired', 'rejected'].includes(r.status) || r.status === 'expiring_soon');
+    const isOpen = !!open[s.id];
+    const next = toReview && can('documents.review') ? <Link to={`/app/reviews/${toReview.versionId}`} className="btn-primary btn-sm">Review document</Link>
+      : outstanding.length && can('requests.send') ? <button className="btn-secondary btn-sm" onClick={() => setRequest({ sub: s.id, reqs: outstanding.map((r: any) => r.requirementId) })}>Request documents</button>
+      : null;
+    return (
+      <li key={s.id} className="border-b border-line">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_9rem_13rem] items-center gap-x-4 gap-y-2 py-4">
+          <button type="button" className="p-1.5 -m-1 rounded text-faint hover:text-ink hover:bg-raised" aria-expanded={isOpen} aria-controls={`req-${s.id}`} aria-label={`${isOpen ? 'Hide' : 'Show'} requirements for ${s.legalName}`} onClick={() => setOpen({ ...open, [s.id]: !isOpen })}>
+            <span className={cx('inline-block transition-transform', isOpen && 'rotate-90')}>{Icon.chevron()}</span>
+          </button>
+          <div className="min-w-0">
+            <Link to={`/app/subcontractors/${s.id}?project=${data.project.id}`} className="font-medium hover:underline underline-offset-4">{s.legalName}</Link>{s.sample && <> <SampleTag /></>}
+            <div className="text-sm text-faint truncate">{[s.trade, s.contact?.name, s.status === 'suspended' && 'Suspended'].filter(Boolean).join(' · ')}</div>
+          </div>
+          <div className="col-start-2 md:col-start-auto text-sm min-w-0">{issues.length ? <span className="text-ink">{issues.join(' · ')}</span> : <span className="text-faint">All requirements met</span>}</div>
+          <div className="col-start-2 md:col-start-auto"><ReadinessBadge value={s.readiness} size="sm" /></div>
+          {next && <div className="col-start-2 sm:hidden">{next}</div>}
+          <div className="col-start-3 row-start-1 md:col-start-auto md:row-start-auto flex items-center justify-end gap-2">
+            <span className="hidden sm:inline-flex">{next}</span>
+            <Menu trigger={(t) => <MoreButton label={`Actions for ${s.legalName}`} {...t} />} items={[
+              can('requests.send') && { label: 'Request documents', onClick: () => setRequest({ sub: s.id }) },
+              { label: 'Open subcontractor profile', onClick: () => nav(`/app/subcontractors/${s.id}?project=${data.project.id}`) },
+              editable && { label: 'Remove from project', onClick: () => setRemove(s), danger: true },
+            ]} />
+          </div>
+        </div>
+        {isOpen && (
+          <div id={`req-${s.id}`} className="pb-5 md:pl-10">
+            <ul className="rounded-md border border-line bg-paper divide-y divide-line">
+              {[...s.results].sort((a: any, b: any) => Number(b.blocking) - Number(a.blocking)).map((r: any) => {
+                const act = REVIEW.includes(r.status) && r.versionId && can('documents.review') ? <Link className="btn-quiet" to={`/app/reviews/${r.versionId}`}>Review</Link>
+                  : [...MISSING, ...REQUESTED, 'expired', 'rejected', 'expiring_soon'].includes(r.status) && can('requests.send') ? <button className="btn-quiet" onClick={() => setRequest({ sub: s.id, reqs: [r.requirementId] })}>{r.status === 'expiring_soon' || r.status === 'expired' ? 'Request renewal' : r.status === 'rejected' ? 'Request replacement' : REQUESTED.includes(r.status) ? 'Send again' : 'Request'}</button>
+                  : r.documentId ? <Link className="btn-quiet" to={`/app/documents/${r.documentId}`}>View document</Link> : null;
+                return (
+                  <li key={r.requirementId} className="grid sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto] gap-x-6 gap-y-1 px-4 py-3 text-sm">
+                    <div className="min-w-0"><div className="font-medium text-ink">{r.requirementName}{!r.mandatory && <span className="text-faint font-normal"> · optional</span>}</div><StatusText value={r.status} /></div>
+                    <div className="text-muted min-w-0">{/^Nothing submitted and no request sent yet\.?$/.test(r.reason) ? <span className="text-faint">Not requested yet</span> : r.reason}</div>
+                    <div className="sm:text-right">{act}</div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </li>
+    );
+  };
   return (
     <>
-      <Toolbar right={<button className="btn-secondary btn-sm" disabled={!rows.length} onClick={() => exportCsv(`${data.project.name} subcontractors`, [{ key: 'legalName', label: 'Subcontractor' }, { key: 'trade', label: 'Trade' }, { key: 'contactText', label: 'Contact' }, { key: 'satisfied', label: 'Requirements satisfied' }, { key: 'outstanding', label: 'Outstanding' }, { key: 'readinessText', label: 'Readiness' }, { key: 'summary', label: 'Reason' }, { key: 'last', label: 'Last activity' }], flat)}>Export CSV</button>}>
+      <Toolbar right={<button className="btn-secondary btn-sm" disabled={!rows.length} onClick={() => exportCsv(`${data.project.name} readiness`, [{ key: 'legalName', label: 'Subcontractor' }, { key: 'trade', label: 'Trade' }, { key: 'contactText', label: 'Contact' }, { key: 'readinessText', label: 'Readiness' }, { key: 'issues', label: 'Issues' }, { key: 'summary', label: 'Reason' }, { key: 'last', label: 'Last activity' }], flat)}>Export CSV</button>}>
         <SearchInput value={q} onChange={setQ} placeholder="Search company, trade or contact" className="w-full sm:w-80" />
-        <FilterSelect label="Readiness" value={filter} onChange={setFilter} options={[{ value: 'not_ready', label: 'Not ready' }, { value: 'action_required', label: 'Action required' }, { value: 'ready', label: 'Ready' }, { value: 'not_evaluated', label: 'Not evaluated' }]} />
+        {focus !== 'all' && <button className="btn-ghost btn-sm" onClick={() => setFocus('all')}>{Icon.x()}Clear filter</button>}
       </Toolbar>
-      {rows.length === 0 ? <Empty title="No subcontractors match" /> : (
-        <div className="overflow-x-auto -mx-4 sm:mx-0">
-          <table className="table min-w-[960px]">
-            <thead><tr><th className="th w-8"><span className="sr-only">Expand</span></th><th className="th">Subcontractor</th><th className="th">Contact</th><th className="th">Requirements satisfied</th><th className="th w-[26%]">Outstanding</th><th className="th">Readiness</th><th className="th">Last activity</th><th className="th"><span className="sr-only">Actions</span></th></tr></thead>
-            <tbody>{rows.map((s: any) => {
-              const outstanding = [...s.missing, ...s.expired.map((e: string) => `${e} (expired)`)];
-              const satisfied = Math.max(0, s.required - s.missing.length - s.expired.length);
-              return (
-                <Fragment key={s.id}>
-                  <tr className="tr-link" onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
-                    <td className="td text-faint"><button type="button" className="p-1 -m-1 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-field" aria-expanded={expanded === s.id} aria-label={`${expanded === s.id ? 'Hide' : 'Show'} details for ${s.legalName}`} onClick={(e) => { e.stopPropagation(); setExpanded(expanded === s.id ? null : s.id); }}><span className={cx('inline-block transition-transform', expanded === s.id && 'rotate-90')}>{Icon.chevron()}</span></button></td>
-                    <td className="td"><Link to={`/app/subcontractors/${s.id}`} onClick={(e) => e.stopPropagation()} className="font-medium hover:underline underline-offset-4">{s.legalName}</Link><div className="text-sm text-faint">{s.trade}{s.status === 'suspended' && ' · Suspended'}</div></td>
-                    <td className="td">{s.contact ? <><div>{s.contact.name}</div><div className="text-sm text-faint truncate max-w-[15rem]" title={s.contact.email}>{s.contact.email}</div></> : <span className="text-faint">No contact</span>}</td>
-                    <td className="td tnum">{satisfied} of {s.required}{s.pending > 0 && <div className="text-sm text-faint">{s.pending} awaiting review</div>}</td>
-                    <td className="td text-sm">{outstanding.length ? outstanding.join(', ') : s.expiring.length ? <span className="text-muted">Expiring: {s.expiring.map((e: any) => `${e.name} (${formatDate(e.date)})`).join(', ')}</span> : <span className="text-faint">Nothing outstanding</span>}</td>
-                    <td className="td"><ReadinessBadge value={s.readiness} size="sm" /></td>
-                    <td className="td text-muted whitespace-nowrap">{formatDate(s.lastActivityAt)}</td>
-                    <td className="td" onClick={(e) => e.stopPropagation()}>
-                      <Menu trigger={(t) => <MoreButton label={`Actions for ${s.legalName}`} {...t} />} items={[
-                        can('requests.send') && { label: 'Request documents', onClick: () => setRequest(s.id) },
-                        { label: 'Open subcontractor profile', onClick: () => nav(`/app/subcontractors/${s.id}`) },
-                        can('projects.edit') && { label: 'Remove from project', onClick: () => setRemove(s), danger: true },
-                      ]} />
-                    </td>
-                  </tr>
-                  {expanded === s.id && (
-                    <tr><td colSpan={8} className="bg-paper border-b border-line px-6 sm:px-12 py-5">
-                      <p className="font-medium">{s.summary}</p>
-                      <table className="w-full max-w-4xl mt-3"><tbody>{s.results.map((r: any) => (
-                        <tr key={r.requirementId} className="border-t border-line"><td className="py-2.5 pr-4 w-[30%]">{r.requirementName}{!r.mandatory && <span className="text-faint text-sm"> · optional</span>}</td><td className="py-2.5 pr-4 w-[18%]"><StatusText value={r.status} /></td><td className="py-2.5 text-sm text-muted">{r.reason}</td></tr>
-                      ))}</tbody></table>
-                      {can('requests.send') && outstanding.length + s.expiring.length > 0 && <button className="btn-primary btn-sm mt-4" onClick={() => setRequest(s.id)}>Request outstanding documents</button>}
-                    </td></tr>
-                  )}
-                </Fragment>
-              );
-            })}</tbody>
-          </table>
+      {rows.length === 0 ? <Empty title="No subcontractors match">Try a different search or clear the filter.</Empty> : (
+        <div className="space-y-10">
+          {needs.length > 0 && <section><h2 className="text-md font-semibold flex items-center gap-2">Needs action <span className="text-muted font-normal tnum">{needs.length}</span></h2><ul className="mt-2 border-t border-line-strong">{needs.map(row)}</ul></section>}
+          {ready.length > 0 && <section><h2 className="text-md font-semibold flex items-center gap-2">Ready to work <span className="text-muted font-normal tnum">{ready.length}</span></h2><ul className="mt-2 border-t border-line-strong">{ready.map(row)}</ul></section>}
+          {needs.length === 0 && focus === 'all' && <p className="flex gap-2 items-center text-success"><Glyph tone="ok" />Everyone assigned to this project is ready to work.</p>}
         </div>
       )}
-      {request && <RequestDialog open onClose={() => setRequest(null)} subcontractorId={request} projectId={data.project.id} />}
+      {request && <RequestDialog open onClose={() => setRequest(null)} subcontractorId={request.sub} projectId={data.project.id} requirementIds={request.reqs} />}
       <Confirm open={!!remove} onClose={() => setRemove(null)} title={`Remove ${remove?.legalName} from this project?`} confirmLabel="Remove" danger busy={unassign.busy}
         onConfirm={async () => { await unassign.run({ projectId: data.project.id, subcontractorId: remove.id }); setRemove(null); toast('Removed from project'); }}>
         Their documents and history are kept. Readiness for this project stops being tracked.
@@ -218,12 +238,12 @@ function RequirementsTab({ data }: { data: any }) {
         <h2 className="text-lg font-semibold">What subcontractors must provide for this project</h2>
         <p className="text-sm text-muted mt-1">Mandatory requirements must be approved and in date for a subcontractor to be ready. Optional ones never block readiness.</p>
         {data.requirements.length === 0 ? <Empty title="No requirements yet">Apply a template or add individual requirements.</Empty> : (
-          <ul className="mt-5 border-t border-charcoal/80">{data.requirements.map((r: any) => (
+          <ul className="mt-5 border-t border-line-strong">{data.requirements.map((r: any) => (
             <li key={r.id} className="py-4 border-b border-line grid sm:grid-cols-[1fr_auto] gap-3 items-start">
               <div>
                 <div className="font-medium">{r.definition?.name}</div>
                 <div className="text-sm text-muted mt-0.5">{[r.definition?.category, r.definition?.kind === 'document' ? r.definition?.documentType : humanize(r.definition?.kind ?? ''), r.definition?.expiryRequired ? 'Expires' : 'No expiry', r.definition?.criteria?.length ? `${r.definition.criteria.length} check${r.definition.criteria.length === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')}</div>
-                <div className={cx('text-xs mt-1', r.source.type === 'template' ? 'text-faint' : 'text-field')}>{source(r)}</div>
+                <div className={cx('text-xs mt-1', r.source.type === 'template' ? 'text-faint' : 'text-accent')}>{source(r)}</div>
               </div>
               <div className="flex items-center gap-4">
                 <Checkbox checked={r.mandatory} disabled={!editable || setReq.busy} onChange={(v) => setReq.run({ projectId: data.project.id, requirementId: r.requirementId, mandatory: v }).then(() => toast(v ? 'Now mandatory' : 'Now optional'))} label="Mandatory" />
@@ -284,7 +304,7 @@ function ActivityTab({ projectId }: { projectId: string }) {
   if (error) return <ErrorState error={error} />;
   if (!data.items.length) return <Empty title="No activity yet" />;
   return (
-    <ol className="max-w-3xl border-t border-charcoal/80">{data.items.map((e: any) => (
+    <ol className="max-w-3xl border-t border-line-strong">{data.items.map((e: any) => (
       <li key={e.id} className="py-3.5 border-b border-line"><div>{activityLine(e)}</div><div className="text-xs text-faint mt-1">{formatDateTime(e.at)} · {humanize(e.source)}</div></li>
     ))}</ol>
   );

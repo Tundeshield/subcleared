@@ -5,6 +5,7 @@ import AppLayout from './pages/app/AppLayout';
 import { AcceptInvite, AuthAction, ForgotPassword, Login, Onboarding, Signup, VerifyNotice } from './pages/public/Auth';
 import Landing from './pages/public/Landing';
 import Pricing from './pages/public/Pricing';
+import Design from './pages/public/Design';
 import { PageLoading, Spinner } from './ui';
 
 const Overview = lazy(() => import('./pages/app/Overview'));
@@ -48,6 +49,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/pricing" element={<Pricing />} />
+        <Route path="/design" element={<Design />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
