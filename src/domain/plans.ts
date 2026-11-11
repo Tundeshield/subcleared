@@ -1,0 +1,40 @@
+// Plan catalogue. Defaults live here; the server can override the whole
+// catalogue with the PLANS_JSON environment variable, so pricing and limits
+// are configuration, not code. Stripe price IDs come from environment too.
+
+export interface Plan {
+  id: string;
+  name: string;
+  description: string;
+  monthly: number; // USD per month when billed monthly
+  annual: number; // USD per month when billed annually
+  limits: { activeSubcontractors: number | null; activeProjects: number | null; users: number | null; storageGb: number | null };
+  features: string[];
+}
+
+export const TRIAL_DAYS = 14;
+
+export const DEFAULT_PLANS: Plan[] = [
+  {
+    id: 'starter', name: 'Starter', description: 'For contractors tracking a core group of trades.',
+    monthly: 89, annual: 74,
+    limits: { activeSubcontractors: 30, activeProjects: 5, users: 3, storageGb: 10 },
+    features: ['Project-specific requirements', 'Secure submission links', 'Review workflow', 'Expiry reminders', 'CSV and PDF reports'],
+  },
+  {
+    id: 'growth', name: 'Growth', description: 'For contractors running several live projects at once.',
+    monthly: 229, annual: 189,
+    limits: { activeSubcontractors: 150, activeProjects: 25, users: 12, storageGb: 50 },
+    features: ['Everything in Starter', 'AI-assisted extraction', 'Escalation rules', 'Audit trail reports', 'Custom roles and permissions'],
+  },
+  {
+    id: 'scale', name: 'Scale', description: 'For established contractors with a large supply chain.',
+    monthly: 499, annual: 415,
+    limits: { activeSubcontractors: 500, activeProjects: null, users: null, storageGb: 250 },
+    features: ['Everything in Growth', 'Unlimited projects and users', 'Configurable retention', 'Priority support'],
+  },
+];
+
+export function getPlan(plans: Plan[], id: string): Plan {
+  return plans.find((p) => p.id === id) ?? plans[0];
+}

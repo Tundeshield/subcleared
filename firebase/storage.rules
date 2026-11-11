@@ -1,0 +1,10 @@
+rules_version = '2';
+// All file access goes through short-lived V4 signed URLs issued by the
+// server after a tenant and permission check. Direct client access is denied.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
