@@ -5,7 +5,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { READINESS_LABELS, STATUS_LABELS } from '../domain/compliance';
+import { displayReadiness, READINESS_LABELS, STATUS_LABELS } from '../domain/compliance';
 import type { Readiness, RequirementStatus } from '../domain/types';
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
@@ -73,12 +73,13 @@ export const toneText = (t: Tone) => (t === 'ok' ? 'text-success' : t === 'block
 export type { Tone };
 export { Glyph };
 
-const READINESS_TONE: Record<Readiness, Tone> = { ready: 'ok', action_required: 'attention', not_ready: 'blocked', not_evaluated: 'none' };
-export function ReadinessBadge({ value, size = 'md', detail }: { value: Readiness | string; size?: 'sm' | 'md'; detail?: ReactNode }) {
-  const v = (value in READINESS_TONE ? value : 'not_evaluated') as Readiness;
+const READINESS_TONE: Record<string, Tone> = { ready: 'ok', action_required: 'attention', not_ready: 'blocked', not_evaluated: 'none', needs_review: 'progress' };
+export function ReadinessBadge({ value, size = 'md', detail, results }: { value: Readiness | string; size?: 'sm' | 'md'; detail?: ReactNode; results?: { status: string; blocking?: boolean }[] }) {
+  const shown = displayReadiness(value, results);
+  const v = (shown in READINESS_TONE ? shown : 'not_evaluated') as Readiness;
   return (
     <span className={cx('inline-flex items-center gap-2 whitespace-nowrap', size === 'sm' ? 'text-sm' : 'text-base', v === 'ready' ? 'text-success font-medium' : toneText(READINESS_TONE[v]))}>
-      <Glyph tone={READINESS_TONE[v]} />{READINESS_LABELS[v]}{detail && <span className="text-faint font-normal">{detail}</span>}
+      <Glyph tone={READINESS_TONE[v]} />{(v as string) === 'needs_review' ? 'Needs review' : READINESS_LABELS[v]}{detail && <span className="text-faint font-normal">{detail}</span>}
     </span>
   );
 }
@@ -91,10 +92,10 @@ export function StatusText({ value, label, wrap }: { value: RequirementStatus | 
   return <span className={cx('inline-flex gap-2 text-sm', wrap ? 'items-start [&>svg]:mt-[4px]' : 'items-center whitespace-nowrap', toneText(tone))}><Glyph tone={tone} className="w-[13px] h-[13px]" />{label ?? STATUS_LABELS[value as RequirementStatus] ?? humanize(value)}</span>;
 }
 const DOC_STATUS: Record<string, [string, Tone]> = {
-  approved: ['Approved', 'ok'], approved_replacement_pending: ['Approved · replacement in review', 'ok'], expiring_soon: ['Expiring soon', 'attention'],
-  expiring_replacement_pending: ['Expiring · replacement in review', 'attention'], expired: ['Expired', 'blocked'], expired_replacement_pending: ['Expired · replacement in review', 'blocked'],
-  awaiting_review: ['Awaiting review', 'progress'], under_review: ['In review', 'progress'], submitted: ['Submitted', 'progress'], rejected: ['Rejected', 'blocked'],
-  info_requested: ['More information requested', 'attention'], superseded: ['Superseded', 'na'], archived: ['Archived', 'na'], quarantined: ['Blocked by security checks', 'blocked'], uploading: ['Uploading', 'none'],
+  approved: ['Approved', 'ok'], approved_replacement_pending: ['Approved · new version needs review', 'ok'], expiring_soon: ['Expiring soon', 'attention'],
+  expiring_replacement_pending: ['Expiring · new version needs review', 'attention'], expired: ['Expired', 'blocked'], expired_replacement_pending: ['Expired · new version needs review', 'blocked'],
+  awaiting_review: ['Needs review', 'progress'], under_review: ['Being reviewed', 'progress'], submitted: ['Submitted', 'progress'], rejected: ['Changes needed', 'blocked'],
+  info_requested: ['Changes needed', 'attention'], superseded: ['Superseded', 'na'], archived: ['Archived', 'na'], quarantined: ['Blocked by security checks', 'blocked'], uploading: ['Uploading', 'none'],
 };
 export function DocStatus({ value }: { value: string }) {
   const [label, tone] = DOC_STATUS[value] ?? [humanize(value), 'none'];

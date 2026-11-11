@@ -52,3 +52,36 @@ Partially configured, not broken: email delivery, Stripe, AI extraction and malw
 - Navigation: Workspace / Configuration / Administration.
 - Design system: new restrained colour system with meaningful status colours (always paired with an icon and words), documented at `/design` and in `docs/design-system.md`.
 - Country-agnostic: broader country list, locale-correct dates and currency per organisation, a neutral starter library for countries without a tailored one, and no market claims in brand messaging.
+
+---
+
+# Simplification audit (brief 4: "Know who's ready, who's not, and what needs to happen next")
+
+## System inventory
+
+- **Data (Firestore, per organisation):** `projects`, `subcontractors` (with contacts and notes), `assignments` (subcontractor ↔ project), `requirements` (versioned definitions), `templates` (versioned), `documents` and `versions` (every upload is a new, immutable version), `reviews`, `verifications`, `overrides` (N/A and manual confirmations), `evaluations` (rule snapshots) and `readiness` (current result per project × subcontractor), `requests`, `links` (hashed portal tokens), `reminders`, `notifications`, `members`, `invitations`, `audit` (append-only), `billing`.
+- **Backend:** Netlify Functions — `api` (every action, server-side authorisation), `extract-background` (optional AI extraction), `renewals-scheduled` (every 6 h: expiry, reminders, escalation), `jobs-run` (manual trigger), `stripe-webhook`.
+- **Auth and permissions:** Firebase email/password with verification; roles owner, admin, compliance manager, project manager (scoped to their projects), reviewer, viewer; tenant scoping on every read and write; deny-all client rules.
+- **Integrations:** Firebase Auth/Firestore/Storage, Stripe, Resend (email), Anthropic (extraction, optional), malware-scan URL (optional).
+- **Broken or incomplete:** nothing found broken in tests or E2E. Email, billing, extraction and scanning are inactive until their keys are set; the UI says so where it matters. The live site cannot sign anyone up until the Firebase console steps are completed.
+
+## What works well
+Per-project readiness with reasons; secure no-account portal; immutable versions and audit; renewals automation; the new readiness view on projects.
+
+## What is still confusing
+1. **Eight equal destinations** in the main navigation (plus configuration and administration). Daily work uses four.
+2. **Twelve requirement statuses** with internal names ("Re-review needed", "Missing" vs "Requested" vs "Overdue", "Rejected").
+3. **The workflow is implicit.** After creating a project nothing says "now add subcontractors", then "now request paperwork".
+4. **Assigning only picks existing companies.** A new subcontractor means leaving the project, creating it in the directory and coming back.
+5. **Requests are per subcontractor.** Requesting paperwork from five new companies takes five dialogs.
+6. **Overview shows aggregate counts** ("5 subcontractors with missing requirements") rather than the specific items to act on.
+7. **The review queue has no filters** by project, subcontractor or date.
+
+## Decisions
+- **Primary navigation:** Overview · Projects · Subcontractors · Documents to review. Everything else (All documents, Renewals, Reports, Requirements & templates, Team, Settings, Billing) moves to a secondary "More" group: still one click away, just not competing with daily work.
+- **Combine:** renewal alerts and review items surface in Overview and on each project, so most users never need the Renewals page.
+- **Plain status model:** Not requested · Requested · Submitted · Needs review · Approved · Changes needed · Expiring soon · Expired · Not applicable. Readiness: Ready · Not ready · Needs review · Action required. Internal states are unchanged.
+- **Primary journey made explicit:** every project shows its next step (choose paperwork → add subcontractors → request paperwork → review submissions) until everyone is ready.
+- **Add subcontractors in place:** pick existing companies or add new ones (with a contact) from the same panel; duplicates are prevented by name.
+- **Request paperwork in one step** for every subcontractor on a project that has outstanding items.
+- **Overview** leads with a "Needs your attention" list: item, issue, action, each row a direct link.

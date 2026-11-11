@@ -18,27 +18,36 @@ export interface EvalInput {
   now?: Date;
 }
 
+// Everyday labels. The engine keeps finer internal states; people see nine.
 export const STATUS_LABELS: Record<RequirementStatus, string> = {
   not_requested: 'Not requested',
-  missing: 'Missing',
+  missing: 'Not requested',
   requested: 'Requested',
+  overdue: 'Requested — overdue',
   submitted: 'Submitted',
-  awaiting_review: 'Awaiting review',
-  approved: 'Approved and valid',
+  awaiting_review: 'Needs review',
+  review_required: 'Needs review',
+  approved: 'Approved',
+  rejected: 'Changes needed',
   expiring_soon: 'Expiring soon',
   expired: 'Expired',
-  rejected: 'Rejected',
-  overdue: 'Overdue',
   not_applicable: 'Not applicable',
-  review_required: 'Re-review needed',
 };
 
 export const READINESS_LABELS: Record<Readiness, string> = {
   ready: 'Ready',
   action_required: 'Action required',
   not_ready: 'Not ready',
-  not_evaluated: 'Not evaluated',
+  not_evaluated: 'Not assessed yet',
 };
+
+/** What to show for readiness: when the only things in the way are submissions waiting for a decision, say "Needs review". */
+export function displayReadiness(readiness: Readiness | string, results?: { status: string; blocking?: boolean; mandatory?: boolean }[]): Readiness | 'needs_review' {
+  if (!results || readiness === 'ready' || readiness === 'not_evaluated') return readiness as Readiness;
+  const REVIEW = ['awaiting_review', 'submitted', 'review_required'];
+  const open = results.filter((r) => r.blocking || ['expiring_soon', 'rejected', 'expired', ...REVIEW].includes(r.status));
+  return open.length > 0 && open.every((r) => REVIEW.includes(r.status)) ? 'needs_review' : (readiness as Readiness);
+}
 
 const OPEN_REQUEST = new Set(['sent', 'acknowledged', 'partially_fulfilled']);
 const PENDING = new Set(['submitted', 'awaiting_review', 'under_review']);

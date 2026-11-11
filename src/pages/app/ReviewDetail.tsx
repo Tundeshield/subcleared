@@ -5,7 +5,7 @@ import { formatDate, formatDateTime } from '../../domain/dates';
 import { term } from '../../domain/locale';
 import { api, dataChanged, useApi } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { Callout, Checkbox, cx, Dialog, DocStatus, ErrorState, Field, FormError, Glyph, humanize, PageHeader, PageLoading, Segmented, Spinner, useToast, VerificationLabel } from '../../ui';
+import { Callout, Checkbox, cx, Dialog, DocStatus, ErrorState, Field, FormError, Glyph, humanize, Icon, PageHeader, PageLoading, Segmented, Spinner, useToast, VerificationLabel } from '../../ui';
 import { FilePreview } from './DocumentDetail';
 
 type Decision = 'approve' | 'reject' | 'request_info';
@@ -65,14 +65,17 @@ export default function ReviewDetail() {
         metadata: { ...meta, values }, checklist: [...checks.map((c) => ({ key: c.criterion.key, label: c.criterion.label, passed: c.passed })), ...Object.entries(manual).map(([k, p]) => ({ key: k, label: k, passed: p }))],
       });
       dataChanged();
-      toast(decision === 'approve' ? 'Approved — readiness updated' : decision === 'reject' ? 'Rejected — the subcontractor has been told why' : 'More information requested');
-      nav('/app/reviews');
+      toast(decision === 'approve' ? 'Approved — readiness updated' : decision === 'reject' ? 'Rejected — the subcontractor has been told why' : 'Correction requested — the subcontractor has been told what to change');
+      // Keep going: open the next document waiting for a decision, if there is one.
+      const queue = await api<any>('reviews.queue', {}).catch(() => null);
+      const nextItem = queue?.items?.find((i: any) => i.versionId !== v.id && !i.lockedBy);
+      nav(nextItem ? `/app/reviews/${nextItem.versionId}` : '/app/reviews');
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   const blockedApprove = decision === 'approve' && (failed.length > 0 || missingExpiry);
   return (
     <div>
-      <PageHeader crumbs={[{ label: 'Reviews', to: '/app/reviews' }, { label: data.subcontractor.legalName, to: `/app/subcontractors/${data.subcontractor.id}` }, { label: data.requirement?.name ?? data.document.title }]}
+      <PageHeader crumbs={[{ label: 'Documents to review', to: '/app/reviews' }, { label: data.subcontractor.legalName, to: `/app/subcontractors/${data.subcontractor.id}` }, { label: data.requirement?.name ?? data.document.title }]}
         title={data.requirement?.name ?? data.document.title}
         meta={<><span>{data.subcontractor.legalName}</span><span>Version {v.versionNumber} · {v.fileName}</span><span>Submitted {formatDateTime(v.uploadedAt)} by {v.uploadedBy.name.replace(/ \(.+\)$/, '')}</span></>}
         actions={<DocStatus value={v.reviewStatus} />} />
@@ -95,7 +98,7 @@ export default function ReviewDetail() {
                   {['Named insured matches the subcontractor', `${market === 'US' ? 'Carrier' : 'Insurer'} and policy number are legible`, 'Policy dates cover the work period', 'Endorsements are present where required'].map((k) => (
                     <Checkbox key={k} checked={manual[k] === true} onChange={(x) => setManual({ ...manual, [k]: x ? true : null })} label={k} />
                   ))}
-                  <p className="text-xs text-faint leading-relaxed pt-1">A {term(market, 'coi')} is evidence of cover, not proof of it. Approving records that it was reviewed against your stated requirements — not a legal coverage determination.</p>
+                  <p className="text-xs text-faint leading-relaxed pt-1">{/^[aeiou]/i.test(term(market, 'coi')) ? 'An' : 'A'} {term(market, 'coi')} is evidence of cover, not proof of it. Approving records that it was reviewed against your stated requirements — not a legal coverage determination.</p>
                 </div>
               )}
             </section>
@@ -119,18 +122,38 @@ export default function ReviewDetail() {
           <section>
             <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Confirmed details</h2>
             <p className="text-sm text-muted mt-3">These become the official record when you decide.</p>
-            <div className="mt-5 grid sm:grid-cols-2 gap-x-5 gap-y-4">
-              {data.metadataFields.map((f: any) => (
+            {(() => {
+              // Show what this requirement needs first; everything else is one click away.
+              const criteriaKeys = new Set((data.requirement?.criteria ?? []).map((c: any) => c.key));
+              const insurance = /insur|endorse|indemnity/i.test(`${data.requirement?.category ?? ''} ${data.requirement?.name ?? ''}`);
+              const essential = new Set(['issuer', 'referenceNumber', 'expiryDate', ...(insurance ? ['namedInsured', 'issueDate'] : ['issueDate'])]);
+              const hasValue = (k: string, inValues = false) => { const x = inValues ? meta.values?.[k] : meta[k]; return x !== undefined && x !== null && x !== ''; };
+              const metaField = (f: any) => (
                 <Field key={f.key} label={f.label} required={f.key === 'expiryDate' && data.requirement?.expiryRequired}>
                   <input className={cx('input', fields[f.key] && fields[f.key].confidence < 0.7 && 'border-ink')} type={f.type === 'date' ? 'date' : 'text'} value={meta[f.key] ?? ''} onChange={(e) => setM(f.key, e.target.value)} disabled={!pending} />
                 </Field>
-              ))}
-              {data.valueFields.map((f: any) => f.type === 'amount' ? (
+              );
+              const valueField = (f: any) => f.type === 'amount' ? (
                 <Field key={f.key} label={f.label}><input className="input" inputMode="numeric" value={meta.values?.[f.key] ?? ''} onChange={(e) => setV(f.key, e.target.value.replace(/[^0-9.]/g, ''))} disabled={!pending} /></Field>
               ) : (
                 <Field key={f.key} label={f.label}><select className="input" value={meta.values?.[f.key] === undefined ? '' : String(meta.values[f.key])} onChange={(e) => setV(f.key, e.target.value === '' ? undefined : e.target.value === 'true')} disabled={!pending}><option value="">Not recorded</option><option value="true">Shown on the document</option><option value="false">Not shown</option></select></Field>
-              ))}
-            </div>
+              );
+              const mainMeta = data.metadataFields.filter((f: any) => essential.has(f.key) || hasValue(f.key));
+              const mainValues = data.valueFields.filter((f: any) => criteriaKeys.has(f.key) || hasValue(f.key, true));
+              const moreMeta = data.metadataFields.filter((f: any) => !mainMeta.includes(f));
+              const moreValues = data.valueFields.filter((f: any) => !mainValues.includes(f));
+              return (
+                <>
+                  <div className="mt-5 grid sm:grid-cols-2 gap-x-5 gap-y-4">{mainMeta.map(metaField)}{mainValues.map(valueField)}</div>
+                  {moreMeta.length + moreValues.length > 0 && (
+                    <details className="group mt-5">
+                      <summary className="cursor-pointer select-none text-sm font-medium text-muted hover:text-ink list-none flex items-center gap-2"><span className="inline-block transition-transform group-open:rotate-90">{Icon.chevron()}</span>More details <span className="font-normal text-faint">(optional)</span></summary>
+                      <div className="mt-4 grid sm:grid-cols-2 gap-x-5 gap-y-4">{moreMeta.map(metaField)}{moreValues.map(valueField)}</div>
+                    </details>
+                  )}
+                </>
+              );
+            })()}
             {data.previous && <p className="text-sm text-muted mt-5">Replaces version {data.previous.versionNumber}, approved {formatDate(data.previous.review?.at)}{data.previous.metadata.expiryDate ? `, which expires ${formatDate(data.previous.metadata.expiryDate)}` : ''}{data.previous.metadata.referenceNumber ? ` (reference ${data.previous.metadata.referenceNumber})` : ''}.</p>}
           </section>
 
@@ -138,14 +161,14 @@ export default function ReviewDetail() {
             <section className="border-t border-line-strong pt-6">
               <h2 className="text-lg font-semibold">Decision</h2>
               <div className="mt-4 space-y-5">
-                <Segmented label="Decision" value={decision} onChange={setDecision} options={[{ value: 'approve', label: 'Approve' }, { value: 'reject', label: 'Reject' }, { value: 'request_info', label: 'Ask for more' }]} />
+                <Segmented label="Decision" value={decision} onChange={setDecision} options={[{ value: 'approve', label: 'Approve' }, { value: 'request_info', label: 'Request correction' }, { value: 'reject', label: 'Reject' }]} />
                 {blockedApprove && <Callout tone="bad">{missingExpiry ? 'Record the expiry date to approve. ' : ''}{failed.length ? `Doesn't meet: ${failed.map((f) => f.criterion.label).join(', ')}. Correct the values if they were entered wrongly, or reject.` : ''}</Callout>}
                 {decision === 'approve' && expired && <Callout tone="warn">This document has already expired. You can record it, but the subcontractor stays not ready for this requirement until a current one arrives.</Callout>}
                 {decision !== 'approve' && <Field label="What the subcontractor needs to do" required hint="Sent to them with a link to upload a replacement."><textarea className="input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={decision === 'reject' ? 'e.g. The named insured is a different company' : 'e.g. Please also send the additional insured endorsement page'} /></Field>}
                 <Field label="Internal note" optional hint="Only visible to your team."><textarea className="input" rows={2} value={comment} onChange={(e) => setComment(e.target.value)} /></Field>
                 <FormError error={err} />
                 <button className="btn-primary btn-lg w-full" disabled={busy || !!lockErr || (decision !== 'approve' && !reason.trim()) || blockedApprove} onClick={submit}>
-                  {busy && <Spinner />}{decision === 'approve' ? 'Approve document' : decision === 'reject' ? 'Reject and let them know' : 'Ask for more information'}
+                  {busy && <Spinner />}{decision === 'approve' ? 'Approve document' : decision === 'reject' ? 'Reject and explain why' : 'Request a correction'}
                 </button>
               </div>
             </section>

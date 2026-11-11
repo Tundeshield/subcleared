@@ -470,3 +470,33 @@ describe('Countries without a tailored library', () => {
     expect(subs.items.every((s: any) => typeof s.readyOn === 'number' && s.issues && typeof s.issues.missing === 'number')).toBe(true);
   });
 });
+
+describe('Project workflow in one step', () => {
+  it('requests outstanding paperwork for several subcontractors at once and surfaces it on the overview', async () => {
+    const o = await setupOrg();
+    const { projectId } = await ok('owner1', 'projects.create', { name: 'Harbour View', status: 'active' }, o.orgId);
+    for (const r of [o.gl, o.wc]) await ok('owner1', 'projects.setRequirement', { projectId, requirementId: r, mandatory: true }, o.orgId);
+    const a = await ok('owner1', 'subs.create', { legalName: 'Alpha Electrical', trade: 'Electrical', contacts: [{ name: 'Ann Lee', email: 'ann@alpha.example', primary: true }] }, o.orgId);
+    const b = await ok('owner1', 'subs.create', { legalName: 'Beta Roofing', trade: 'Roofing' }, o.orgId); // no contact yet
+    await ok('owner1', 'projects.assign', { projectId, subcontractorIds: [a.subcontractorId, b.subcontractorId] }, o.orgId);
+
+    const before = await ok('owner1', 'dashboard', {}, o.orgId);
+    expect(before.needs.some((n: any) => n.item === 'Harbour View' && n.action === 'Request paperwork')).toBe(true);
+
+    const r = await ok('owner1', 'requests.forProject', { projectId, subcontractorIds: [a.subcontractorId, b.subcontractorId] }, o.orgId);
+    expect(r.results.find((x: any) => x.subcontractorId === a.subcontractorId)).toMatchObject({ status: 'sent', documents: 2 });
+    expect(r.results.find((x: any) => x.subcontractorId === b.subcontractorId)).toMatchObject({ status: 'skipped' });
+    const email = h.mail.find((m) => m.to === 'ann@alpha.example');
+    expect(email.text).toContain('Harbour View');
+    expect(email.text).toContain('Reply to this email');
+
+    const detail = await ok('owner1', 'projects.get', { projectId }, o.orgId);
+    const alpha = detail.subcontractors.find((s: any) => s.id === a.subcontractorId);
+    expect(alpha.results.every((x: any) => x.status === 'requested')).toBe(true);
+
+    // Reviewers without send permission are refused; other tenants cannot reach the project.
+    h.users.other = { email: 'x@other.example', verified: true };
+    const other = await ok('other', 'org.register', { orgName: 'Other Co', country: 'Ireland', timezone: 'Europe/Dublin' });
+    expect((await call('other', 'requests.forProject', { projectId, subcontractorIds: [a.subcontractorId] }, other.orgId)).status).toBe(404);
+  });
+});

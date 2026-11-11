@@ -280,6 +280,13 @@ export async function reviewQueue(ctx: Ctx) {
   const docs = new Map(data.documents.map((d) => [d.id, d]));
   const defs = new Map(data.requirements.map((r) => [r.id, r]));
   const now = ctx.svc.now().getTime();
+  const liveProjects = new Map(data.projects.filter((p) => p.status !== 'archived').map((p) => [p.id, p]));
+  /** Projects this submission matters for: the document's own projects, or every live project the subcontractor is on. */
+  const projectsFor = (v: (typeof data.versions)[number]) => {
+    const scoped = docs.get(v.documentId)?.projectIds ?? [];
+    const ids = scoped.length ? scoped : data.assignments.filter((a) => a.active && a.subcontractorId === v.subcontractorId).map((a) => a.projectId);
+    return [...new Set(ids)].map((id) => liveProjects.get(id)).filter(Boolean).map((p) => ({ id: p!.id, name: p!.name }));
+  };
   const items = data.versions
     .filter((v) => ['submitted', 'awaiting_review', 'under_review'].includes(v.reviewStatus) && (!visible || visible.has(v.subcontractorId)) && !docs.get(v.documentId)?.archived)
     .map((v) => {
@@ -289,7 +296,7 @@ export async function reviewQueue(ctx: Ctx) {
         subcontractorId: v.subcontractorId, subcontractor: subs.get(v.subcontractorId)?.legalName, title: docs.get(v.documentId)?.title,
         requirement: v.requirementId ? defs.get(v.requirementId)?.name : undefined, extraction: v.extraction.status,
         lockedBy: lockFresh ? v.lock : null, status: v.reviewStatus, replacing: !!docs.get(v.documentId)?.approvedVersionId,
-        ageHours: Math.round((now - new Date(v.uploadedAt).getTime()) / 3_600_000),
+        ageHours: Math.round((now - new Date(v.uploadedAt).getTime()) / 3_600_000), projects: projectsFor(v),
       };
     }).sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt));
   return { items };

@@ -422,6 +422,35 @@ export async function dashboard(ctx: Ctx, input: any) {
     actions.push({ kind: x.status, title: `${x.requirementName} ${x.status === 'rejected' ? 'rejected' : x.status === 'overdue' ? 'overdue' : 'outstanding'}`, detail: `${subName.get(r.subcontractorId)} · ${projects.find((p) => p.id === r.projectId)?.name}`, link: `/app/subcontractors/${r.subcontractorId}?tab=requirements&project=${r.projectId}` });
   }
 
+  // "Needs your attention": one row per thing to do — item, issue, action — most urgent first.
+  type Need = { tone: 'progress' | 'blocked' | 'attention'; item: string; itemLink: string; context?: string; issue: string; action: string; link: string; rank: number };
+  const needs: Need[] = [];
+  const pname = (id: string) => projects.find((p) => p.id === id)?.name;
+  for (const v of [...pending].sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt))) {
+    needs.push({ tone: 'progress', item: subName.get(v.subcontractorId) ?? 'Subcontractor', itemLink: `/app/subcontractors/${v.subcontractorId}`, issue: `${docById.get(v.documentId)?.title ?? v.fileName} needs review`, action: 'Review document', link: `/app/reviews/${v.id}`, rank: 1 });
+  }
+  const changes = new Map<string, { r: typeof rows[number]; names: string[] }>();
+  const overdue = new Map<string, { r: typeof rows[number]; names: string[] }>();
+  for (const r of rows) for (const x of r.results) {
+    const k = `${r.projectId}:${r.subcontractorId}`;
+    if (x.status === 'rejected') { const e = changes.get(k) ?? { r, names: [] }; e.names.push(x.requirementName); changes.set(k, e); }
+    if (x.status === 'overdue') { const e = overdue.get(k) ?? { r, names: [] }; e.names.push(x.requirementName); overdue.set(k, e); }
+  }
+  for (const { r, names } of changes.values()) needs.push({ tone: 'blocked', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, context: pname(r.projectId), issue: names.length === 1 ? `${names[0]} needs changes` : `${names.length} documents need changes`, action: 'View reason', link: `/app/projects/${r.projectId}?show=not_ready`, rank: 2 });
+  for (const x of expired) needs.push({ tone: 'blocked', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expired ${-x.days === 0 ? 'today' : `${-x.days} day${-x.days === 1 ? '' : 's'} ago`}`, action: 'Request renewal', link: '/app/renewals?window=expired', rank: 3 });
+  for (const p of projects) {
+    const pr = rows.filter((r) => r.projectId === p.id);
+    const toRequest = pr.filter((r) => r.results.some((x) => ['missing', 'not_requested'].includes(x.status) && defs.get(x.requirementId)?.kind === 'document'));
+    if (toRequest.length) needs.push({ tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: `${toRequest.length} subcontractor${toRequest.length === 1 ? ' hasn’t' : 's haven’t'} been asked for paperwork`, action: 'Request paperwork', link: `/app/projects/${p.id}`, rank: 4 });
+    else {
+      const notReady = pr.filter((r) => r.readiness === 'not_ready').length;
+      if (notReady) needs.push({ tone: 'attention', item: p.name, itemLink: `/app/projects/${p.id}`, issue: `${notReady} subcontractor${notReady === 1 ? '' : 's'} not ready`, action: 'View project', link: `/app/projects/${p.id}?show=not_ready`, rank: 6 });
+    }
+  }
+  for (const { r, names } of overdue.values()) needs.push({ tone: 'attention', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, context: pname(r.projectId), issue: names.length === 1 ? `${names[0]} is overdue` : `${names.length} requested documents are overdue`, action: 'Resend request', link: `/app/projects/${r.projectId}?show=not_ready`, rank: 5 });
+  for (const x of [...expiring30].sort((a, b) => a.days - b.days)) needs.push({ tone: 'attention', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expires ${x.days === 0 ? 'today' : `in ${x.days} day${x.days === 1 ? '' : 's'}`}`, action: 'Request renewal', link: '/app/renewals?window=30', rank: 7 });
+  needs.sort((a, b) => a.rank - b.rank);
+
   const recent = (await ctx.db.list<AuditEvent>(C.col(ctx.org.id, 'audit'))).filter((e) => MEANINGFUL.test(e.action)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10);
   return {
     today, firstName: (ctx.member.name || '').split(' ')[0] || '',
@@ -433,7 +462,7 @@ export async function dashboard(ctx: Ctx, input: any) {
       notReady: [...scopedSubs].filter((s) => worst.get(s.id) === 'not_ready').length,
       notEvaluated: [...scopedSubs].filter((s) => !worst.get(s.id) || worst.get(s.id) === 'not_evaluated').length,
     },
-    attention, actions: actions.slice(0, 8), actionsTotal: actions.length,
+    attention, actions: actions.slice(0, 8), actionsTotal: actions.length, needs: needs.slice(0, 12), needsTotal: needs.length,
     projects: projectSummary,
     upcoming: inForce.filter((x) => x.days <= Math.max(Number(input?.days) || 60, soon)).sort((a, b) => a.days - b.days).slice(0, 8).map((x) => ({
       versionId: x.v.id, documentId: x.v.documentId, title: docById.get(x.v.documentId)?.title, subcontractor: subName.get(x.v.subcontractorId), subcontractorId: x.v.subcontractorId,

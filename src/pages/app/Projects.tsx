@@ -5,7 +5,7 @@ import { useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
 import {
-  Drawer, Empty, ErrorState, Field, FilterSelect, FormError, humanize, PageHeader, Pagination, ReadinessBar, SampleTag, SearchInput, Skeleton, SortHeader,
+  Drawer, Empty, ErrorState, Field, Icon, FilterSelect, FormError, humanize, PageHeader, Pagination, ReadinessBar, SampleTag, SearchInput, Skeleton, SortHeader,
   sortRows, Spinner, Toolbar, usePaged, useToast,
 } from '../../ui';
 
@@ -92,6 +92,13 @@ export function ProjectDrawer({ open, onClose, project }: { open: boolean; onClo
   const [touched, setTouched] = useState(false);
   useEffect(() => { if (open) { setTouched(false); setF(project ? { ...blank, ...project, startDate: project.startDate ?? '', endDate: project.endDate ?? '', managerUid: project.managerUid ?? '' } : blank); } }, [open]); // eslint-disable-line
   const set = (k: string, v: any) => setF((x) => ({ ...x, [k]: v }));
+  // Sensible default: preselect the general onboarding template for a new project.
+  useEffect(() => {
+    if (!open || project || f.templateId) return;
+    const t = reqs.data?.templates.filter((x: any) => x.active) ?? [];
+    const general = t.find((x: any) => /general/i.test(x.name)) ?? t[0];
+    if (general) set('templateId', general.id);
+  }, [open, reqs.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = members.data?.members.filter((m: any) => m.status === 'active') ?? [];
   const dateErr = f.startDate && f.endDate && f.endDate < f.startDate ? 'Completion must be after the start date' : undefined;
   const submit = async () => {
@@ -112,42 +119,36 @@ export function ProjectDrawer({ open, onClose, project }: { open: boolean; onClo
       <button className="btn-secondary" onClick={onClose}>Cancel</button>
       <button className="btn-primary" disabled={save.busy} onClick={submit}>{save.busy && <Spinner />}{project ? 'Save changes' : 'Create project'}</button>
     </>}>
-      <div className="space-y-8">
-        <fieldset className="space-y-5">
-          <legend className="eyebrow mb-4">Project</legend>
+      <div className="space-y-6">
           <Field label="Project name" required error={touched && !f.name.trim() ? 'Give the project a name' : undefined}><input className="input" value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Riverside Apartments, Phase 2" /></Field>
-          <div className="grid sm:grid-cols-2 gap-5">
+        <div className="grid sm:grid-cols-2 gap-5">
             <Field label="Reference" optional><input className="input" value={f.code} onChange={(e) => set('code', e.target.value)} placeholder="e.g. RSA-02" /></Field>
-            <Field label="Status"><select className="input" value={f.status} onChange={(e) => set('status', e.target.value)} disabled={f.status === 'archived'}>{STATUSES.filter((s) => s !== 'archived').map((s) => <option key={s} value={s}>{humanize(s)}</option>)}</select></Field>
-          </div>
-          <Field label="Description" optional><textarea className="input" rows={2} value={f.description} onChange={(e) => set('description', e.target.value)} /></Field>
-        </fieldset>
-        <fieldset className="space-y-5">
-          <legend className="eyebrow mb-4">Site and dates</legend>
-          <div className="grid sm:grid-cols-2 gap-5">
             <Field label="Location" hint="City or site name, shown in lists."><input className="input" value={f.location} onChange={(e) => set('location', e.target.value)} placeholder="e.g. Manchester" /></Field>
+        </div>
+        {!project && (
+            <Field label="Paperwork needed" hint="Pick the template closest to the work. You can add or remove items on the project afterwards.">
+              <select className="input" value={f.templateId} onChange={(e) => set('templateId', e.target.value)}><option value="">None yet — I'll choose later</option>{reqs.data?.templates.filter((t: any) => t.active).map((t: any) => <option key={t.id} value={t.id}>{t.name} ({t.items.length} requirements)</option>)}</select>
+            </Field>
+        )}
+        <details className="group rounded-md border border-line" open={!!project}>
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-muted hover:text-ink list-none flex items-center gap-2"><span className="inline-block transition-transform group-open:rotate-90">{Icon.chevron()}</span>More details <span className="font-normal text-faint">(optional)</span></summary>
+          <div className="px-4 pb-5 pt-1 space-y-5">
+            <div className="grid sm:grid-cols-2 gap-5">
+            <Field label="Status"><select className="input" value={f.status} onChange={(e) => set('status', e.target.value)} disabled={f.status === 'archived'}>{STATUSES.filter((s) => s !== 'archived').map((s) => <option key={s} value={s}>{humanize(s)}</option>)}</select></Field>
             <Field label="Address" optional><input className="input" value={f.address} onChange={(e) => set('address', e.target.value)} /></Field>
             <Field label="Start date" optional><input className="input" type="date" value={f.startDate} onChange={(e) => set('startDate', e.target.value)} /></Field>
             <Field label="Expected completion" optional error={dateErr}><input className="input" type="date" value={f.endDate} onChange={(e) => set('endDate', e.target.value)} /></Field>
-          </div>
-        </fieldset>
-        <fieldset className="space-y-5">
-          <legend className="eyebrow mb-4">People</legend>
+            </div>
+          <Field label="Description" optional><textarea className="input" rows={2} value={f.description} onChange={(e) => set('description', e.target.value)} /></Field>
           <Field label="Project manager" hint="Project managers see the projects they manage."><select className="input" value={f.managerUid} onChange={(e) => set('managerUid', e.target.value)}><option value="">Unassigned</option>{active.map((m: any) => <option key={m.uid} value={m.uid}>{m.name || m.email}</option>)}</select></Field>
           <div><div className="label">Project administrators</div>
             {active.length === 0 ? <p className="text-sm text-faint">Loading team…</p> : <div className="grid sm:grid-cols-2 gap-2">{active.map((m: any) => (
               <label key={m.uid} className="flex items-center gap-2.5 text-base"><input type="checkbox" className="h-4 w-4 accent-[rgb(var(--accent))]" checked={f.adminUids.includes(m.uid)} onChange={(e) => set('adminUids', e.target.checked ? [...f.adminUids, m.uid] : f.adminUids.filter((x) => x !== m.uid))} />{m.name || m.email}</label>
             ))}</div>}
           </div>
-        </fieldset>
-        {!project && (
-          <fieldset>
-            <legend className="eyebrow mb-4">Requirements</legend>
-            <Field label="Start from a template" hint="Copies the template's requirements into this project. You can adjust them afterwards; later template changes won't alter this project unless you re-apply.">
-              <select className="input" value={f.templateId} onChange={(e) => set('templateId', e.target.value)}><option value="">No template — I'll add requirements myself</option>{reqs.data?.templates.filter((t: any) => t.active).map((t: any) => <option key={t.id} value={t.id}>{t.name} ({t.items.length} requirements)</option>)}</select>
-            </Field>
-          </fieldset>
-        )}
+
+          </div>
+        </details>
         <FormError error={save.error} />
       </div>
     </Drawer>

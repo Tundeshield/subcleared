@@ -48,7 +48,7 @@ export default function SubDetail() {
         </>} />
       {s.status === 'suspended' && <div className="mb-8"><Callout tone="bad" title="Suspended">Not ready on any project while suspended, and every upload link they had has been withdrawn.</Callout></div>}
       <Tabs value={tab} onChange={setTab} tabs={[
-        { value: 'overview', label: 'Overview' }, { value: 'projects', label: 'Projects', count: data.projects.length }, { value: 'requirements', label: 'Requirements' },
+        { value: 'overview', label: 'Overview' }, { value: 'projects', label: 'Projects', count: data.projects.length }, { value: 'requirements', label: 'Paperwork by project' },
         { value: 'documents', label: 'Documents', count: data.documents.filter((d: any) => d.versions.length).length }, { value: 'activity', label: 'Activity' },
         ...(data.notes ? [{ value: 'notes' as Tab, label: 'Notes', count: data.notes.length }] : []),
       ]} />
@@ -56,11 +56,12 @@ export default function SubDetail() {
         {tab === 'overview' && (
           <div className="grid lg:grid-cols-[1.2fr_1fr] gap-x-14 gap-y-10">
             <section>
-              <h2 className="text-lg font-semibold mb-2">Readiness by project</h2>
+              <h2 className="text-lg font-semibold">Readiness by project</h2>
+              <p className="text-sm text-muted mt-0.5 mb-2">Each project asks for its own paperwork, so this company can be ready on one project and not another.</p>
               {data.projects.length === 0 ? <p className="text-muted">Not assigned to any project yet. Assign from a project's page.</p> : (
                 <ul className="border-t border-line-strong">{data.projects.map((p: any) => (
                   <li key={p.id} className="py-4 border-b border-line">
-                    <div className="flex flex-wrap items-baseline justify-between gap-3">{p.visible ? <Link to={`/app/projects/${p.id}`} className="font-medium hover:underline underline-offset-4">{p.name}</Link> : <span className="font-medium">{p.name}</span>}<ReadinessBadge value={p.readiness} size="sm" /></div>
+                    <div className="flex flex-wrap items-baseline justify-between gap-3">{p.visible ? <Link to={`/app/projects/${p.id}`} className="font-medium hover:underline underline-offset-4">{p.name}</Link> : <span className="font-medium">{p.name}</span>}<ReadinessBadge value={p.readiness} results={p.results} size="sm" /></div>
                     <p className="text-sm text-muted mt-1">{p.summary}</p>
                   </li>
                 ))}</ul>
@@ -113,7 +114,7 @@ function ProjectsTab({ data, onRequest }: { data: any; onRequest: (projectId: st
       {data.projects.map((p: any) => (
         <section key={p.id}>
           <div className="flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-line-strong">
-            <div><h2 className="text-lg font-semibold">{p.visible ? <Link to={`/app/projects/${p.id}`} className="hover:underline underline-offset-4">{p.name}</Link> : p.name}</h2><div className="mt-1 flex flex-wrap items-center gap-x-3 text-sm"><ReadinessBadge value={p.readiness} size="sm" /><span className="text-faint">{p.evaluatedAt && `Checked ${formatDateTime(p.evaluatedAt)}`}</span></div></div>
+            <div><h2 className="text-lg font-semibold">{p.visible ? <Link to={`/app/projects/${p.id}`} className="hover:underline underline-offset-4">{p.name}</Link> : p.name}</h2><div className="mt-1 flex flex-wrap items-center gap-x-3 text-sm"><ReadinessBadge value={p.readiness} results={p.results} size="sm" /><span className="text-faint">{p.evaluatedAt && `Checked ${formatDateTime(p.evaluatedAt)}`}</span></div></div>
             <div className="flex gap-2"><button className="btn-ghost btn-sm" onClick={() => setHist(p.id)}>History</button>{can('requests.send') && p.readiness !== 'ready' && <button className="btn-secondary btn-sm" onClick={() => onRequest(p.id)}>Request outstanding</button>}</div>
           </div>
           <table className="w-full"><tbody>{p.results.map((r: any) => (
@@ -158,7 +159,7 @@ function DocumentsTab({ data }: { data: any }) {
   return (
     <section>
       <div className="flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-line-strong">
-        <div><h2 className="text-lg font-semibold">Documents</h2><p className="text-sm text-muted mt-0.5">The evidence in force and every earlier version. Nothing is deleted when a replacement arrives.</p></div>
+        <div><h2 className="text-lg font-semibold">Documents</h2><p className="text-sm text-muted mt-0.5">Held once for this company and used by every project that asks for it. Having a document here doesn't make them ready — each project checks it against its own requirements. Earlier versions are always kept.</p></div>
         {can('documents.upload') && <button className="btn-secondary btn-sm" onClick={() => setUpload(true)}>Upload on their behalf</button>}
       </div>
       {docs.length === 0 ? <Empty title="No documents yet">Send a request so the subcontractor can upload, or upload on their behalf.</Empty> : (

@@ -66,7 +66,7 @@ describe('compliance engine', () => {
     const e = evaluate(input({ projectRequirements: [pr('pA', 'gl')] }));
     expect(e.readiness).toBe('not_ready');
     expect(e.results[0].status).toBe('missing');
-    expect(e.reasons[0]).toMatch(/GL: missing/);
+    expect(e.reasons[0]).toMatch(/GL: not requested/);
   });
 
   it('is ready when all mandatory requirements are approved and in date', () => {

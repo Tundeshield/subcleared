@@ -4,8 +4,8 @@ import { PublicFooter, PublicNav } from './PublicShell';
 
 // Illustrative content for the product preview. Names are invented.
 const PREVIEW = [
-  { co: 'Northgate Electrical', trade: 'Electrical · Sam Ortega', r: 'not_ready', issues: '1 missing · 1 rejected', action: 'Request documents' },
-  { co: 'Harbourline Mechanical', trade: 'HVAC · Priya Nair', r: 'action_required', issues: '1 awaiting review', action: 'Review document', primary: true },
+  { co: 'Northgate Electrical', trade: 'Electrical · Sam Ortega', r: 'not_ready', issues: '1 not requested · 1 changes needed', action: 'Request documents' },
+  { co: 'Harbourline Mechanical', trade: 'HVAC · Priya Nair', r: 'action_required', issues: '1 to review', action: 'Review document', primary: true },
   { co: 'Ridgeway Roofing', trade: 'Roofing · Tom Ellis', r: 'action_required', issues: '1 expiring soon', action: 'Request renewal' },
   { co: 'Keystone Civils', trade: 'Groundworks · Ana Ruiz', r: 'ready', issues: 'All requirements met' },
   { co: 'Brightwater Plumbing', trade: 'Plumbing · Lee Chen', r: 'ready', issues: 'All requirements met' },

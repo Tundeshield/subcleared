@@ -11,7 +11,7 @@ import {
   SearchInput, Skeleton, SortHeader, sortRows, Spinner, toneText, Toolbar, usePaged, useToast,
 } from '../../ui';
 
-const READINESS_FILTERS = [{ value: 'attention', label: 'Requiring attention' }, { value: 'not_ready', label: 'Not ready' }, { value: 'action_required', label: 'Action required' }, { value: 'ready', label: 'Ready' }, { value: 'not_evaluated', label: 'Not evaluated' }];
+const READINESS_FILTERS = [{ value: 'attention', label: 'Requiring attention' }, { value: 'not_ready', label: 'Not ready' }, { value: 'action_required', label: 'Action required' }, { value: 'ready', label: 'Ready' }, { value: 'not_evaluated', label: 'Not assessed yet' }];
 
 export default function Subcontractors() {
   const { can } = useSession();
@@ -23,6 +23,7 @@ export default function Subcontractors() {
   const [status, setStatus] = useState('');
   const [trade, setTrade] = useState('');
   const [issue, setIssue] = useState(params.get('issue') ?? '');
+  const [project, setProject] = useState(params.get('project') ?? '');
   const [sort, setSort] = useState<[string, 1 | -1]>(['legalName', 1]);
   const [open, setOpen] = useState(params.get('new') === '1');
   const [importing, setImporting] = useState(false);
@@ -32,10 +33,10 @@ export default function Subcontractors() {
   const setReadiness = (v: string) => { const p = new URLSearchParams(params); if (v) p.set('readiness', v); else p.delete('readiness'); setParams(p); };
   const rows = useMemo(() => sortRows((data?.items ?? []).filter((s: any) =>
     (!readiness || (readiness === 'attention' ? ['not_ready', 'action_required'].includes(s.readiness) : s.readiness === readiness)) &&
-    (status ? s.status === status : s.status !== 'archived') && (!trade || s.trade === trade) && (!issue || (issue === 'outstanding' ? (s.issues?.missing ?? 0) + (s.issues?.requested ?? 0) + (s.issues?.rejected ?? 0) > 0 : s.issues?.[issue] > 0)) &&
-    `${s.legalName} ${s.tradingName ?? ''} ${s.trade} ${s.contact?.email ?? ''} ${s.contact?.name ?? ''} ${s.tags.join(' ')}`.toLowerCase().includes(q.toLowerCase())), sort), [data, q, readiness, status, trade, issue, sort]);
+    (status ? s.status === status : s.status !== 'archived') && (!trade || s.trade === trade) && (!project || s.projectIds?.includes(project)) && (!issue || (issue === 'outstanding' ? (s.issues?.missing ?? 0) + (s.issues?.requested ?? 0) + (s.issues?.rejected ?? 0) > 0 : s.issues?.[issue] > 0)) &&
+    `${s.legalName} ${s.tradingName ?? ''} ${s.trade} ${s.contact?.email ?? ''} ${s.contact?.name ?? ''} ${s.tags.join(' ')}`.toLowerCase().includes(q.toLowerCase())), sort), [data, q, readiness, status, trade, issue, project, sort]);
   const paged = usePaged(rows, 25);
-  useEffect(() => setSel([]), [readiness, status, trade, issue, q]);
+  useEffect(() => setSel([]), [readiness, status, trade, issue, project, q]);
   const trades = [...new Set((data?.items ?? []).map((s: any) => s.trade))].sort() as string[];
   const allOnPage = paged.slice.length > 0 && paged.slice.every((s: any) => sel.includes(s.id));
   const cols = [{ key: 'legalName', label: 'Subcontractor' }, { key: 'trade', label: 'Trade' }, { key: 'status', label: 'Status' }, { key: 'readiness', label: 'Readiness' }, { key: 'projects', label: 'Projects' }, { key: 'outstanding', label: 'Outstanding items' }, { key: 'contactName', label: 'Contact' }, { key: 'contactEmail', label: 'Email' }];
@@ -54,11 +55,11 @@ export default function Subcontractors() {
           <button className="btn-ghost btn-sm" onClick={() => setSel([])}>Clear</button>
         </div>
       ) : <button className="btn-secondary btn-sm" disabled={!rows.length} onClick={() => exportCsv('Subcontractors', cols, flat(rows))}>Export CSV</button>}>
-        <SearchInput value={q} onChange={setQ} placeholder="Search company, contact, tag" className="w-full sm:w-72" />
+        <SearchInput value={q} onChange={setQ} placeholder="Search company, trade or contact" className="w-full sm:w-72" />
         <FilterSelect label="Readiness" value={readiness} onChange={setReadiness} options={READINESS_FILTERS} />
         <FilterSelect label="Status" all="Current" value={status} onChange={setStatus} options={['onboarding', 'active', 'attention', 'suspended', 'archived'].map((s) => ({ value: s, label: s === 'attention' ? 'Attention required' : humanize(s) }))} />
- <FilterSelect label="Issue" value={issue} onChange={setIssue} options={[{ value: 'outstanding', label: 'Anything outstanding' }, { value: 'missing', label: 'Missing documents' }, { value: 'requested', label: 'Requested, not received' }, { value: 'expired', label: 'Expired documents' }, { value: 'rejected', label: 'Rejected documents' }, { value: 'review', label: 'Awaiting review' }, { value: 'expiring', label: 'Expiring soon' }]} />
-        {trades.length > 1 && <FilterSelect label="Trade" value={trade} onChange={setTrade} options={trades.map((t) => ({ value: t, label: t }))} />}
+ {(projects.data?.items ?? []).length > 1 && <FilterSelect label="Project" value={project} onChange={setProject} options={(projects.data?.items ?? []).filter((p: any) => p.status !== 'archived').map((p: any) => ({ value: p.id, label: p.name }))} />}
+        <FilterSelect label="Paperwork" value={issue} onChange={setIssue} options={[{ value: 'outstanding', label: 'Anything outstanding' }, { value: 'missing', label: 'Not requested' }, { value: 'requested', label: 'Requested, not received' }, { value: 'expired', label: 'Expired' }, { value: 'rejected', label: 'Changes needed' }, { value: 'review', label: 'Needs review' }, { value: 'expiring', label: 'Expiring soon' }]} />
       </Toolbar>
       {loading && !data ? <Skeleton /> : error ? <ErrorState error={error} onRetry={reload} /> : rows.length === 0 ? (
         <Empty title={data.items.length ? 'No subcontractors match' : 'No subcontractors yet'} action={!data.items.length && can('subs.manage') ? <><button className="btn-primary" onClick={() => setOpen(true)}>Add subcontractor</button><button className="btn-secondary" onClick={() => setImporting(true)}>Import CSV</button></> : undefined}>
@@ -72,7 +73,7 @@ export default function Subcontractors() {
                 <th className="th w-10"><Checkbox checked={allOnPage} onChange={(v) => setSel(v ? [...new Set([...sel, ...paged.slice.map((s: any) => s.id)])] : sel.filter((id) => !paged.slice.some((s: any) => s.id === id)))} label={<span className="sr-only">Select all on page</span>} /></th>
                 <SortHeader label="Subcontractor" k="legalName" sort={sort} setSort={setSort} /><th className="th">Primary contact</th>
                 <SortHeader label="Project readiness" k="readiness" sort={sort} setSort={setSort} />
-                <SortHeader label="Issues" k="outstanding" sort={sort} setSort={setSort} /><SortHeader label="Status" k="status" sort={sort} setSort={setSort} />
+                <SortHeader label="Paperwork" k="outstanding" sort={sort} setSort={setSort} /><SortHeader label="Status" k="status" sort={sort} setSort={setSort} />
                 <SortHeader label="Last activity" k="lastActivityAt" sort={sort} setSort={setSort} />
               </tr></thead>
               <tbody>{paged.slice.map((s: any) => (
@@ -81,7 +82,7 @@ export default function Subcontractors() {
                   <td className="td"><div className="font-medium">{s.legalName}</div><div className="text-sm text-faint">{[s.trade, s.tradingName && `t/a ${s.tradingName}`].filter(Boolean).join(' · ')}{s.tags.includes('Sample') && <> <SampleTag /></>}</div></td>
                   <td className="td">{s.contact ? <><div>{s.contact.name}</div><div className="text-sm text-faint truncate max-w-[15rem]" title={s.contact.email}>{s.contact.email}</div></> : <span className="text-faint">No contact</span>}</td>
                   <td className="td"><ProjectReadiness s={s} /></td>
-                  <td className="td text-sm">{s.projects === 0 ? <span className="text-faint">—</span> : subIssues(s).length ? subIssues(s).join(' · ') : <span className="text-faint">None</span>}</td>
+                  <td className="td text-sm">{s.projects === 0 ? <span className="text-faint">—</span> : subIssues(s).length ? subIssues(s).join(' · ') : <span className="text-success">All approved</span>}</td>
                   <td className="td text-sm">{s.status === 'attention' ? 'Attention required' : humanize(s.status)}</td>
                   <td className="td text-muted whitespace-nowrap">{formatDate(s.lastActivityAt)}</td>
                 </tr>
@@ -234,7 +235,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
 
 function subIssues(s: any): string[] {
   const i = s.issues ?? {};
-  return ([['missing', 'missing'], ['requested', 'requested'], ['expired', 'expired'], ['rejected', 'rejected'], ['review', 'awaiting review'], ['expiring', 'expiring soon']] as const)
+  return ([['missing', 'not requested'], ['requested', 'requested'], ['expired', 'expired'], ['rejected', 'changes needed'], ['review', 'to review'], ['expiring', 'expiring soon']] as const)
     .filter(([k]) => i[k] > 0).map(([k, l]) => `${i[k]} ${l}`);
 }
 

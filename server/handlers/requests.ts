@@ -1,4 +1,4 @@
-import { addDays, daysBetween, isISODate, todayIn } from '../../src/domain/dates';
+import { addDays, daysBetween, formatDate, isISODate, todayIn } from '../../src/domain/dates';
 import type { DocumentRecord, DocumentRequest, DocumentVersion, Organisation, PortalLink, RequirementDefinition, Subcontractor } from '../../src/domain/types';
 import { audit, bad, C, type Ctx, id, ids, need, notFound, oneOf, randomToken, sha256, str } from '../core';
 import { loadOrgData, recompute } from '../data';
@@ -74,7 +74,7 @@ export async function createRequest(ctx: Ctx, input: any) {
     await ctx.db.set(C.doc(ctx.org.id, 'requests', rid), req as any);
     const list = defs.map((d) => `• ${d!.name}`).join('\n');
     const log = await sendEmail(ctx, {
-      to: contact.email, template: `sub.${type}`, dedupeKey: `request:${rid}`,
+      to: contact.email, template: `sub.${type}`, dedupeKey: `request:${rid}`, replyTo: ctx.member.email,
       subject: type === 'portal_access' ? `${ctx.org.name} invited you to its compliance portal` : type === 'renewal' ? `${ctx.org.name}: please send an updated document` : `${ctx.org.name} requests compliance documents`,
       heading: type === 'portal_access' ? `Manage your paperwork for ${ctx.org.name}` : `${ctx.org.name} needs documents from ${s.legalName}`,
       body: [
@@ -83,8 +83,10 @@ export async function createRequest(ctx: Ctx, input: any) {
           ? `${ctx.org.name} uses SubCleared to manage subcontractor compliance. Use the secure link below to see what's required, upload documents and keep them up to date. You'll confirm your email with a one-time code.`
           : `Please upload the following${projects.length ? ` for ${projects.map((p: any) => p.name).join(', ')}` : ''}:\n${list}`,
         message ? `Message from ${ctx.member.name}: ${message}` : '',
-        dueDate ? `Please submit by ${dueDate}.` : '',
+        dueDate ? `Please submit by ${formatDate(dueDate)}.` : '',
+        type === 'portal_access' ? '' : 'How to send them: open the link, choose each document and upload a PDF or a clear photo — from a phone is fine. You can see what has been accepted and replace anything that needs changing.',
         `No account is needed. This secure link is for ${contact.email} only and expires in ${days} days.`,
+        `Questions about what's needed? Reply to this email to reach ${ctx.member.name} at ${ctx.org.name}.`,
       ].filter(Boolean).join('\n\n'),
       cta: { label: type === 'portal_access' ? 'Open the portal' : 'Upload documents', url: link.url },
     });
@@ -201,3 +203,38 @@ export async function requestRenewals(ctx: Ctx, input: any) {
 }
 
 export type { DocumentRecord, Subcontractor };
+
+const REQUESTABLE = new Set(['missing', 'not_requested', 'requested', 'overdue', 'rejected', 'expired', 'expiring_soon']);
+
+/**
+ * One step from a project: request every outstanding document from each chosen
+ * subcontractor's primary contact. Built on createRequest, so links, emails,
+ * reminders and audit behave exactly as for a single request.
+ */
+export async function requestForProject(ctx: Ctx, input: any) {
+  need(ctx, 'requests.send');
+  const projectId = id(input.projectId, 'Project');
+  const project = await ctx.db.get<any>(C.doc(ctx.org.id, 'projects', projectId));
+  if (!project) throw notFound('Project not found');
+  const subIds = ids(input.subcontractorIds, 'Subcontractors');
+  if (!subIds.length) throw bad('Choose at least one subcontractor');
+  const results: { subcontractorId: string; name: string; status: 'sent' | 'skipped' | 'failed'; documents: number; detail?: string }[] = [];
+  for (const sid of subIds) {
+    const sub = await ctx.db.get<Subcontractor>(C.doc(ctx.org.id, 'subcontractors', sid));
+    if (!sub) { results.push({ subcontractorId: sid, name: 'Unknown', status: 'failed', documents: 0, detail: 'Not found' }); continue; }
+    const ev = await ctx.db.get<any>(C.doc(ctx.org.id, 'readiness', `${projectId}__${sid}`));
+    const wanted = (ev?.results ?? []).filter((r: any) => REQUESTABLE.has(r.status)).map((r: any) => r.requirementId as string);
+    const defs = (await ctx.db.getMany<RequirementDefinition>(wanted.map((r: string) => C.doc(ctx.org.id, 'requirements', r)))).filter((d): d is RequirementDefinition => !!d && d.kind === 'document');
+    const contact = sub.contacts.find((c) => c.primary) ?? sub.contacts[0];
+    if (!defs.length) { results.push({ subcontractorId: sid, name: sub.legalName, status: 'skipped', documents: 0, detail: 'Nothing outstanding to request' }); continue; }
+    if (!contact) { results.push({ subcontractorId: sid, name: sub.legalName, status: 'skipped', documents: defs.length, detail: 'No contact with an email address' }); continue; }
+    try {
+      const r = await createRequest(ctx, { subcontractorId: sid, type: 'request', contactIds: [contact.id], requirementIds: defs.map((d) => d.id), projectIds: [projectId], dueDate: input.dueDate, message: input.message });
+      const failed = r.results.find((x: any) => x.emailStatus === 'failed');
+      results.push({ subcontractorId: sid, name: sub.legalName, status: failed ? 'failed' : 'sent', documents: defs.length, detail: failed ? `Link created but email not sent: ${failed.emailError}` : `Sent to ${contact.name}` });
+    } catch (e: any) {
+      results.push({ subcontractorId: sid, name: sub.legalName, status: 'failed', documents: defs.length, detail: e.message });
+    }
+  }
+  return { results };
+}

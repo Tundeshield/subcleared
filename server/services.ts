@@ -11,7 +11,7 @@ export interface AuthVerifier {
   revokeSessions?(uid: string): Promise<void>;
 }
 
-export interface MailMessage { to: string; subject: string; text: string; html: string }
+export interface MailMessage { to: string; subject: string; text: string; html: string; replyTo?: string }
 export interface Mailer {
   configured: boolean;
   send(msg: MailMessage): Promise<{ ok: boolean; id?: string; error?: string; dev?: boolean }>;
@@ -79,7 +79,7 @@ export class ResendMailer implements Mailer {
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: this.from, to: [msg.to], subject: msg.subject, html: msg.html, text: msg.text }),
+        body: JSON.stringify({ from: this.from, to: [msg.to], subject: msg.subject, html: msg.html, text: msg.text, ...(msg.replyTo ? { reply_to: msg.replyTo } : {}) }),
       });
       const body: any = await res.json().catch(() => ({}));
       if (!res.ok) return { ok: false, error: body?.message || `Resend responded ${res.status}` };

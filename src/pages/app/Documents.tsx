@@ -26,7 +26,7 @@ export default function Documents() {
         actions={<button className="btn-secondary" disabled={!rows.length} onClick={() => exportCsv('Documents', cols, rows.map((r: any) => ({ ...r, projectsText: r.projectNames?.join('; ') })))}>Export CSV</button>} />
       <Toolbar>
         <SearchInput value={q} onChange={setQ} placeholder="Title, subcontractor, policy or reference" className="w-full sm:w-80" />
-        <FilterSelect label="Status" value={f.status ?? ''} onChange={(v) => set('status', v)} options={[{ value: 'approved', label: 'Approved' }, { value: 'expiring', label: 'Expiring soon' }, { value: 'expired', label: 'Expired' }, { value: 'awaiting_review', label: 'Awaiting review' }, { value: 'rejected', label: 'Rejected' }, { value: 'info_requested', label: 'More information requested' }]} />
+        <FilterSelect label="Status" value={f.status ?? ''} onChange={(v) => set('status', v)} options={[{ value: 'approved', label: 'Approved' }, { value: 'expiring', label: 'Expiring soon' }, { value: 'expired', label: 'Expired' }, { value: 'awaiting_review', label: 'Needs review' }, { value: 'rejected', label: 'Changes needed (rejected)' }, { value: 'info_requested', label: 'Changes needed (more information)' }]} />
         <FilterSelect label="Project" value={f.projectId ?? ''} onChange={(v) => set('projectId', v)} options={(projects.data?.items ?? []).map((p: any) => ({ value: p.id, label: p.name }))} />
         {categories.length > 1 && <FilterSelect label="Category" value={category} onChange={setCategory} options={categories.map((c) => ({ value: c, label: c }))} />}
         <button className="btn-ghost btn-sm" onClick={() => setMore((m) => !m)} aria-expanded={more}>{more ? 'Fewer filters' : 'More filters'}</button>

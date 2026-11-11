@@ -8,7 +8,7 @@ import { Checkbox, cx, Empty, ErrorState, FilterSelect, FormError, Glyph, toneTe
 
 const STAGES: Record<string, [string, 'none' | 'progress' | 'attention' | 'blocked' | 'ok']> = {
   not_requested: ['Not requested', 'none'], requested: ['Renewal requested', 'attention'], acknowledged: ['Opened by subcontractor', 'attention'],
-  replacement_received: ['Replacement awaiting review', 'progress'], replacement_rejected: ['Replacement rejected', 'blocked'], renewed: ['Renewed', 'ok'],
+  replacement_received: ['New version needs review', 'progress'], replacement_rejected: ['Replacement rejected', 'blocked'], renewed: ['Renewed', 'ok'],
 };
 const WINDOWS = [
   { value: 'expired', label: 'Expired', test: (d: number) => d < 0 }, { value: '7', label: 'Within 7 days', test: (d: number) => d >= 0 && d <= 7 },

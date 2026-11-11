@@ -87,7 +87,7 @@ export async function listSubs(ctx: Ctx, input: any) {
     const primary = s.contacts.find((c) => c.primary) ?? s.contacts[0];
     return {
       id: s.id, legalName: s.legalName, tradingName: s.tradingName, trade: s.trade, status: s.status, tags: s.tags,
-      contact: primary ? { name: primary.name, email: primary.email } : null, projects: assignments.length,
+      contact: primary ? { name: primary.name, email: primary.email } : null, projects: assignments.length, projectIds: assignments.map((a) => a.projectId),
       readiness: worst ?? 'not_evaluated', outstanding: rs.reduce((n, r) => n + r.results.filter((x) => x.blocking).length, 0),
       expiring: rs.reduce((n, r) => n + r.results.filter((x) => x.status === 'expiring_soon').length, 0),
       readyOn: rs.filter((r) => r.readiness === 'ready').length, issues: issueCounts(rs),

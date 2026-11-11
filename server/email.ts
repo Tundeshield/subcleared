@@ -30,6 +30,8 @@ export interface EmailInput {
   cta?: { label: string; url: string };
   dedupeKey?: string;
   footer?: string;
+  /** Where replies go — the person who sent the request, so subcontractors can ask questions. */
+  replyTo?: string;
 }
 
 /**
@@ -49,7 +51,7 @@ export async function sendEmail(ctx: { db: Db; svc: Services; org: { id: string;
   };
   await ctx.db.set(path, log as any);
   const { html, text } = renderEmail({ orgName: ctx.org.name, heading: input.heading, body: input.body, cta: input.cta, footer: input.footer });
-  const res = await ctx.svc.mail.send({ to: input.to, subject: input.subject, html, text });
+  const res = await ctx.svc.mail.send({ to: input.to, subject: input.subject, html, text, replyTo: input.replyTo });
   const final: DeliveryLog = {
     ...log,
     status: res.ok ? (res.dev ? 'dev_logged' : 'sent') : 'failed',

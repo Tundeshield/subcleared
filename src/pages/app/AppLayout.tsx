@@ -8,12 +8,15 @@ import { applyPrefs, readPrefs, useSession } from '../../lib/session';
 import { cx, Dialog, Drawer, Glyph, Icon, Logo, Segmented, Spinner } from '../../ui';
 
 type NavItem = { to: string; label: string; perm?: string; count?: 'reviews' };
+// Daily work: four destinations. Everything else is one click away under "More".
 const WORKSPACE: NavItem[] = [
   { to: 'overview', label: 'Overview' }, { to: 'projects', label: 'Projects' }, { to: 'subcontractors', label: 'Subcontractors' },
-  { to: 'documents', label: 'Documents' }, { to: 'reviews', label: 'Reviews', perm: 'documents.review', count: 'reviews' },
-  { to: 'renewals', label: 'Renewals' }, { to: 'reports', label: 'Reports', perm: 'reports.view' },
+  { to: 'reviews', label: 'Documents to review', perm: 'documents.review', count: 'reviews' },
 ];
-const CONFIG: NavItem[] = [{ to: 'requirements', label: 'Requirements & templates' }];
+const MORE: NavItem[] = [
+  { to: 'documents', label: 'All documents' }, { to: 'renewals', label: 'Renewals' }, { to: 'reports', label: 'Reports', perm: 'reports.view' },
+  { to: 'requirements', label: 'Requirements & templates' },
+];
 const ADMIN: NavItem[] = [{ to: 'team', label: 'Team and permissions' }, { to: 'settings', label: 'Settings' }, { to: 'billing', label: 'Billing' }];
 
 export default function AppLayout() {
@@ -64,8 +67,8 @@ export default function AppLayout() {
       <div className="flex-1 overflow-y-auto px-2.5 pb-6">
         <div className="eyebrow px-3 pt-3 pb-2">Workspace</div>
         <ul className="space-y-0.5">{WORKSPACE.filter((n) => !n.perm || can(n.perm as any)).map(item)}</ul>
-        <div className="eyebrow px-3 pt-7 pb-2">Configuration</div>
-        <ul className="space-y-0.5">{CONFIG.map(item)}</ul>
+        <div className="eyebrow px-3 pt-7 pb-2">More</div>
+        <ul className="space-y-0.5">{MORE.filter((n) => !n.perm || can(n.perm as any)).map(item)}</ul>
         <div className="eyebrow px-3 pt-7 pb-2">Administration</div>
         <ul className="space-y-0.5">{ADMIN.map(item)}</ul>
       </div>
@@ -197,14 +200,20 @@ function HelpDrawer({ open, onClose, market }: { open: boolean; onClose: () => v
           <h3 className="font-semibold mb-3">Readiness, per project</h3>
           <p className="text-muted">Each project lists its own requirements. A subcontractor is assessed separately on every project they're assigned to, so they can be ready for one and not another.</p>
           <ul className="mt-4 space-y-3">
-            {[['ok', 'Ready', 'Every mandatory requirement is approved and in date.'], ['attention', 'Action required', 'Nothing is blocking, but something needs attention — a document awaiting review or expiring soon.'], ['blocked', 'Not ready', 'At least one mandatory requirement is missing, rejected or expired.'], ['none', 'Not evaluated', 'The project has no requirements yet.']].map(([t, l, d]) => (
+            {[['ok', 'Ready', 'Every mandatory requirement is approved and in date.'], ['progress', 'Needs review', 'Documents have arrived and are waiting for someone to approve them.'], ['attention', 'Action required', 'Something needs doing soon — a document is expiring or needs changes.'], ['blocked', 'Not ready', 'At least one mandatory document is missing, expired or needs changes.']].map(([t, l, d]) => (
               <li key={l} className="flex gap-3"><Glyph tone={t as any} className="w-4 h-4 mt-1" /><span><span className="font-medium">{l}.</span> <span className="text-muted">{d}</span></span></li>
             ))}
           </ul>
         </section>
         <section>
+          <h3 className="font-semibold mb-3">Document statuses</h3>
+          <dl className="grid grid-cols-[8.5rem_1fr] gap-x-3 gap-y-2 text-sm">
+            {[['Not requested', 'No request sent yet — request it.'], ['Requested', 'Waiting for the subcontractor — resend if needed.'], ['Submitted', 'Received and checked for safety.'], ['Needs review', 'Waiting for your decision.'], ['Approved', 'Accepted against the requirement.'], ['Changes needed', 'Rejected — the subcontractor has been told why.'], ['Expiring soon', 'Request a renewal.'], ['Expired', 'Request an updated document.'], ['Not applicable', 'Doesn’t apply to this subcontractor.']].map(([k, v]) => <div key={k} className="contents"><dt className="font-medium">{k}</dt><dd className="text-muted">{v}</dd></div>)}
+          </dl>
+        </section>
+        <section>
           <h3 className="font-semibold mb-3">Received, reviewed, verified</h3>
-          <p className="text-muted">An upload only counts once a reviewer approves it against the requirement. Marking a document independently verified records who confirmed it with the {market === 'UK' ? 'broker, insurer or register' : 'broker, carrier or licensing board'}. A {term(market, 'coi')} is evidence of cover, not proof of it.</p>
+          <p className="text-muted">An upload only counts once a reviewer approves it against the requirement. Marking a document independently verified records who confirmed it with the {market === 'UK' ? 'broker, insurer or register' : 'broker, carrier or licensing board'}. {/^[aeiou]/i.test(term(market, 'coi')) ? 'An' : 'A'} {term(market, 'coi')} is evidence of cover, not proof of it.</p>
         </section>
         <section>
           <h3 className="font-semibold mb-3">Keyboard</h3>

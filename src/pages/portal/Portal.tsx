@@ -61,6 +61,7 @@ export default function Portal() {
         {s.openRequests.filter((r: any) => r.message || r.dueDate).map((r: any) => (
           <div key={r.id} className="mt-6 border-l-2 border-accent pl-4 text-[0.9375rem]">{r.message && <p>“{r.message}” <span className="text-muted">— {r.from}</span></p>}{r.dueDate && <p className="text-muted mt-0.5">Please send by <span className="text-ink font-medium">{formatDate(r.dueDate)}</span>.</p>}</div>
         ))}
+        <p className="mt-6 text-sm text-muted">Choose each document below and upload a PDF or a clear photo. Questions about what's needed? Reply to the email you received{s.openRequests[0]?.from ? ` to reach ${s.openRequests[0].from}` : ''}.</p>
       </div>
       {notice && (
         <div className="mb-6 rounded-md bg-accent/[0.09] px-4 py-3.5 flex gap-3" role="status">
