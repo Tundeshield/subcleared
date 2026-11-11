@@ -1,3 +1,4 @@
+import { getLocale } from './locale';
 import type { ISODate } from './types';
 
 const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -49,7 +50,7 @@ export function formatDate(d?: string | null): string {
   const iso = d.length > 10 ? d.slice(0, 10) : d;
   if (!isISODate(iso)) return d;
   const [y, m, day] = iso.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, day)).toLocaleDateString('en-GB', {
+  return new Date(Date.UTC(y, m - 1, day)).toLocaleDateString(getLocale(), {
     day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
   });
 }
@@ -58,7 +59,7 @@ export function formatDateTime(ts?: string | null): string {
   if (!ts) return '—';
   const d = new Date(ts);
   if (isNaN(d.getTime())) return ts;
-  return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString(getLocale(), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 export function relativeDays(days: number): string {

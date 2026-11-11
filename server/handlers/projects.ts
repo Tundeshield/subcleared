@@ -48,14 +48,20 @@ async function validateFields(ctx: Ctx, input: any, partial: boolean) {
 }
 
 export async function listProjects(ctx: Ctx) {
-  const data = await loadOrgData(ctx.db, ctx.org.id, ['projects', 'assignments', 'readiness', 'projectRequirements']);
+  const data = await loadOrgData(ctx.db, ctx.org.id, ['projects', 'assignments', 'readiness', 'projectRequirements', 'subs']);
   const projects = data.projects.filter((p) => canSeeProject(ctx.member, p));
+  const members = await ctx.db.list<Member>(C.col(ctx.org.id, 'members'));
   return {
     items: projects.map((p) => {
       const assigned = data.assignments.filter((a) => a.active && a.projectId === p.id).map((a) => a.subcontractorId);
       const rd = data.readiness.filter((r) => r.projectId === p.id && assigned.includes(r.subcontractorId));
+      const last = [p.updatedAt, ...rd.map((r) => r.evaluatedAt), ...data.subs.filter((x) => assigned.includes(x.id)).map((x) => x.lastActivityAt ?? '')].filter(Boolean).sort().pop();
+      const m = members.find((x) => x.uid === p.managerUid);
       return {
         ...p,
+        manager: m ? m.name || m.email : null,
+        lastActivityAt: last,
+        readyPct: rd.length ? Math.round((rd.filter((r) => r.readiness === 'ready').length / rd.length) * 100) : null,
         assigned: assigned.length,
         requirements: data.projectRequirements.filter((r) => r.projectId === p.id && r.active).length,
         ready: rd.filter((r) => r.readiness === 'ready').length,
@@ -95,11 +101,15 @@ export async function getProjectDetail(ctx: Ctx, input: any) {
     const applied = p.templateRefs.find((x) => x.templateId === t.id);
     return { id: t.id, name: t.name, version: t.version, items: t.items.length, appliedVersion: applied?.version, outdated: !!applied && applied.version < t.version };
   });
+  const members = await ctx.db.list<Member>(C.col(ctx.org.id, 'members'));
+  const name = (uid?: string) => { const m = members.find((x) => x.uid === uid); return m ? m.name || m.email : null; };
   return {
-    project: p, subcontractors: subs, requirements: reqs, templates,
+    project: { ...p, managerName: name(p.managerUid), adminNames: p.adminUids.map(name).filter(Boolean) },
+    subcontractors: subs, requirements: reqs, templates,
     counts: {
       total: subs.length,
       ready: subs.filter((s: any) => s.readiness === 'ready').length,
+      awaitingReview: subs.reduce((n: number, s: any) => n + s.pending, 0),
       action: subs.filter((s: any) => s.readiness === 'action_required').length,
       notReady: subs.filter((s: any) => s.readiness === 'not_ready').length,
       notEvaluated: subs.filter((s: any) => s.readiness === 'not_evaluated').length,

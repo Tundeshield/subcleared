@@ -207,6 +207,8 @@ export async function listDocuments(ctx: Ctx, input: any) {
       id: d.id, title: d.title, subcontractorId: d.subcontractorId, subcontractor: sub?.legalName, trade: sub?.trade, requirementId: d.requirementId,
       requirement: d.requirementId ? defs.get(d.requirementId)?.name : undefined, documentType: show?.metadata.documentType || d.documentType,
       issuer: show?.metadata.issuer, referenceNumber: show?.metadata.referenceNumber, expiryDate: st.approved?.metadata.expiryDate, days: st.days,
+      issueDate: show?.metadata.issueDate, versionNumber: show?.versionNumber, category: d.requirementId ? defs.get(d.requirementId)?.category : 'Other',
+      projectNames: projects.map((pid) => data.projects.find((p) => p.id === pid)?.name).filter(Boolean),
       jurisdiction: show?.metadata.jurisdiction ?? sub?.jurisdiction, status: st.status, reviewStatus: st.current?.reviewStatus,
       verification: st.approved?.verification ?? st.current?.verification, versions: vs.filter((v) => !['uploading'].includes(v.reviewStatus)).length,
       uploadedAt: st.current?.uploadedAt, currentVersionId: st.current?.id, approvedVersionId: st.approved?.id, projectIds: projects, archived: d.archived,
@@ -452,7 +454,7 @@ async function progressRenewals(ctx: Ctx, v: DocumentVersion) {
 }
 
 async function notifySubcontractorOfDecision(ctx: Ctx, sub: Subcontractor | null, d: DocumentRecord | null, v: DocumentVersion, rec: ReviewRecord) {
-  if (!sub || rec.decision === 'approved') return; // approvals are visible in the portal; only actionable outcomes are emailed
+  if (!sub || rec.decision === 'approved' || sub.sample) return; // sample contacts are not real mailboxes // approvals are visible in the portal; only actionable outcomes are emailed
   const contact = v.uploadedBy.type === 'portal' ? sub.contacts.find((c) => c.id === v.uploadedBy.id || c.email === v.uploadedBy.id) : undefined;
   const to = contact?.email ?? (sub.contacts.find((c) => c.primary) ?? sub.contacts[0])?.email;
   if (!to) return;

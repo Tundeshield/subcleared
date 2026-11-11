@@ -4,120 +4,128 @@ import type { Criterion, RequirementDefinition } from './types';
 
 type Starter = Omit<RequirementDefinition, 'id' | 'version' | 'createdAt' | 'updatedAt' | 'active'> & { key: string };
 
-const gl: Criterion[] = [
-  { key: 'glEachOccurrence', label: 'General liability, each occurrence', type: 'min_amount', value: 1_000_000 },
-  { key: 'glAggregate', label: 'General liability, aggregate', type: 'min_amount', value: 2_000_000 },
-];
+type Market = 'US' | 'UK' | 'OTHER';
 
-export const STARTER_REQUIREMENTS: Starter[] = [
-  {
-    key: 'gl', name: 'General liability insurance', category: 'Insurance', kind: 'document',
-    description: 'Certificate of insurance showing current general/public liability cover.',
-    subTypes: [], defaultMandatory: true, documentType: 'Certificate of insurance', expiryRequired: true,
-    renewal: 'on_expiry', reviewRequired: true, criteria: gl,
-    instructions: 'Upload the current certificate of insurance. It must show the policy number, insurer, policy dates and limits.',
-  },
-  {
-    key: 'wc', name: "Workers' compensation insurance", category: 'Insurance', kind: 'document',
-    description: "Evidence of workers' compensation / employers' liability cover.",
-    subTypes: [], defaultMandatory: true, documentType: 'Certificate of insurance', expiryRequired: true,
-    renewal: 'on_expiry', reviewRequired: true,
-    criteria: [{ key: 'wcCoverage', label: "Workers' compensation coverage shown", type: 'boolean', value: true }],
-    instructions: "Upload your workers' compensation or employers' liability certificate.",
-  },
-  {
-    key: 'auto', name: 'Commercial auto insurance', category: 'Insurance', kind: 'document',
-    description: 'Commercial vehicle liability cover for vehicles used on site or for deliveries.',
-    subTypes: [], defaultMandatory: true, documentType: 'Certificate of insurance', expiryRequired: true,
-    renewal: 'on_expiry', reviewRequired: true,
-    criteria: [{ key: 'autoCombinedSingleLimit', label: 'Auto liability, combined single limit', type: 'min_amount', value: 1_000_000 }],
-  },
-  {
-    key: 'umbrella', name: 'Umbrella / excess liability', category: 'Insurance', kind: 'document',
-    description: 'Excess liability cover above primary limits.', subTypes: [], defaultMandatory: false,
-    documentType: 'Certificate of insurance', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true,
-    criteria: [{ key: 'umbrellaLimit', label: 'Umbrella limit', type: 'min_amount', value: 5_000_000 }],
-  },
-  {
-    key: 'ai', name: 'Additional insured endorsement', category: 'Insurance', kind: 'document',
-    description: 'Endorsement naming the general contractor as additional insured.', subTypes: [], defaultMandatory: true,
-    documentType: 'Endorsement', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true,
-    criteria: [
-      { key: 'additionalInsured', label: 'Additional insured status', type: 'boolean', value: true },
-      { key: 'waiverOfSubrogation', label: 'Waiver of subrogation', type: 'boolean', value: true },
-    ],
-  },
-  {
-    key: 'pl', name: 'Professional liability insurance', category: 'Insurance', kind: 'document',
-    description: 'Required where the subcontractor provides design services.', subTypes: ['design', 'mechanical', 'civil'],
-    defaultMandatory: false, documentType: 'Certificate of insurance', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'biz', name: 'Business licence', category: 'Licensing', kind: 'document',
-    description: 'Current business licence or registration to trade.', subTypes: [], defaultMandatory: true,
-    documentType: 'Licence', expiryRequired: false, renewal: 'on_expiry', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'elec', name: 'Electrical trade licence', category: 'Licensing', kind: 'document',
-    description: 'Licence for the qualifying electrician or electrical contractor.', subTypes: ['electrical'],
-    defaultMandatory: true, documentType: 'Licence', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'plumb', name: 'Plumbing / gas trade licence', category: 'Licensing', kind: 'document',
-    description: 'Licence or registration for plumbing and gas work.', subTypes: ['plumbing'],
-    defaultMandatory: true, documentType: 'Licence', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'safety', name: 'Safety certification', category: 'Health & safety', kind: 'document',
-    description: 'Accredited health and safety certification or prequalification.', subTypes: [], defaultMandatory: true,
-    documentType: 'Certificate', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'hsp', name: 'Health and safety policy', category: 'Health & safety', kind: 'document',
-    description: 'Signed company health and safety policy.', subTypes: [], defaultMandatory: true,
-    documentType: 'Policy', expiryRequired: false, renewal: 'annual', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'rams', name: 'Risk assessment and method statement', category: 'Health & safety', kind: 'document',
-    description: 'Project-specific risk assessment and method statement for the scope of work.', subTypes: [],
-    defaultMandatory: true, documentType: 'RAMS', expiryRequired: false, renewal: 'none', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'reg', name: 'Company registration', category: 'Corporate', kind: 'document',
-    description: 'Certificate of incorporation or equivalent registration document.', subTypes: [], defaultMandatory: false,
-    documentType: 'Registration', expiryRequired: false, renewal: 'none', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'tax', name: 'Tax documentation', category: 'Corporate', kind: 'document',
-    description: 'Tax form or tax registration evidence required in your jurisdiction (e.g. W-9, UTR, TIN).', subTypes: [],
-    defaultMandatory: true, documentType: 'Tax form', expiryRequired: false, renewal: 'none', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'agreement', name: 'Signed subcontractor agreement', category: 'Contractual', kind: 'document',
-    description: 'Executed subcontract or master services agreement.', subTypes: [], defaultMandatory: true,
-    documentType: 'Agreement', expiryRequired: false, renewal: 'none', reviewRequired: true, criteria: [],
-  },
-  {
-    key: 'declaration', name: 'Annual compliance declaration', category: 'Declarations', kind: 'declaration',
-    description: 'Periodic declaration that the subcontractor has no outstanding enforcement actions and maintains required training.', subTypes: [],
-    defaultMandatory: false, expiryRequired: false, renewal: 'periodic', renewalPeriodDays: 365, reviewRequired: false, criteria: [],
-  },
-];
+function base(market: Market): Starter[] {
+  const uk = market === 'UK';
+  const cur = uk ? 'GBP' : 'USD';
+  const lim = (us: number, gb: number) => (uk ? gb : us);
+  const gl: Criterion[] = [
+    { key: 'glEachOccurrence', label: uk ? 'Public liability, any one occurrence' : 'General liability, each occurrence', type: 'min_amount', value: lim(1_000_000, 5_000_000), currency: cur },
+    ...(uk ? [] : [{ key: 'glAggregate', label: 'General liability, aggregate', type: 'min_amount' as const, value: 2_000_000, currency: cur }]),
+  ];
+  const coi = uk ? 'Insurance certificate' : 'Certificate of insurance';
+  return [
+    {
+      key: 'gl', name: uk ? 'Public liability insurance' : 'General liability insurance', category: 'Insurance', kind: 'document',
+      description: uk ? 'Insurance certificate or schedule showing current public liability cover.' : 'Certificate of insurance (ACORD 25 or equivalent) showing current general liability cover.',
+      subTypes: [], defaultMandatory: true, documentType: coi, expiryRequired: true, renewal: 'on_expiry', reviewRequired: true, criteria: gl,
+      instructions: `Upload your current ${coi.toLowerCase()}. It must show the insurer, policy number, policy dates and limits.`,
+    },
+    {
+      key: 'wc', name: uk ? "Employers' liability insurance" : "Workers' compensation insurance", category: 'Insurance', kind: 'document',
+      description: uk ? "Employers' liability certificate (a legal requirement for most UK employers)." : "Evidence of workers' compensation cover, or a valid exemption where your state allows one.",
+      subTypes: [], defaultMandatory: true, documentType: coi, expiryRequired: true, renewal: 'on_expiry', reviewRequired: true,
+      criteria: uk ? [{ key: 'elLimit', label: "Employers' liability limit", type: 'min_amount', value: 10_000_000, currency: cur }] : [{ key: 'wcCoverage', label: "Workers' compensation coverage shown", type: 'boolean', value: true }],
+      instructions: uk ? "Upload your current employers' liability certificate." : "Upload your workers' compensation certificate or exemption.",
+    },
+    {
+      key: 'auto', name: uk ? 'Commercial vehicle insurance' : 'Commercial auto insurance', category: 'Insurance', kind: 'document',
+      description: 'Liability cover for vehicles used on site or for deliveries.', subTypes: [], defaultMandatory: true, documentType: coi,
+      expiryRequired: true, renewal: 'on_expiry', reviewRequired: true,
+      criteria: uk ? [] : [{ key: 'autoCombinedSingleLimit', label: 'Auto liability, combined single limit', type: 'min_amount', value: 1_000_000, currency: cur }],
+    },
+    {
+      key: 'umbrella', name: uk ? 'Excess liability insurance' : 'Umbrella / excess liability', category: 'Insurance', kind: 'document',
+      description: 'Excess cover above primary liability limits.', subTypes: [], defaultMandatory: false, documentType: coi, expiryRequired: true,
+      renewal: 'on_expiry', reviewRequired: true, criteria: [{ key: 'umbrellaLimit', label: 'Excess limit', type: 'min_amount', value: lim(5_000_000, 5_000_000), currency: cur }],
+    },
+    uk ? {
+      key: 'ai', name: 'Indemnity to principal', category: 'Insurance', kind: 'document',
+      description: 'Policy wording or endorsement extending an indemnity to the principal contractor, where your contract requires it.', subTypes: [],
+      defaultMandatory: false, documentType: 'Endorsement', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true,
+      criteria: [{ key: 'additionalInsured', label: 'Indemnity to principal shown', type: 'boolean', value: true }],
+    } : {
+      key: 'ai', name: 'Additional insured endorsement', category: 'Insurance', kind: 'document',
+      description: 'Endorsement naming the general contractor (and owner, where required) as additional insured, with waiver of subrogation.', subTypes: [],
+      defaultMandatory: true, documentType: 'Endorsement', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true,
+      criteria: [{ key: 'additionalInsured', label: 'Additional insured status', type: 'boolean', value: true }, { key: 'waiverOfSubrogation', label: 'Waiver of subrogation', type: 'boolean', value: true }],
+    },
+    {
+      key: 'pl', name: 'Professional indemnity insurance', category: 'Insurance', kind: 'document',
+      description: 'Required where the subcontractor provides design services.', subTypes: ['design', 'mechanical', 'civil'],
+      defaultMandatory: false, documentType: coi, expiryRequired: true, renewal: 'on_expiry', reviewRequired: true, criteria: [],
+    },
+    uk ? {
+      key: 'biz', name: 'Company registration', category: 'Registration', kind: 'document',
+      description: 'Certificate of incorporation or Companies House record (or sole-trader confirmation).', subTypes: [], defaultMandatory: true,
+      documentType: 'Registration', expiryRequired: false, renewal: 'none', reviewRequired: true, criteria: [],
+    } : {
+      key: 'biz', name: 'Business license', category: 'Licensing', kind: 'document',
+      description: 'Current business license or registration to operate in the project jurisdiction.', subTypes: [], defaultMandatory: true,
+      documentType: 'License', expiryRequired: false, renewal: 'on_expiry', reviewRequired: true, criteria: [],
+    },
+    {
+      key: 'elec', name: uk ? 'Electrical competent person registration' : 'Electrical contractor license', category: uk ? 'Registration' : 'Licensing', kind: 'document',
+      description: uk ? 'NICEIC, NAPIT or equivalent competent person scheme registration.' : 'State electrical contractor license for the project jurisdiction.',
+      subTypes: ['electrical'], defaultMandatory: true, documentType: uk ? 'Registration' : 'License', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true, criteria: [],
+    },
+    {
+      key: 'plumb', name: uk ? 'Gas Safe registration' : 'Plumbing contractor license', category: uk ? 'Registration' : 'Licensing', kind: 'document',
+      description: uk ? 'Gas Safe Register entry for engineers carrying out gas work.' : 'State or municipal plumbing license for the project jurisdiction.',
+      subTypes: ['plumbing'], defaultMandatory: true, documentType: uk ? 'Registration' : 'License', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true, criteria: [],
+    },
+    {
+      key: 'safety', name: uk ? 'Health and safety accreditation' : 'Safety program and EMR', category: 'Health & safety', kind: 'document',
+      description: uk ? 'CHAS, SafeContractor, Constructionline or another SSIP-recognised accreditation.' : 'Written safety program and current experience modification rate (EMR) letter.',
+      subTypes: [], defaultMandatory: true, documentType: 'Certificate', expiryRequired: true, renewal: 'on_expiry', reviewRequired: true, criteria: [],
+    },
+    {
+      key: 'training', name: uk ? 'CSCS cards for site operatives' : 'OSHA 10/30 training records', category: 'Health & safety', kind: 'manual_check',
+      description: uk ? 'Confirm every operative attending site holds a valid CSCS (or equivalent) card.' : 'Confirm site workers hold OSHA 10 and supervisors OSHA 30 cards.',
+      subTypes: [], defaultMandatory: false, expiryRequired: false, renewal: 'periodic', renewalPeriodDays: 180, reviewRequired: false, criteria: [],
+    },
+    {
+      key: 'rams', name: uk ? 'Risk assessment and method statement (RAMS)' : 'Job hazard analysis', category: 'Health & safety', kind: 'document',
+      description: uk ? 'Project-specific RAMS covering the subcontract scope.' : 'Project-specific job hazard analysis (JHA) for the scope of work.',
+      subTypes: [], defaultMandatory: true, documentType: uk ? 'RAMS' : 'JHA', expiryRequired: false, renewal: 'none', reviewRequired: true, criteria: [],
+    },
+    {
+      key: 'tax', name: uk ? 'CIS verification' : 'Form W-9', category: 'Tax', kind: uk ? 'manual_check' : 'document',
+      description: uk ? 'Confirm the subcontractor has been verified with HMRC under the Construction Industry Scheme.' : 'Signed IRS Form W-9 with the taxpayer identification number.',
+      subTypes: [], defaultMandatory: true, documentType: uk ? undefined : 'Tax form', expiryRequired: false, renewal: 'none', reviewRequired: !uk, criteria: [],
+    },
+    {
+      key: 'agreement', name: 'Signed subcontract agreement', category: 'Contractual', kind: 'document',
+      description: 'Executed subcontract or master subcontract agreement.', subTypes: [], defaultMandatory: true,
+      documentType: 'Agreement', expiryRequired: false, renewal: 'none', reviewRequired: true, criteria: [],
+    },
+    {
+      key: 'declaration', name: 'Annual compliance declaration', category: 'Declarations', kind: 'declaration',
+      description: 'Yearly confirmation that there are no outstanding enforcement actions and that required training is current.', subTypes: [],
+      defaultMandatory: false, expiryRequired: false, renewal: 'periodic', renewalPeriodDays: 365, reviewRequired: false, criteria: [],
+    },
+  ] as Starter[];
+}
+
+export function starterRequirements(market: Market = 'OTHER') { return base(market); }
+/** @deprecated use starterRequirements(market) */
+export const STARTER_REQUIREMENTS: Starter[] = base('US');
 
 export const STARTER_TEMPLATES: { name: string; description: string; items: [string, boolean][] }[] = [
-  { name: 'General subcontractor onboarding', description: 'Baseline paperwork for any trade.', items: [['gl', true], ['wc', true], ['biz', true], ['tax', true], ['agreement', true], ['hsp', true]] },
-  { name: 'Electrical subcontractor', description: 'Baseline plus electrical licensing and safety.', items: [['gl', true], ['wc', true], ['biz', true], ['elec', true], ['safety', true], ['rams', true], ['tax', true], ['agreement', true]] },
-  { name: 'Plumbing subcontractor', description: 'Baseline plus plumbing/gas licensing.', items: [['gl', true], ['wc', true], ['biz', true], ['plumb', true], ['rams', true], ['tax', true], ['agreement', true]] },
-  { name: 'Roofing subcontractor', description: 'Work at height: safety certification and RAMS.', items: [['gl', true], ['wc', true], ['umbrella', false], ['safety', true], ['rams', true], ['biz', true], ['agreement', true]] },
+  { name: 'General subcontractor onboarding', description: 'Baseline paperwork for any trade.', items: [['gl', true], ['wc', true], ['biz', true], ['tax', true], ['agreement', true], ['safety', true]] },
+  { name: 'Electrical subcontractor', description: 'Baseline plus electrical licensing and site safety.', items: [['gl', true], ['wc', true], ['biz', true], ['elec', true], ['safety', true], ['rams', true], ['tax', true], ['agreement', true]] },
+  { name: 'Plumbing and heating subcontractor', description: 'Baseline plus plumbing/gas licensing.', items: [['gl', true], ['wc', true], ['biz', true], ['plumb', true], ['rams', true], ['tax', true], ['agreement', true]] },
+  { name: 'Roofing subcontractor', description: 'Work at height: accreditation and method statements.', items: [['gl', true], ['wc', true], ['umbrella', false], ['safety', true], ['rams', true], ['biz', true], ['agreement', true]] },
   { name: 'Mechanical subcontractor', description: 'HVAC and mechanical services.', items: [['gl', true], ['wc', true], ['auto', true], ['pl', false], ['safety', true], ['rams', true], ['agreement', true]] },
   { name: 'Civil engineering subcontractor', description: 'Groundworks and civils with plant on site.', items: [['gl', true], ['wc', true], ['auto', true], ['umbrella', true], ['pl', false], ['safety', true], ['rams', true], ['agreement', true]] },
   { name: 'Specialist contractor', description: 'Specialist packages with design input.', items: [['gl', true], ['wc', true], ['pl', true], ['rams', true], ['agreement', true]] },
-  { name: 'High-risk work contractor', description: 'Demolition, confined spaces, hot works and similar.', items: [['gl', true], ['wc', true], ['auto', true], ['umbrella', true], ['ai', true], ['safety', true], ['rams', true], ['declaration', true], ['agreement', true]] },
+  { name: 'High-risk work contractor', description: 'Demolition, confined spaces, hot works and similar.', items: [['gl', true], ['wc', true], ['auto', true], ['umbrella', true], ['ai', true], ['safety', true], ['training', true], ['rams', true], ['declaration', true], ['agreement', true]] },
 ];
 
 export const SUB_TYPES = ['general', 'electrical', 'plumbing', 'roofing', 'mechanical', 'civil', 'design', 'specialist', 'high_risk'];
 
-export const DOCUMENT_TYPES = ['Certificate of insurance', 'Endorsement', 'Licence', 'Certificate', 'Policy', 'RAMS', 'Registration', 'Tax form', 'Agreement', 'Other'];
+export const DOCUMENT_TYPES = ['Certificate of insurance', 'Insurance certificate', 'Endorsement', 'License', 'Licence', 'Certificate', 'Policy', 'RAMS', 'JHA', 'Registration', 'Tax form', 'Agreement', 'Other'];
 
 /** Metadata fields offered to reviewers and to AI extraction. */
 export const METADATA_FIELDS: { key: string; label: string; type: 'text' | 'date' | 'amount' | 'boolean' }[] = [
@@ -132,11 +140,12 @@ export const METADATA_FIELDS: { key: string; label: string; type: 'text' | 'date
 ];
 
 export const VALUE_FIELDS: { key: string; label: string; type: 'amount' | 'boolean' }[] = [
-  { key: 'glEachOccurrence', label: 'GL each occurrence', type: 'amount' },
-  { key: 'glAggregate', label: 'GL aggregate', type: 'amount' },
+  { key: 'glEachOccurrence', label: 'Liability limit, each occurrence', type: 'amount' },
+  { key: 'glAggregate', label: 'Liability limit, aggregate', type: 'amount' },
+  { key: 'elLimit', label: "Employers' liability limit", type: 'amount' },
   { key: 'autoCombinedSingleLimit', label: 'Auto combined single limit', type: 'amount' },
-  { key: 'umbrellaLimit', label: 'Umbrella / excess limit', type: 'amount' },
-  { key: 'wcCoverage', label: "Workers' compensation shown", type: 'boolean' },
+  { key: 'umbrellaLimit', label: 'Excess / umbrella limit', type: 'amount' },
+  { key: 'wcCoverage', label: "Workers' comp / EL cover shown", type: 'boolean' },
   { key: 'additionalInsured', label: 'Additional insured', type: 'boolean' },
   { key: 'waiverOfSubrogation', label: 'Waiver of subrogation', type: 'boolean' },
 ];

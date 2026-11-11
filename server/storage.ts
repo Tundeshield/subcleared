@@ -14,6 +14,7 @@ export interface FileStore {
   read(key: string): Promise<Uint8Array | null>;
   move(from: string, to: string): Promise<void>;
   remove(key: string): Promise<void>;
+  write(key: string, data: Uint8Array, contentType: string): Promise<void>;
   setMetadata?(key: string, meta: Record<string, string>): Promise<void>;
 }
 
@@ -43,6 +44,7 @@ export class GcsFileStore implements FileStore {
   }
   async move(from: string, to: string) { await this.bucket.file(from).move(to); }
   async remove(key: string) { await this.bucket.file(key).delete({ ignoreNotFound: true }); }
+  async write(key: string, data: Uint8Array, contentType: string) { await this.bucket.file(key).save(Buffer.from(data), { contentType, resumable: false }); }
 }
 
 export class LocalFileStore implements FileStore {
@@ -73,7 +75,7 @@ export class LocalFileStore implements FileStore {
     return `${this.baseUrl}/api/_files/get?key=${encodeURIComponent(key)}&exp=${exp}&name=${encodeURIComponent(fileName)}&inline=${inline ? 1 : 0}&sig=${this.sign(key, 'get', exp, extra)}`;
   }
   async read(key: string) { const p = this.file(key); return fs.existsSync(p) ? new Uint8Array(fs.readFileSync(p)) : null; }
-  write(key: string, data: Uint8Array) { const p = this.file(key); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, data); }
+  async write(key: string, data: Uint8Array, _contentType?: string) { const p = this.file(key); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, data); }
   async move(from: string, to: string) { const a = this.file(from); const b = this.file(to); fs.mkdirSync(path.dirname(b), { recursive: true }); fs.renameSync(a, b); }
   async remove(key: string) { const p = this.file(key); if (fs.existsSync(p)) fs.unlinkSync(p); }
 }

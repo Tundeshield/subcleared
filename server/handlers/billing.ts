@@ -64,7 +64,7 @@ export async function createCheckout(ctx: Ctx, input: any) {
   need(ctx, 'billing.manage');
   const plan = oneOf(input.plan, ctx.svc.env.plans.map((p) => p.id), 'Plan');
   const interval = oneOf(input.interval, ['month', 'year'] as const, 'Billing interval');
-  const price = ctx.svc.env.priceId(plan, interval);
+  const price = ctx.svc.env.priceId(plan, interval, ctx.org.settings.currency);
   if (!price) throw new HttpError(503, `No Stripe price configured for ${plan} (${interval}ly).`, 'billing_unconfigured');
   const stripe = await stripeClient(ctx.svc);
   let customer = ctx.org.subscription.stripeCustomerId;
@@ -125,7 +125,7 @@ export async function handleStripeWebhook(svc: Services, rawBody: string, signat
     const org = await svc.db.get<Organisation>(C.org(orgId));
     if (!org) return { ignored: true };
     const price = sub.items.data[0]?.price;
-    const plan = sub.metadata?.plan || svc.env.plans.find((p) => [svc.env.priceId(p.id, 'month'), svc.env.priceId(p.id, 'year')].includes(price?.id))?.id || org.subscription.plan;
+    const plan = sub.metadata?.plan || svc.env.plans.find((p) => (['month', 'year'] as const).some((i) => [svc.env.priceId(p.id, i), svc.env.priceId(p.id, i, 'USD'), svc.env.priceId(p.id, i, 'GBP')].includes(price?.id)))?.id || org.subscription.plan;
     const periodEnd = (sub as any).current_period_end ?? sub.items.data[0]?.current_period_end;
     const next: Subscription = {
       ...org.subscription, plan, interval: price?.recurring?.interval === 'year' ? 'year' : 'month',

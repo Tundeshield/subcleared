@@ -1,10 +1,11 @@
 import { readinessRank } from '../../src/domain/compliance';
 import { addDays, daysBetween, todayIn } from '../../src/domain/dates';
-import { STARTER_REQUIREMENTS, STARTER_TEMPLATES } from '../../src/domain/library';
+import { starterRequirements, STARTER_TEMPLATES } from '../../src/domain/library';
+import { MARKETS, marketFromCountry } from '../../src/domain/locale';
 import { canAssignRole, canSeeProject, isProjectScoped, permissionsFor, ROLE_PERMISSIONS } from '../../src/domain/permissions';
 import { getPlan, TRIAL_DAYS } from '../../src/domain/plans';
 import type {
-  AuditEvent, InAppNotification, Invitation, Member, NotificationType, Organisation, OrgSettings, Permission, Project, RequirementDefinition,
+  AuditEvent, InAppNotification, Invitation, Market, Member, NotificationType, Organisation, OrgSettings, Permission, Project, RequirementDefinition,
   RequirementTemplate, Role,
 } from '../../src/domain/types';
 import {
@@ -18,10 +19,13 @@ import type { Identity, Services } from '../services';
 const ROLES = Object.keys(ROLE_PERMISSIONS) as Role[];
 const ALL_PERMS = ROLE_PERMISSIONS.owner;
 
-export const DEFAULT_SETTINGS = (timezone: string): OrgSettings => ({
-  timezone, expiringSoonDays: 30, reminderSchedule: [90, 60, 30, 14, 7, 0, -7], escalationDays: 14,
-  retentionYears: 7, remindArchived: false, defaultLinkExpiryDays: 14,
-});
+export const DEFAULT_SETTINGS = (timezone: string, market: Market = 'OTHER'): OrgSettings => {
+  const m = MARKETS.find((x) => x.id === market)!;
+  return {
+    timezone, expiringSoonDays: 30, reminderSchedule: [90, 60, 30, 14, 7, 0, -7], escalationDays: 14,
+    retentionYears: 7, remindArchived: false, defaultLinkExpiryDays: 14, market, locale: m.locale, currency: m.currency,
+  };
+};
 
 export interface UserDoc { uid: string; email: string; name: string; orgIds: string[]; defaultOrgId?: string; createdAt: string; textScale?: number; theme?: string; views?: any[] }
 
@@ -73,9 +77,9 @@ export async function updateProfile(svc: Services, db: Db, identity: Identity, i
   return { ok: true };
 }
 
-export async function seedLibrary(db: Db, orgId: string, now: string) {
+export async function seedLibrary(db: Db, orgId: string, now: string, market: Market = 'OTHER') {
   const keyToId = new Map<string, string>();
-  for (const r of STARTER_REQUIREMENTS) {
+  for (const r of starterRequirements(market)) {
     const rid = db.newId();
     keyToId.set(r.key, rid);
     const { key, ...rest } = r;
@@ -98,6 +102,7 @@ export async function registerOrg(svc: Services, db: Db, identity: Identity, inp
   if (!identity.emailVerified) throw new HttpError(403, 'Please verify your email address before creating an organisation.', 'email_unverified');
   const name = reqStr(input.orgName, 'Organisation name', 120);
   const country = reqStr(input.country, 'Country', 80);
+  const market: Market = input.market ? oneOf(input.market, ['US', 'UK', 'OTHER'] as const, 'Market') : marketFromCountry(country);
   const timezone = reqStr(input.timezone, 'Timezone', 64);
   try { new Intl.DateTimeFormat('en', { timeZone: timezone }); } catch { throw bad('Unknown timezone'); }
   const personName = str(input.name, 'Your name', { max: 120 }) || identity.name || identity.email.split('@')[0];
@@ -105,7 +110,7 @@ export async function registerOrg(svc: Services, db: Db, identity: Identity, inp
   const orgId = db.newId();
   const trialEnds = new Date(now.getTime() + TRIAL_DAYS * 86_400_000).toISOString();
   const org: Organisation = {
-    id: orgId, name, country, createdAt: now.toISOString(), ownerUid: identity.uid, settings: DEFAULT_SETTINGS(timezone),
+    id: orgId, name, country, createdAt: now.toISOString(), ownerUid: identity.uid, settings: DEFAULT_SETTINGS(timezone, market),
     subscription: { plan: 'growth', interval: 'month', status: 'trialing', trialEndsAt: trialEnds },
   };
   const member: Member = { uid: identity.uid, email: identity.email, name: personName, role: 'owner', status: 'active', joinedAt: now.toISOString() };
@@ -116,7 +121,7 @@ export async function registerOrg(svc: Services, db: Db, identity: Identity, inp
     uid: identity.uid, email: identity.email, name: personName, createdAt: user?.createdAt ?? now.toISOString(),
     orgIds: [...new Set([...(user?.orgIds ?? []), orgId])], defaultOrgId: orgId,
   }, { merge: true });
-  if (input.seedLibrary !== false) await seedLibrary(db, orgId, now.toISOString());
+  if (input.seedLibrary !== false) await seedLibrary(db, orgId, now.toISOString(), market);
   await audit({ db, svc, org, member, source: 'web' }, { action: 'organisation.created', entity: { type: 'organisation', id: orgId, label: name }, after: { name, country, timezone } });
   return { orgId };
 }
@@ -135,6 +140,9 @@ export async function updateSettings(ctx: Ctx, input: any) {
   if (input.retentionYears !== undefined) s.retentionYears = n(input.retentionYears, 'Retention', 1, 30);
   if (input.defaultLinkExpiryDays !== undefined) s.defaultLinkExpiryDays = n(input.defaultLinkExpiryDays, 'Link expiry', 1, 30);
   if (input.remindArchived !== undefined) s.remindArchived = !!input.remindArchived;
+  if (input.market !== undefined) s.market = oneOf(input.market, ['US', 'UK', 'OTHER'] as const, 'Market');
+  if (input.locale !== undefined) s.locale = oneOf(input.locale, ['en-US', 'en-GB'] as const, 'Date format');
+  if (input.currency !== undefined) s.currency = oneOf(input.currency, ['USD', 'GBP'] as const, 'Currency');
   if (input.reminderSchedule !== undefined) {
     if (!Array.isArray(input.reminderSchedule) || !input.reminderSchedule.length || input.reminderSchedule.length > 12) throw bad('Reminder schedule needs 1–12 entries');
     s.reminderSchedule = [...new Set(input.reminderSchedule.map((x: any) => n(x, 'Reminder offset', -90, 365)))].sort((a: any, b: any) => b - a) as number[];
@@ -336,99 +344,105 @@ export async function search(ctx: Ctx, input: any) {
 
 // --- Dashboard ---------------------------------------------------------------------
 
+const MEANINGFUL = /^(document\.(uploaded|replaced|approved|rejected|info_requested|archived)|request\.(sent|portal_invited)|subcontractor\.(created|imported|suspended|archived|restored)|project\.(created|template_applied|subcontractor_assigned)|requirement\.(created|changed|marked_not_applicable)|template\.(created|changed)|member\.(joined|invited)|compliance\.status_changed|notification\.renewal_reminder)$/;
+
 export async function dashboard(ctx: Ctx, input: any) {
   const data = await loadOrgData(ctx.db, ctx.org.id);
   const today = todayIn(ctx.org.settings.timezone, ctx.svc.now());
-  let projects = data.projects.filter((p) => p.status !== 'archived' && canSeeProject(ctx.member, p));
+  const soon = ctx.org.settings.expiringSoonDays;
+  let projects = data.projects.filter((p) => !['archived', 'completed'].includes(p.status) && canSeeProject(ctx.member, p));
   if (input?.projectId) projects = projects.filter((p) => p.id === input.projectId);
   const projectIds = new Set(projects.map((p) => p.id));
-  let rows = data.readiness.filter((r) => projectIds.has(r.projectId) && data.assignments.some((a) => a.active && a.projectId === r.projectId && a.subcontractorId === r.subcontractorId));
+  const live = (pid: string, sid: string) => data.assignments.some((a) => a.active && a.projectId === pid && a.subcontractorId === sid);
+  let rows = data.readiness.filter((r) => projectIds.has(r.projectId) && live(r.projectId, r.subcontractorId));
   if (input?.subcontractorId) rows = rows.filter((r) => r.subcontractorId === input.subcontractorId);
-  if (input?.status) rows = rows.filter((r) => r.readiness === input.status);
 
-  const subIdsInScope = new Set(data.assignments.filter((a) => a.active && projectIds.has(a.projectId)).map((a) => a.subcontractorId));
-  const scopedSubs = data.subs.filter((s) => s.status !== 'archived' && (isProjectScoped(ctx.member) || input?.projectId ? subIdsInScope.has(s.id) : true))
+  const assignedSubIds = new Set(data.assignments.filter((a) => a.active && projectIds.has(a.projectId)).map((a) => a.subcontractorId));
+  const scopedSubs = data.subs.filter((s) => !['archived'].includes(s.status) && (isProjectScoped(ctx.member) || input?.projectId ? assignedSubIds.has(s.id) : true))
     .filter((s) => !input?.subcontractorId || s.id === input.subcontractorId);
-
-  // A subcontractor's overall position = its worst project readiness.
   const worst = new Map<string, string>();
-  for (const r of rows) {
-    const cur = worst.get(r.subcontractorId);
-    if (!cur || readinessRank(r.readiness) < readinessRank(cur as any)) worst.set(r.subcontractorId, r.readiness);
-  }
-  const subStatus = scopedSubs.map((s) => worst.get(s.id) ?? 'not_evaluated');
-  const scopedSubIds = new Set(scopedSubs.map((s) => s.id));
-  const currentVersions = data.versions.filter((v) => scopedSubIds.has(v.subcontractorId));
-  const docById = new Map(data.documents.map((d) => [d.id, d]));
-  const approvedCurrent = currentVersions.filter((v) => v.reviewStatus === 'approved' && docById.get(v.documentId)?.approvedVersionId === v.id && !docById.get(v.documentId)?.archived);
-  const horizon = Number(input?.days) || 60;
-  const upcoming = approvedCurrent.filter((v) => v.metadata.expiryDate).map((v) => ({ v, days: daysBetween(today, v.metadata.expiryDate!) }))
-    .filter((x) => x.days <= horizon).sort((a, b) => a.days - b.days);
-  const expired = upcoming.filter((x) => x.days < 0);
-  const pending = currentVersions.filter((v) => ['submitted', 'awaiting_review', 'under_review'].includes(v.reviewStatus));
+  for (const r of rows) { const c = worst.get(r.subcontractorId); if (!c || readinessRank(r.readiness) < readinessRank(c as any)) worst.set(r.subcontractorId, r.readiness); }
   const subName = new Map(data.subs.map((s) => [s.id, s.legalName]));
+  const docById = new Map(data.documents.map((d) => [d.id, d]));
+  const defs = new Map(data.requirements.map((r) => [r.id, r]));
+  const scopedSubIds = new Set(scopedSubs.map((s) => s.id));
+
+  // Evidence in force and its expiry.
+  const inForce = data.versions.filter((v) => v.reviewStatus === 'approved' && scopedSubIds.has(v.subcontractorId) && docById.get(v.documentId)?.approvedVersionId === v.id && !docById.get(v.documentId)?.archived && v.metadata.expiryDate)
+    .map((v) => ({ v, days: daysBetween(today, v.metadata.expiryDate!) }));
+  const pending = data.versions.filter((v) => scopedSubIds.has(v.subcontractorId) && ['submitted', 'awaiting_review', 'under_review'].includes(v.reviewStatus) && !docById.get(v.documentId)?.archived);
+  const isInsurance = (docId: string) => { const d = docById.get(docId); const def = d?.requirementId ? defs.get(d.requirementId) : undefined; return /insur|endorse|indemnity/i.test(`${def?.category ?? ''} ${def?.name ?? ''} ${d?.documentType ?? ''}`); };
+  const expired = inForce.filter((x) => x.days < 0);
+  const expiring30 = inForce.filter((x) => x.days >= 0 && x.days <= 30);
+  const missingSubs = new Set(rows.filter((r) => r.results.some((x) => x.blocking && ['missing', 'requested', 'overdue', 'rejected'].includes(x.status))).map((r) => r.subcontractorId));
+  const projectsNotReady = projects.filter((p) => rows.some((r) => r.projectId === p.id && r.readiness === 'not_ready'));
+
+  const projectNamesForSub = (sid: string, docProjectIds: string[]) => {
+    const ids = docProjectIds.length ? docProjectIds : data.assignments.filter((a) => a.active && a.subcontractorId === sid).map((a) => a.projectId);
+    return ids.map((id) => data.projects.find((p) => p.id === id)).filter((p) => p && p.status !== 'archived').map((p) => p!.name);
+  };
+  const renewalStage = (v: DocumentVersionLite) => {
+    const repl = data.versions.find((x) => x.documentId === v.documentId && x.uploadedAt > v.uploadedAt && ['submitted', 'awaiting_review', 'under_review'].includes(x.reviewStatus));
+    if (repl) return { stage: 'replacement_received', replacementVersionId: repl.id };
+    const req = data.requests.find((q) => q.renewalOfVersionId === v.id && ['sent', 'acknowledged', 'partially_fulfilled'].includes(q.status));
+    return { stage: req ? (req.status === 'acknowledged' ? 'acknowledged' : 'requested') : 'not_requested' };
+  };
 
   const projectSummary = projects.map((p) => {
     const pr = rows.filter((r) => r.projectId === p.id);
-    const issues = pr.reduce((n, r) => n + r.results.filter((x) => x.blocking).length, 0);
+    const ready = pr.filter((r) => r.readiness === 'ready').length;
+    const manager = undefined as string | undefined;
     return {
-      id: p.id, name: p.name, code: p.code, status: p.status,
-      assigned: data.assignments.filter((a) => a.active && a.projectId === p.id).length,
-      ready: pr.filter((r) => r.readiness === 'ready').length,
-      action: pr.filter((r) => r.readiness === 'action_required').length,
-      notReady: pr.filter((r) => r.readiness === 'not_ready').length,
-      notEvaluated: pr.filter((r) => r.readiness === 'not_evaluated').length,
-      issues,
+      id: p.id, name: p.name, code: p.code, location: p.location, status: p.status, managerUid: p.managerUid, manager,
+      assigned: pr.length, ready, action: pr.filter((r) => r.readiness === 'action_required').length, notReady: pr.filter((r) => r.readiness === 'not_ready').length,
+      notEvaluated: pr.filter((r) => r.readiness === 'not_evaluated').length, readyPct: pr.length ? Math.round((ready / pr.length) * 100) : null,
+      issues: pr.reduce((n, r) => n + r.results.filter((x) => x.blocking).length, 0),
     };
-  }).sort((a, b) => b.issues - a.issues || b.notReady - a.notReady);
+  }).sort((a, b) => (a.readyPct ?? 101) - (b.readyPct ?? 101) || b.notReady - a.notReady);
+  const members = await ctx.db.list<Member>(C.col(ctx.org.id, 'members'));
+  for (const p of projectSummary) p.manager = members.find((m) => m.uid === p.managerUid)?.name;
 
-  // Outstanding actions: the concrete next steps, worst first.
+  const attention = [
+    { key: 'reviews', label: 'Documents awaiting review', count: pending.length, link: '/app/reviews', action: 'Review' },
+    { key: 'missing', label: 'Subcontractors with missing requirements', count: missingSubs.size, link: '/app/subcontractors?readiness=not_ready', action: 'Chase' },
+    { key: 'expired', label: 'Expired insurance documents', count: expired.filter((x) => isInsurance(x.v.documentId)).length, link: '/app/renewals?window=expired', action: 'Request renewal' },
+    { key: 'expiring', label: 'Documents expiring within 30 days', count: expiring30.length, link: '/app/renewals?window=30', action: 'Plan renewals' },
+    { key: 'projects', label: 'Projects with subcontractors not ready', count: projectsNotReady.length, link: '/app/projects?readiness=not_ready', action: 'Open projects' },
+  ];
+
+  // Concrete next steps, most urgent first.
   const actions: any[] = [];
-  for (const v of pending) actions.push({ kind: 'review', priority: 1, title: `Review ${v.fileName}`, detail: subName.get(v.subcontractorId), link: `/app/reviews/${v.id}`, at: v.uploadedAt });
-  for (const r of rows) {
-    const p = projects.find((x) => x.id === r.projectId);
-    for (const x of r.results.filter((x) => x.blocking)) {
-      actions.push({
-        kind: x.status, priority: x.status === 'expired' ? 0 : x.status === 'overdue' ? 0 : 2,
-        title: `${x.requirementName} — ${x.status.replace('_', ' ')}`, detail: `${subName.get(r.subcontractorId)} · ${p?.name}`,
-        link: `/app/subcontractors/${r.subcontractorId}?tab=requirements&project=${r.projectId}`, subcontractorId: r.subcontractorId, requirementId: x.requirementId, projectId: r.projectId,
-      });
-    }
-  }
-  for (const x of upcoming.filter((u) => u.days >= 0 && u.days <= ctx.org.settings.expiringSoonDays)) {
-    const hasRenewal = data.requests.some((q) => q.renewalOfVersionId === x.v.id && ['sent', 'acknowledged'].includes(q.status));
-    if (!hasRenewal) actions.push({ kind: 'renewal', priority: 3, title: `Request renewal: ${docById.get(x.v.documentId)?.title}`, detail: `${subName.get(x.v.subcontractorId)} · expires in ${x.days} days`, link: `/app/renewals` });
-  }
-  actions.sort((a, b) => a.priority - b.priority);
-  // Merge duplicates of the same requirement across projects.
+  for (const v of pending.sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt)).slice(0, 5)) actions.push({ kind: 'review', title: `Review ${docById.get(v.documentId)?.title ?? v.fileName}`, detail: subName.get(v.subcontractorId), link: `/app/reviews/${v.id}`, at: v.uploadedAt });
+  for (const x of expired.slice(0, 5)) actions.push({ kind: 'expired', title: `${docById.get(x.v.documentId)?.title} expired`, detail: `${subName.get(x.v.subcontractorId)} · ${-x.days} days ago`, link: '/app/renewals?window=expired' });
   const seen = new Set<string>();
-  const deduped = actions.filter((a) => { const k = `${a.kind}:${a.subcontractorId ?? ''}:${a.requirementId ?? a.link}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  for (const r of rows) for (const x of r.results.filter((y) => y.blocking && ['missing', 'requested', 'overdue', 'rejected'].includes(y.status))) {
+    const k = `${r.subcontractorId}:${x.requirementId}`; if (seen.has(k)) continue; seen.add(k);
+    actions.push({ kind: x.status, title: `${x.requirementName} ${x.status === 'rejected' ? 'rejected' : x.status === 'overdue' ? 'overdue' : 'outstanding'}`, detail: `${subName.get(r.subcontractorId)} · ${projects.find((p) => p.id === r.projectId)?.name}`, link: `/app/subcontractors/${r.subcontractorId}?tab=requirements&project=${r.projectId}` });
+  }
 
-  const recent = (await ctx.db.list<AuditEvent>(C.col(ctx.org.id, 'audit'))).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 12);
+  const recent = (await ctx.db.list<AuditEvent>(C.col(ctx.org.id, 'audit'))).filter((e) => MEANINGFUL.test(e.action)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10);
   return {
-    today,
+    today, firstName: (ctx.member.name || '').split(' ')[0] || '',
     metrics: {
-      totalSubcontractors: scopedSubs.length,
-      ready: subStatus.filter((s) => s === 'ready').length,
-      attention: subStatus.filter((s) => s === 'action_required').length,
-      notReady: subStatus.filter((s) => s === 'not_ready').length,
-      notEvaluated: subStatus.filter((s) => s === 'not_evaluated').length,
-      pendingReviews: pending.length,
-      expiringSoon: upcoming.filter((x) => x.days >= 0 && x.days <= ctx.org.settings.expiringSoonDays).length,
-      expired: new Set(expired.map((x) => x.v.subcontractorId)).size,
-      expiredDocuments: expired.length,
-      outstandingRequirements: rows.reduce((n, r) => n + r.results.filter((x) => x.blocking).length, 0),
-      subsWithOutstanding: new Set(rows.filter((r) => r.results.some((x) => x.blocking)).map((r) => r.subcontractorId)).size,
+      activeProjects: projects.length,
+      activeSubcontractors: scopedSubs.length,
+      ready: [...scopedSubs].filter((s) => worst.get(s.id) === 'ready').length,
+      attention: [...scopedSubs].filter((s) => ['not_ready', 'action_required'].includes(worst.get(s.id) ?? '')).length,
+      notReady: [...scopedSubs].filter((s) => worst.get(s.id) === 'not_ready').length,
+      notEvaluated: [...scopedSubs].filter((s) => !worst.get(s.id) || worst.get(s.id) === 'not_evaluated').length,
     },
+    attention, actions: actions.slice(0, 8), actionsTotal: actions.length,
     projects: projectSummary,
-    upcoming: upcoming.filter((x) => x.days >= 0).slice(0, 10).map((x) => ({ versionId: x.v.id, documentId: x.v.documentId, title: docById.get(x.v.documentId)?.title, subcontractor: subName.get(x.v.subcontractorId), subcontractorId: x.v.subcontractorId, expiryDate: x.v.metadata.expiryDate, days: x.days })),
-    actions: deduped.slice(0, 25),
-    actionsTotal: deduped.length,
-    recent: ctx.member && permissionsFor(ctx.member).has('audit.view') ? recent : recent.filter((e) => !e.action.startsWith('member.')),
-    hasRequirements: data.requirements.length > 0,
-    hasProjects: data.projects.length > 0,
-    hasSubs: data.subs.length > 0,
+    upcoming: inForce.filter((x) => x.days <= Math.max(Number(input?.days) || 60, soon)).sort((a, b) => a.days - b.days).slice(0, 8).map((x) => ({
+      versionId: x.v.id, documentId: x.v.documentId, title: docById.get(x.v.documentId)?.title, subcontractor: subName.get(x.v.subcontractorId), subcontractorId: x.v.subcontractorId,
+      projects: projectNamesForSub(x.v.subcontractorId, docById.get(x.v.documentId)?.projectIds ?? []), expiryDate: x.v.metadata.expiryDate, days: x.days, ...renewalStage(x.v),
+    })),
+    recent,
+    hasRequirements: data.requirements.length > 0, hasProjects: data.projects.length > 0, hasSubs: data.subs.length > 0,
+    hasAssignments: data.assignments.some((a) => a.active), hasRequests: data.requests.length > 0, hasSample: !!ctx.org.hasSample,
   };
 }
+
+type DocumentVersionLite = { id: string; documentId: string; uploadedAt: string };
 
 export { addDays };

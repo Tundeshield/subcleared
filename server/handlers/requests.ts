@@ -169,7 +169,10 @@ export async function listRenewals(ctx: Ctx, input: any) {
     const replacement = data.versions.filter((x) => x.documentId === d.id && x.uploadedAt > v.uploadedAt && !['uploading', 'quarantined'].includes(x.reviewStatus)).sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))[0];
     const stage = replacement ? (replacement.reviewStatus === 'approved' ? 'renewed' : replacement.reviewStatus === 'rejected' ? 'replacement_rejected' : 'replacement_received')
       : renewal ? (renewal.acknowledgedAt || renewal.status === 'acknowledged' ? 'acknowledged' : ['cancelled', 'expired'].includes(renewal.status) ? 'not_requested' : 'requested') : 'not_requested';
+    const pids = d.projectIds.length ? d.projectIds : data.assignments.filter((a) => a.active && a.subcontractorId === d.subcontractorId).map((a) => a.projectId);
+    const projects = pids.map((pid) => data.projects.find((p) => p.id === pid)).filter((p) => p && p.status !== 'archived').map((p) => ({ id: p!.id, name: p!.name }));
     return {
+      projects, category: d.requirementId ? defs.get(d.requirementId)?.category : 'Other', issuer: v.metadata.issuer,
       documentId: d.id, versionId: v.id, title: d.title, requirement: d.requirementId ? defs.get(d.requirementId)?.name : undefined, requirementId: d.requirementId,
       subcontractorId: d.subcontractorId, subcontractor: sub.legalName, expiryDate: v.metadata.expiryDate, days, stage,
       request: renewal && { id: renewal.id, status: renewal.status, createdAt: renewal.createdAt, contactEmail: renewal.contactEmail, acknowledgedAt: renewal.acknowledgedAt },

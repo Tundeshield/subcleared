@@ -23,7 +23,12 @@ export interface OrgSettings {
   retentionYears: number; // minimum retention for superseded evidence
   remindArchived: boolean;
   defaultLinkExpiryDays: number;
+  market?: Market; // drives terminology and starter templates
+  locale?: 'en-US' | 'en-GB'; // date format and spelling
+  currency?: 'USD' | 'GBP';
 }
+
+export type Market = 'US' | 'UK' | 'OTHER';
 
 export interface Subscription {
   plan: string;
@@ -45,6 +50,7 @@ export interface Organisation {
   settings: OrgSettings;
   subscription: Subscription;
   demo?: boolean;
+  hasSample?: boolean;
 }
 
 export interface Member {
@@ -87,6 +93,7 @@ export interface Project {
   templateRefs: { templateId: string; version: number; appliedAt: Timestamp }[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  sample?: boolean;
 }
 
 export type SubStatus = 'invited' | 'onboarding' | 'active' | 'attention' | 'suspended' | 'archived';
@@ -122,6 +129,7 @@ export interface Subcontractor {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   lastActivityAt?: Timestamp;
+  sample?: boolean;
 }
 
 export type RequirementKind = 'document' | 'declaration' | 'manual_check';

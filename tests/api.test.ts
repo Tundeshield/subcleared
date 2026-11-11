@@ -18,7 +18,7 @@ function harness(): Harness {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-'));
   const files = new LocalFileStore(dir, 'test-secret', 'http://test');
   const mail: any[] = [];
-  const clock = { now: new Date('2026-06-15T09:00:00Z') };
+  const clock = { now: new Date('2026-06-15T14:00:00Z') };
   const users: Harness['users'] = {};
   const svc: Services = {
     mode: 'memory', db, files,
@@ -52,10 +52,10 @@ const linkToken = (mailItem: any) => /\/portal\/([A-Za-z0-9_-]+)/.exec(mailItem.
 
 async function setupOrg(owner = 'owner1', email = 'owner@acme.example') {
   h.users[owner] = { email, verified: true };
-  const { orgId } = await ok(owner, 'org.register', { orgName: 'Acme Build', country: 'United Kingdom', timezone: 'Europe/London', name: 'Olu Owner' });
+  const { orgId } = await ok(owner, 'org.register', { orgName: 'Acme Build', country: 'United States', timezone: 'America/Chicago', name: 'Olu Owner' });
   const reqs = (await ok(owner, 'requirements.list', {}, orgId)).requirements;
   const byName = (n: string) => reqs.find((r: any) => r.name === n).id;
-  return { orgId, gl: byName('General liability insurance'), wc: byName("Workers' compensation insurance"), biz: byName('Business licence'), auto: byName('Commercial auto insurance') };
+  return { orgId, gl: byName('General liability insurance'), wc: byName("Workers' compensation insurance"), biz: byName('Business license'), auto: byName('Commercial auto insurance') };
 }
 
 beforeEach(() => { h = harness(); });
@@ -172,7 +172,8 @@ describe('end-to-end compliance workflow', () => {
     expect(detail.subcontractors[0].reasons).toEqual(['All 2 mandatory requirements are approved and in date.']);
     expect(detail.subcontractors[0].readiness).toBe('ready');
     const dash = await ok('owner1', 'dashboard', {}, o.orgId);
-    expect(dash.metrics).toMatchObject({ totalSubcontractors: 1, ready: 1, notReady: 0, pendingReviews: 0 });
+    expect(dash.metrics).toMatchObject({ activeProjects: 1, activeSubcontractors: 1, ready: 1, notReady: 0 });
+    expect(dash.attention.find((a: any) => a.key === 'reviews').count).toBe(0);
 
     const auditLog = await ok('owner1', 'audit.list', { ref: subcontractorId }, o.orgId);
     const actions = auditLog.items.map((e: any) => e.action);
@@ -411,5 +412,37 @@ describe('CSV import and plan limits', () => {
     h.clock.now = new Date('2026-07-15T00:00:00Z');
     const blocked = await call('owner1', 'subs.create', { legalName: 'Late Co', trade: 'X' }, o.orgId);
     expect(blocked.status).toBe(402);
+  });
+});
+
+describe('US/UK markets and sample data', () => {
+  it('seeds market-specific terminology and loads/removes labelled sample data', async () => {
+    h.users.uk = { email: 'ops@ashdown.example', verified: true };
+    const { orgId } = await ok('uk', 'org.register', { orgName: 'Ashdown Construction Ltd', country: 'United Kingdom', timezone: 'Europe/London' });
+    const me = await ok('uk', 'me', {}, orgId);
+    expect(me.org.settings).toMatchObject({ market: 'UK', locale: 'en-GB', currency: 'GBP' });
+    const lib = await ok('uk', 'requirements.list', {}, orgId);
+    expect(lib.requirements.map((r: any) => r.name)).toContain('Public liability insurance');
+    expect(lib.requirements.map((r: any) => r.name)).toContain("Employers' liability insurance");
+    const r = await ok('uk', 'org.loadSample', {}, orgId);
+    expect(r).toEqual({ projects: 3, subcontractors: 5 });
+    const projects = await ok('uk', 'projects.list', {}, orgId);
+    expect(projects.items.map((p: any) => p.location).sort()).toEqual(['Birmingham', 'London', 'Manchester']);
+    expect(projects.items.every((p: any) => p.sample)).toBe(true);
+    const dash = await ok('uk', 'dashboard', {}, orgId);
+    expect(dash.metrics.activeSubcontractors).toBe(5);
+    expect(dash.metrics.ready).toBeGreaterThan(0);
+    expect(dash.attention.find((a: any) => a.key === 'reviews').count).toBeGreaterThan(0);
+    expect(h.mail.filter((m) => m.to.endsWith('.example') && !m.to.startsWith('ops'))).toHaveLength(0); // no emails to sample contacts
+    await ok('uk', 'org.clearSample', {}, orgId);
+    expect((await ok('uk', 'projects.list', {}, orgId)).items).toHaveLength(0);
+    expect((await ok('uk', 'subs.list', {}, orgId)).items).toHaveLength(0);
+
+    h.users.us = { email: 'ops@lonestar-gc.example', verified: true };
+    const us = await ok('us', 'org.register', { orgName: 'Brazos Builders Inc.', country: 'United States', timezone: 'America/Chicago' });
+    expect((await ok('us', 'requirements.list', {}, us.orgId)).requirements.map((x: any) => x.name)).toContain('General liability insurance');
+    await ok('us', 'org.loadSample', {}, us.orgId);
+    const usp = await ok('us', 'projects.list', {}, us.orgId);
+    expect(usp.items.map((p: any) => p.location).sort()).toEqual(['Austin, TX', 'Chicago, IL', 'Dallas, TX']);
   });
 });

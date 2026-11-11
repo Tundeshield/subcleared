@@ -28,7 +28,7 @@ export interface Env {
   scanToken?: string;
   cronSecret?: string;
   plans: Plan[];
-  priceId(plan: string, interval: 'month' | 'year'): string | undefined;
+  priceId(plan: string, interval: 'month' | 'year', currency?: 'USD' | 'GBP'): string | undefined;
 }
 
 export interface Services {
@@ -63,7 +63,10 @@ export function readEnv(e: NodeJS.ProcessEnv = process.env): Env {
     scanToken: e.MALWARE_SCAN_TOKEN,
     cronSecret: e.CRON_SECRET,
     plans,
-    priceId: (plan, interval) => e[`STRIPE_PRICE_${plan.toUpperCase()}_${interval === 'month' ? 'MONTHLY' : 'ANNUAL'}`],
+    priceId: (plan, interval, currency) => {
+      const k = `STRIPE_PRICE_${plan.toUpperCase()}_${interval === 'month' ? 'MONTHLY' : 'ANNUAL'}`;
+      return (currency ? e[`${k}_${currency}`] : undefined) ?? e[k];
+    },
   };
 }
 

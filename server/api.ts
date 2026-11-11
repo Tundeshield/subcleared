@@ -12,6 +12,7 @@ import * as requests from './handlers/requests';
 import * as reqs from './handlers/requirements';
 import * as subs from './handlers/subs';
 import * as portal from './portal';
+import * as sample from './sample';
 import type { Identity, Services } from './services';
 
 type OrgHandler = (ctx: Ctx, input: any) => Promise<unknown>;
@@ -34,6 +35,7 @@ const ORG_ACTIONS: Record<string, OrgHandler> = {
   'requests.create': requests.createRequest, 'requests.list': requests.listRequests, 'requests.resend': requests.resendRequest, 'links.revoke': requests.revokeLink,
   'renewals.list': requests.listRenewals, 'renewals.request': requests.requestRenewals,
   'reports.run': reports.runReport, 'compliance.overview': reports.complianceOverview, 'compliance.history': reports.evaluationHistory,
+  'org.loadSample': sample.loadSample, 'org.clearSample': sample.clearSample,
   'billing.get': billing.getBilling, 'billing.checkout': billing.createCheckout, 'billing.portal': billing.createPortal,
 };
 
