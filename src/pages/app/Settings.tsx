@@ -241,7 +241,7 @@ function Automation() {
         <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Emailed documents</h2>
         {intake.data ? (intake.data.address
           ? <p className="mt-4">Documents emailed to <code className="font-mono break-all">{intake.data.address}</code> are scanned, read and filed automatically. <a className="link" href="/app/inbox">Open emailed documents</a></p>
-          : <p className="text-muted mt-4">{intake.data.configured ? 'Not set up yet.' : 'Email intake needs an inbound email provider on this deployment.'} <a className="link" href="/app/inbox">Set it up</a></p>) : <p className="text-muted mt-4">—</p>}
+          : <p className="text-muted mt-4">{intake.data.configured ? 'Not set up yet.' : 'Receiving through Resend isn’t switched on for this deployment yet.'} <a className="link" href="/app/inbox">Set it up</a></p>) : <p className="text-muted mt-4">—</p>}
       </section>
       {can('settings.manage') && (
         <section>

@@ -50,7 +50,7 @@ function IntakeAddress({ data, onChange }: { data: any; onChange: () => void }) 
   const { can } = useSession();
   const [busy, setBusy] = useState(false);
   const toast = useToast();
-  if (!data.configured) return <div className="mt-6"><Callout tone="info" title="Email intake isn’t connected yet">This deployment needs an inbound email provider before documents can be emailed in. Until then, subcontractors upload through their secure links.</Callout></div>;
+  if (!data.configured) return <div className="mt-6"><Callout tone="info" title="Email intake isn’t connected yet">Emailed documents arrive through Resend. Receiving needs to be switched on for this deployment before documents can be emailed in. Until then, subcontractors upload through their secure links.</Callout></div>;
   if (!data.address) {
     return (
       <div className="mt-6 rounded-lg border border-line p-5">

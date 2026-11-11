@@ -1,11 +1,14 @@
-// Email document intake.
+// Email document intake, received through Resend.
 //
-// Each organisation gets a private address: docs-<key>@<INBOUND_EMAIL_DOMAIN>.
-// An inbound-email provider (Postmark inbound, or any relay that posts the
-// generic JSON shape below) forwards each message to /webhooks/inbound-email
-// with the shared INBOUND_EMAIL_SECRET. The webhook only does fast, safe work:
-// find the organisation from the address, check and scan each attachment,
-// store it, record provenance. Reading and matching run in the background.
+// Each organisation gets a private address: docs-<key>@<INBOUND_EMAIL_DOMAIN>,
+// where the domain is a Resend receiving domain (a subdomain with its MX
+// pointed at Resend, or the <id>.resend.app domain Resend provides).
+// Resend sends an `email.received` webhook to /webhooks/inbound-email. That
+// webhook carries metadata only, so it is verified (Svix signature, 5-minute
+// window), de-duplicated on the email id, routed to the organisation by the
+// recipient address, and handed to a background function. The background
+// function downloads each attachment from Resend's Attachments API, checks and
+// scans it, stores it with its provenance, reads it and matches it.
 //
 // A document is attached automatically only when exactly one subcontractor and
 // exactly one outstanding requirement fit. Anything less certain waits in a
@@ -32,6 +35,8 @@ export interface IntakeItem {
   to: string;
   subject?: string;
   messageId?: string;
+  /** Resend's id for the received email. */
+  providerId?: string;
   textPreview?: string;
   fileName: string;
   mimeType: string;
@@ -46,95 +51,168 @@ export interface IntakeItem {
   duplicateOf?: { versionId: string; documentId: string };
 }
 
-interface Attachment { name: string; contentType: string; content: Buffer }
-interface Inbound { from: string; fromName?: string; to: string[]; subject?: string; messageId?: string; date?: string; text?: string; mailboxHash?: string; attachments: Attachment[] }
+/** Where received emails and their attachments are fetched from. Production: Resend. Tests and dev: an in-memory fake. */
+export interface InboundSource {
+  getEmail(emailId: string): Promise<{ text?: string; fromName?: string } | null>;
+  listAttachments(emailId: string): Promise<{ filename: string; contentType: string; size?: number; download: () => Promise<Uint8Array> }[]>;
+}
+
+export class ResendInbound implements InboundSource {
+  constructor(private apiKey: string) {}
+  private async get(path: string) {
+    const res = await fetch(`https://api.resend.com${path}`, { headers: { Authorization: `Bearer ${this.apiKey}` } });
+    if (!res.ok) throw new Error(`Resend ${path} responded ${res.status}`);
+    return res.json() as Promise<any>;
+  }
+  async getEmail(emailId: string) {
+    try {
+      const e = await this.get(`/emails/receiving/${encodeURIComponent(emailId)}`);
+      const fromHeader: string = e?.headers?.from ?? '';
+      const name = fromHeader.includes('<') ? fromHeader.split('<')[0].trim().replace(/^"|"$/g, '') : undefined;
+      return { text: typeof e?.text === 'string' ? e.text : undefined, fromName: name || undefined };
+    } catch { return null; }
+  }
+  async listAttachments(emailId: string) {
+    const out: any[] = [];
+    let after: string | undefined;
+    for (let page = 0; page < 5; page++) {
+      const r = await this.get(`/emails/receiving/${encodeURIComponent(emailId)}/attachments?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`);
+      out.push(...(r.data ?? []));
+      if (!r.has_more || !r.data?.length) break;
+      after = r.data[r.data.length - 1].id;
+    }
+    return out.map((a) => ({
+      filename: String(a.filename ?? 'attachment'), contentType: String(a.content_type ?? '').toLowerCase(), size: Number(a.size) || undefined,
+      download: async () => {
+        const res = await fetch(a.download_url);
+        if (!res.ok) throw new Error(`Attachment download failed (${res.status})`);
+        return new Uint8Array(await res.arrayBuffer());
+      },
+    }));
+  }
+}
 
 const FREE_MAIL = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'hotmail.co.uk', 'live.com', 'yahoo.com', 'yahoo.co.uk', 'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com', 'btinternet.com', 'sky.com']);
 
-/** Accepts Postmark's inbound JSON or a generic shape: {from, fromName, to, subject, messageId, date, text, attachments:[{filename, contentType, content (base64)}]}. */
-export function parseInbound(p: any): Inbound {
-  const lower = (s: any) => String(s ?? '').trim().toLowerCase();
-  if (p && (p.FromFull || p.From || p.Attachments)) {
-    return {
-      from: lower(p.FromFull?.Email ?? p.From), fromName: p.FromFull?.Name || p.FromName || undefined,
-      to: [p.OriginalRecipient, ...(p.ToFull ?? []).map((t: any) => t.Email), ...(p.CcFull ?? []).map((t: any) => t.Email), p.To].filter(Boolean).flatMap((x: string) => String(x).split(',')).map(lower),
-      subject: p.Subject, messageId: p.MessageID, date: p.Date, text: p.TextBody, mailboxHash: p.MailboxHash || (p.ToFull ?? []).find((t: any) => t.MailboxHash)?.MailboxHash,
-      attachments: (p.Attachments ?? []).map((a: any) => ({ name: String(a.Name ?? 'attachment'), contentType: lower(a.ContentType), content: Buffer.from(String(a.Content ?? ''), 'base64') })),
-    };
-  }
-  return {
-    from: lower(typeof p?.from === 'object' ? p.from.email : p?.from).replace(/^.*<([^>]+)>.*$/, '$1'), fromName: p?.fromName,
-    to: (Array.isArray(p?.to) ? p.to : [p?.to]).filter(Boolean).map((x: any) => lower(typeof x === 'object' ? x.email : x).replace(/^.*<([^>]+)>.*$/, '$1')),
-    subject: p?.subject, messageId: p?.messageId, date: p?.date, text: p?.text,
-    attachments: (p?.attachments ?? []).map((a: any) => ({ name: String(a.filename ?? a.name ?? 'attachment'), contentType: lower(a.contentType ?? a.type), content: Buffer.from(String(a.content ?? ''), 'base64') })),
-  };
-}
-
-export function intakeKeyFrom(m: Pick<Inbound, 'to' | 'mailboxHash'>): string | null {
-  const ok = (k?: string | null) => (k && /^[a-z0-9]{12,40}$/.test(k) ? k : null);
-  for (const addr of m.to) {
+export function intakeKeyFrom(m: { to: string[] }): string | null {
+  for (const raw of m.to) {
+    const addr = raw.toLowerCase().replace(/^.*<([^>]+)>.*$/, '$1').trim();
     const local = addr.split('@')[0] ?? '';
-    const hit = local.match(/(?:^|[+.])docs-([a-z0-9]{12,40})$/) ?? local.match(/^docs-([a-z0-9]{12,40})(?:\+|$)/);
-    if (ok(hit?.[1])) return hit![1];
+    const hit = local.match(/^docs-([a-z0-9]{12,40})(?:\+.*)?$/);
+    if (hit) return hit[1];
   }
-  const h = m.mailboxHash?.toLowerCase().replace(/^docs-/, '');
-  return ok(h);
+  return null;
 }
 
-function safeEqual(a: string, b: string) {
-  const x = Buffer.from(a); const y = Buffer.from(b);
-  return x.length === y.length && crypto.timingSafeEqual(x, y);
+/**
+ * Svix signature check used by Resend webhooks: HMAC-SHA256 over
+ * "<id>.<timestamp>.<raw body>" with the base64 key after "whsec_".
+ * Accepts any of several "v1,<sig>" values (secret rotation) and rejects
+ * timestamps more than five minutes from now (replays).
+ */
+export function verifySvix(secret: string, raw: string, h: { id?: string | null; timestamp?: string | null; signature?: string | null }, now: Date): boolean {
+  if (!h.id || !h.timestamp || !h.signature) return false;
+  const ts = Number(h.timestamp);
+  if (!Number.isFinite(ts) || Math.abs(now.getTime() / 1000 - ts) > 300) return false;
+  let key: Buffer;
+  try { key = Buffer.from(secret.replace(/^whsec_/, ''), 'base64'); } catch { return false; }
+  const expected = crypto.createHmac('sha256', key).update(`${h.id}.${h.timestamp}.${raw}`).digest();
+  return h.signature.split(' ').some((part) => {
+    const [ver, sig] = part.split(',');
+    if (ver !== 'v1' || !sig) return false;
+    const got = Buffer.from(sig, 'base64');
+    return got.length === expected.length && crypto.timingSafeEqual(got, expected);
+  });
+}
+
+/** Test/dev helper: signs a payload the way Resend does. */
+export function signSvix(secret: string, raw: string, id: string, now: Date) {
+  const timestamp = String(Math.floor(now.getTime() / 1000));
+  const sig = crypto.createHmac('sha256', Buffer.from(secret.replace(/^whsec_/, ''), 'base64')).update(`${id}.${timestamp}.${raw}`).digest('base64');
+  return { 'svix-id': id, 'svix-timestamp': timestamp, 'svix-signature': `v1,${sig}` };
 }
 
 const EXT: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' };
 
-export async function handleInboundEmail(svc: Services, rawBody: string, secret?: string | null): Promise<{ status: number; body: any }> {
-  if (!svc.env.inboundSecret) return { status: 503, body: { error: 'Email intake is not configured (INBOUND_EMAIL_SECRET)' } };
-  if (!secret || !safeEqual(secret, svc.env.inboundSecret)) return { status: 403, body: { error: 'Forbidden' } };
-  let msg: Inbound;
-  try { msg = parseInbound(JSON.parse(rawBody)); } catch { return { status: 400, body: { error: 'Invalid payload' } }; }
-  const key = intakeKeyFrom(msg);
-  // Unknown addresses are accepted and dropped (200) so senders can't probe which keys exist.
-  if (!key) return { status: 200, body: { ok: true, accepted: 0 } };
-  const route = await svc.db.get<{ orgId: string; key: string; revokedAt?: string }>(`intakeRoutes/${key}`);
-  if (!route || route.revokedAt) return { status: 200, body: { ok: true, accepted: 0 } };
-  const org = await svc.db.get<Organisation>(C.org(route.orgId));
-  if (!org || org.settings.intakeKey !== key) return { status: 200, body: { ok: true, accepted: 0 } };
-  try { await rateLimit(svc.db, `intake:${org.id}`, 300, 3600, svc.now()); } catch { return { status: 429, body: { error: 'Too many messages' } }; }
+interface InboundMessage { id: string; orgId: string; emailId: string; from: string; to: string[]; subject?: string; messageId?: string; receivedAt: string; status: 'queued' | 'done' | 'failed'; error?: string; attachments?: number }
 
+/** The webhook: verify, de-duplicate, route, queue. Fast and small; no attachment bytes pass through it. */
+export async function handleInboundEmail(svc: Services, rawBody: string, headers: { get(name: string): string | null | undefined }): Promise<{ status: number; body: any }> {
+  if (!svc.env.resendWebhookSecret || !svc.inbound) return { status: 503, body: { error: 'Email intake is not configured (RESEND_WEBHOOK_SECRET / RESEND_API_KEY)' } };
+  const h = (n: string) => headers.get(`svix-${n}`) ?? headers.get(`webhook-${n}`);
+  if (!verifySvix(svc.env.resendWebhookSecret, rawBody, { id: h('id'), timestamp: h('timestamp'), signature: h('signature') }, svc.now())) return { status: 401, body: { error: 'Invalid signature' } };
+  let event: any;
+  try { event = JSON.parse(rawBody); } catch { return { status: 400, body: { error: 'Invalid payload' } }; }
+  if (event?.type !== 'email.received') return { status: 200, body: { ok: true, ignored: event?.type } };
+  const d = event.data ?? {};
+  const emailId = typeof d.email_id === 'string' && /^[A-Za-z0-9-]{8,80}$/.test(d.email_id) ? d.email_id : null;
+  if (!emailId) return { status: 400, body: { error: 'Missing email id' } };
+  const to = [...(Array.isArray(d.to) ? d.to : []), ...(Array.isArray(d.cc) ? d.cc : []), ...(Array.isArray(d.received_for) ? d.received_for : [])].map(String);
+  const key = intakeKeyFrom({ to });
+  // Unknown addresses are accepted and dropped (200) so senders can't probe which keys exist, and Resend doesn't retry.
+  if (!key) return { status: 200, body: { ok: true, routed: false } };
+  const route = await svc.db.get<{ orgId: string; key: string; revokedAt?: string }>(`intakeRoutes/${key}`);
+  if (!route || route.revokedAt) return { status: 200, body: { ok: true, routed: false } };
+  const org = await svc.db.get<Organisation>(C.org(route.orgId));
+  if (!org || org.settings.intakeKey !== key) return { status: 200, body: { ok: true, routed: false } };
+  try { await rateLimit(svc.db, `intake:${org.id}`, 300, 3600, svc.now()); } catch { return { status: 429, body: { error: 'Too many messages' } }; }
+  const msg: InboundMessage = {
+    id: emailId, orgId: org.id, emailId, from: String(d.from ?? '').toLowerCase().trim(), to: to.slice(0, 20), subject: typeof d.subject === 'string' ? d.subject.slice(0, 300) : undefined,
+    messageId: typeof d.message_id === 'string' ? d.message_id.slice(0, 300) : undefined, receivedAt: typeof d.created_at === 'string' ? d.created_at : svc.now().toISOString(), status: 'queued',
+  };
+  // Resend delivers at least once: the email id makes repeats harmless.
+  try { await svc.db.create(C.doc(org.id, 'intakeMessages', emailId), msg as any); } catch { return { status: 200, body: { ok: true, duplicate: true } }; }
+  try { await svc.queueIntake(org.id, `msg:${emailId}`); } catch (e: any) { console.error('queue intake failed', e); await fetchMessage(svc, org, emailId).catch(() => undefined); }
+  return { status: 200, body: { ok: true, routed: true } };
+}
+
+/** Background: download attachments from Resend, check, scan and store each, then read and match. */
+async function fetchMessage(svc: Services, org: Organisation, emailId: string) {
+  const mpath = C.doc(org.id, 'intakeMessages', emailId);
+  const msg = await svc.db.get<InboundMessage>(mpath);
+  if (!msg || msg.status !== 'queued' || !svc.inbound) return;
   const base = { svc, db: svc.db, org };
-  const receivedAt = svc.now().toISOString();
-  const created: string[] = [];
-  for (const a of msg.attachments.slice(0, 10)) {
-    const itemId = svc.db.newId();
-    const item: IntakeItem = {
-      id: itemId, status: 'processing', receivedAt, from: msg.from, fromName: msg.fromName, to: msg.to.join(', ').slice(0, 300), subject: msg.subject?.slice(0, 300), messageId: msg.messageId?.slice(0, 300),
-      textPreview: msg.text?.slice(0, 2000), fileName: a.name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 200), mimeType: a.contentType === 'image/jpg' ? 'image/jpeg' : a.contentType,
-      size: a.content.length, sha256: sha256(a.content), scan: { status: 'rejected' },
-    };
-    // Signatures, logos and calendar invites are common in email; skip quietly if they aren't documents we accept.
-    if (!ALLOWED_MIME.includes(item.mimeType as any) && !/\.(pdf|jpe?g|png)$/i.test(item.fileName)) continue;
-    if (a.content.length < 2048 && item.mimeType.startsWith('image/')) continue; // tracking pixels and tiny signature images
-    if (a.content.length > MAX_UPLOAD_BYTES) {
-      item.status = 'rejected'; item.rejectedReason = `Larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`;
-    } else {
-      const scan = await scanFile(svc, a.content, item.fileName, item.mimeType);
-      if (!scan.ok) { item.status = 'rejected'; item.rejectedReason = scan.reason; item.scan = { status: 'rejected', method: scan.method, detail: scan.detail }; }
+  try {
+    const [email, attachments] = await Promise.all([svc.inbound.getEmail(emailId), svc.inbound.listAttachments(emailId)]);
+    const created: string[] = [];
+    for (const a of attachments.slice(0, 10)) {
+      const fileName = a.filename.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 200);
+      const mime = a.contentType === 'image/jpg' ? 'image/jpeg' : a.contentType;
+      // Signatures, logos and calendar invites are common in email; skip anything that isn't a document type we accept.
+      if (!ALLOWED_MIME.includes(mime as any) && !/\.(pdf|jpe?g|png)$/i.test(fileName)) continue;
+      if (a.size !== undefined && a.size < 2048 && mime.startsWith('image/')) continue;
+      const itemId = svc.db.newId();
+      const item: IntakeItem = {
+        id: itemId, status: 'processing', receivedAt: msg.receivedAt, from: msg.from, fromName: email?.fromName, to: msg.to.join(', ').slice(0, 300), subject: msg.subject, messageId: msg.messageId,
+        providerId: emailId, textPreview: email?.text?.slice(0, 2000), fileName, mimeType: mime, size: a.size ?? 0, sha256: '', scan: { status: 'rejected' },
+      };
+      if ((a.size ?? 0) > MAX_UPLOAD_BYTES) { item.status = 'rejected'; item.rejectedReason = `Larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`; }
       else {
-        item.mimeType = scan.mime!;
-        item.scan = { status: 'clean', method: scan.method, detail: scan.detail };
-        item.storagePath = `orgs/${org.id}/intake/${itemId}.${EXT[scan.mime!]}`;
-        await svc.files.write(item.storagePath, a.content, scan.mime!);
+        const bytes = await a.download();
+        item.size = bytes.length; item.sha256 = sha256(bytes);
+        if (bytes.length < 2048 && mime.startsWith('image/')) continue;
+        if (bytes.length > MAX_UPLOAD_BYTES) { item.status = 'rejected'; item.rejectedReason = `Larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`; }
+        else {
+          const scan = await scanFile(svc, bytes, fileName, mime);
+          if (!scan.ok) { item.status = 'rejected'; item.rejectedReason = scan.reason; item.scan = { status: 'rejected', method: scan.method, detail: scan.detail }; }
+          else {
+            item.mimeType = scan.mime!;
+            item.scan = { status: 'clean', method: scan.method, detail: scan.detail };
+            item.storagePath = `orgs/${org.id}/intake/${itemId}.${EXT[scan.mime!]}`;
+            await svc.files.write(item.storagePath, bytes, scan.mime!);
+          }
+        }
       }
+      await svc.db.set(C.doc(org.id, 'intake', itemId), item as any);
+      await audit({ ...base, source: 'webhook' }, { action: item.status === 'rejected' ? 'intake.rejected' : 'intake.received', entity: { type: 'intake', id: itemId, label: item.fileName }, after: { from: item.from, subject: item.subject, size: item.size, reason: item.rejectedReason, emailId }, actor: { type: 'system', id: 'email', name: `Email from ${item.from}` } });
+      if (item.status === 'processing') created.push(itemId);
     }
-    await svc.db.set(C.doc(org.id, 'intake', itemId), item as any);
-    await audit({ ...base, source: 'webhook' }, { action: item.status === 'rejected' ? 'intake.rejected' : 'intake.received', entity: { type: 'intake', id: itemId, label: item.fileName }, after: { from: item.from, subject: item.subject, size: item.size, reason: item.rejectedReason }, actor: { type: 'system', id: 'email', name: `Email from ${item.from}` } });
-    if (item.status === 'processing') created.push(itemId);
+    await svc.db.update(mpath, { status: 'done', attachments: created.length });
+    for (const itemId of created) await processIntake(svc, org.id, itemId);
+  } catch (e: any) {
+    await svc.db.update(mpath, { status: 'failed', error: String(e?.message ?? e).slice(0, 300) });
+    throw e;
   }
-  for (const itemId of created) {
-    try { await svc.queueIntake(org.id, itemId); } catch (e: any) { console.error('queue intake failed', e); await processIntake(svc, org.id, itemId).catch(() => undefined); }
-  }
-  return { status: 200, body: { ok: true, accepted: created.length } };
 }
 
 /** What this subcontractor still owes: requested and not yet received, or approved but expired/expiring. */
@@ -200,7 +278,12 @@ export async function suggestMatch(svc: Services, org: Organisation, item: Pick<
 }
 
 /** Background step: read, match, and attach when certain. */
-export async function processIntake(svc: Services, orgId: string, itemId: string) {
+export async function processIntake(svc: Services, orgId: string, itemId: string): Promise<any> {
+  if (itemId.startsWith('msg:')) {
+    const org = await svc.db.get<Organisation>(C.org(orgId));
+    if (org) await fetchMessage(svc, org, itemId.slice(4));
+    return { fetched: true };
+  }
   const path = C.doc(orgId, 'intake', itemId);
   const [item, org] = await Promise.all([svc.db.get<IntakeItem>(path), svc.db.get<Organisation>(C.org(orgId))]);
   if (!item || !org || item.status !== 'processing' || !item.storagePath) return { skipped: true };
@@ -256,7 +339,7 @@ function intakeAddress(svc: Services, key?: string) {
 
 export async function getIntakeSetup(ctx: Ctx) {
   return {
-    configured: !!ctx.svc.env.inboundSecret && !!ctx.svc.env.inboundDomain,
+    configured: !!ctx.svc.env.resendWebhookSecret && !!ctx.svc.inbound && !!ctx.svc.env.inboundDomain,
     address: intakeAddress(ctx.svc, ctx.org.settings.intakeKey),
     readingOn: !!ctx.svc.ai,
   };
@@ -264,7 +347,7 @@ export async function getIntakeSetup(ctx: Ctx) {
 
 export async function enableIntake(ctx: Ctx, input: any) {
   need(ctx, 'settings.manage');
-  if (!ctx.svc.env.inboundDomain || !ctx.svc.env.inboundSecret) throw new HttpError(503, 'Email intake needs an inbound email provider. Set INBOUND_EMAIL_DOMAIN and INBOUND_EMAIL_SECRET for this deployment.', 'not_configured');
+  if (!ctx.svc.env.inboundDomain || !ctx.svc.env.resendWebhookSecret || !ctx.svc.inbound) throw new HttpError(503, 'Email intake needs Resend receiving. Set INBOUND_EMAIL_DOMAIN, RESEND_WEBHOOK_SECRET and RESEND_API_KEY for this deployment.', 'not_configured');
   const old = ctx.org.settings.intakeKey;
   if (old && !input.rotate) return getIntakeSetup(ctx);
   const key = randomToken(18).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20).padEnd(20, '0');
@@ -325,3 +408,24 @@ export async function intakeFileUrl(ctx: Ctx, input: any) {
   return { url: await ctx.svc.files.readUrl(item.storagePath, { fileName: item.fileName, inline: true, ttlSeconds: 300 }) };
 }
 
+
+// --- Development and tests --------------------------------------------------------
+
+/** Stands in for Resend's receiving API locally: holds messages in memory. */
+export class MemoryInbound implements InboundSource {
+  private store = new Map<string, { text?: string; fromName?: string; attachments: { filename: string; contentType: string; bytes: Uint8Array }[] }>();
+  put(emailId: string, m: { text?: string; fromName?: string; attachments: { filename: string; contentType: string; bytes: Uint8Array }[] }) { this.store.set(emailId, m); }
+  async getEmail(emailId: string) { const m = this.store.get(emailId); return m ? { text: m.text, fromName: m.fromName } : null; }
+  async listAttachments(emailId: string) {
+    return (this.store.get(emailId)?.attachments ?? []).map((a) => ({ filename: a.filename, contentType: a.contentType, size: a.bytes.length, download: async () => a.bytes }));
+  }
+}
+
+/** Simulates one Resend delivery end to end: stores the message, then calls the webhook with a correctly signed event. */
+export async function simulateResendDelivery(svc: Services, inbound: MemoryInbound, m: { from: string; fromName?: string; to: string[]; subject?: string; text?: string; attachments: { filename: string; contentType: string; bytes: Uint8Array }[]; emailId?: string }) {
+  const emailId = m.emailId ?? crypto.randomUUID();
+  inbound.put(emailId, { text: m.text, fromName: m.fromName, attachments: m.attachments });
+  const raw = JSON.stringify({ type: 'email.received', created_at: svc.now().toISOString(), data: { email_id: emailId, created_at: svc.now().toISOString(), from: m.from, to: m.to, cc: [], bcc: [], subject: m.subject, message_id: `<${emailId}@example>`, attachments: m.attachments.map((a, i) => ({ id: `${emailId}-${i}`, filename: a.filename, content_type: a.contentType })) } });
+  const headers = signSvix(svc.env.resendWebhookSecret!, raw, `msg_${emailId}`, svc.now());
+  return handleInboundEmail(svc, raw, { get: (n: string) => (headers as any)[n] ?? null });
+}

@@ -54,7 +54,7 @@ export async function me(svc: Services, db: Db, identity: Identity, orgId?: stri
     billingConfigured: !!svc.env.stripeSecret,
     emailConfigured: svc.mail.configured,
     extractionConfigured: !!svc.ai,
-    intakeConfigured: !!svc.env.inboundSecret && !!svc.env.inboundDomain,
+    intakeConfigured: !!svc.env.resendWebhookSecret && !!svc.inbound && !!svc.env.inboundDomain,
     mode: svc.mode,
   };
 }

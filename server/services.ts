@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { DEFAULT_PLANS, type Plan } from '../src/domain/plans';
 import { FirestoreDb, type Db } from './db';
 import { AnthropicProvider, type AiProvider } from './ai';
+import { ResendInbound, type InboundSource } from './intake';
 import { GcsFileStore, type FileStore } from './storage';
 
 export interface Identity { uid: string; email: string; emailVerified: boolean; name?: string }
@@ -30,7 +31,8 @@ export interface Env {
   aiPrices?: Record<string, { in: number; out: number }>;
   aiMaxPages: number;
   aiMaxBytes: number;
-  inboundSecret?: string;
+  /** Signing secret of the Resend `email.received` webhook (whsec_…). */
+  resendWebhookSecret?: string;
   inboundDomain?: string;
   stripeSecret?: string;
   stripeWebhookSecret?: string;
@@ -49,6 +51,8 @@ export interface Services {
   mail: Mailer;
   /** Document reader / assistant model. Undefined when no AI provider is configured. */
   ai?: AiProvider;
+  /** Received-email API (Resend). Undefined when RESEND_API_KEY is missing. */
+  inbound?: InboundSource;
   env: Env;
   now(): Date;
   /** Kicks off background extraction for a stored version. */
@@ -75,7 +79,7 @@ export function readEnv(e: NodeJS.ProcessEnv = process.env): Env {
     aiPrices: (() => { try { return e.AI_PRICES_JSON ? JSON.parse(e.AI_PRICES_JSON) : undefined; } catch { console.error('AI_PRICES_JSON is not valid JSON'); return undefined; } })(),
     aiMaxPages: Number(e.AI_MAX_PAGES || 12),
     aiMaxBytes: Number(e.AI_MAX_BYTES || 10 * 1024 * 1024),
-    inboundSecret: e.INBOUND_EMAIL_SECRET,
+    resendWebhookSecret: e.RESEND_WEBHOOK_SECRET,
     inboundDomain: e.INBOUND_EMAIL_DOMAIN,
     stripeSecret: e.STRIPE_SECRET_KEY,
     stripeWebhookSecret: e.STRIPE_WEBHOOK_SECRET,
@@ -140,6 +144,7 @@ export async function getFirebaseServices(): Promise<Services> {
     },
     mail: new ResendMailer(process.env.RESEND_API_KEY, process.env.EMAIL_FROM),
     ai: env.anthropicKey ? new AnthropicProvider(env.anthropicKey) : undefined,
+    inbound: process.env.RESEND_API_KEY ? new ResendInbound(process.env.RESEND_API_KEY) : undefined,
     env,
     now: () => new Date(),
     async queueExtraction(orgId, versionId) {

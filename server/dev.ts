@@ -9,7 +9,7 @@ import path from 'node:path';
 import { handleApi } from './api';
 import { MemoryDb } from './db';
 import { MockAiProvider } from './ai';
-import { handleInboundEmail, processIntake } from './intake';
+import { MemoryInbound, processIntake, simulateResendDelivery } from './intake';
 import { runDailyJobs, runExtraction } from './jobs';
 import { readEnv, type Services } from './services';
 import { LocalFileStore } from './storage';
@@ -36,6 +36,7 @@ function readToken(t: string) {
 }
 function hashPw(pw: string, salt: string) { return crypto.scryptSync(pw, salt, 32).toString('hex'); }
 
+const devInbound = new MemoryInbound();
 const svc: Services = {
   mode: 'memory', db, files,
   auth: {
@@ -57,7 +58,8 @@ const svc: Services = {
     },
   },
   ai: process.env.DEV_AI === 'mock' ? new MockAiProvider() : undefined,
-  env: { ...readEnv({ ...process.env, APP_URL, INBOUND_EMAIL_SECRET: process.env.INBOUND_EMAIL_SECRET || 'dev-inbound', INBOUND_EMAIL_DOMAIN: process.env.INBOUND_EMAIL_DOMAIN || 'in.subcleared.test' }), appUrl: APP_URL },
+  inbound: devInbound,
+  env: { ...readEnv({ ...process.env, APP_URL, RESEND_WEBHOOK_SECRET: process.env.RESEND_WEBHOOK_SECRET || 'whsec_ZGV2LXJlc2VuZC13ZWJob29rLXNlY3JldA==', INBOUND_EMAIL_DOMAIN: process.env.INBOUND_EMAIL_DOMAIN || 'in.subcleared.test' }), appUrl: APP_URL },
   now: () => new Date(Date.now() + clockOffsetMs),
   async queueExtraction(orgId, versionId) { setTimeout(() => runExtraction(svc, orgId, versionId).catch(console.error), 10); },
   async queueIntake(orgId, intakeId) { setTimeout(() => processIntake(svc, orgId, intakeId).catch(console.error), 10); },
@@ -149,9 +151,10 @@ const server = http.createServer(async (req, res) => {
       const mail = (await db.list<any>('_devMail')).sort((a, b) => b.at.localeCompare(a.at));
       return json(res, 200, { items: mail.slice(0, 200) });
     }
-    if (url.pathname === '/webhooks/inbound-email' && req.method === 'POST') {
-      const raw = await body(req, 40_000_000);
-      const out = await handleInboundEmail(svc, raw.toString(), url.searchParams.get('token') || req.headers['x-inbound-secret'] as string);
+    if (url.pathname === '/api/_dev/inbound' && req.method === 'POST') {
+      // Simulates Resend receiving an email: {from, fromName, to, subject, text, attachments:[{filename, contentType, content (base64)}]}
+      const m = JSON.parse((await body(req, 40_000_000)).toString());
+      const out = await simulateResendDelivery(svc, devInbound, { ...m, to: Array.isArray(m.to) ? m.to : [m.to], attachments: (m.attachments ?? []).map((a: any) => ({ filename: a.filename, contentType: a.contentType, bytes: new Uint8Array(Buffer.from(a.content, 'base64')) })) });
       return json(res, out.status, out.body);
     }
     if (url.pathname === '/api/_dev/jobs') { const out = await runDailyJobs(svc, { force: url.searchParams.get('force') !== '0' }); return json(res, 200, out); }

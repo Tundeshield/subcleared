@@ -8,7 +8,7 @@ import { dueChase, inWorkingHours } from '../src/domain/automation';
 import { cleanExtraction, MockAiProvider, processVersion } from '../server/ai';
 import { handleApi } from '../server/api';
 import { MemoryDb } from '../server/db';
-import { handleInboundEmail, intakeKeyFrom, parseInbound, processIntake } from '../server/intake';
+import { handleInboundEmail, intakeKeyFrom, MemoryInbound, processIntake, signSvix, simulateResendDelivery, verifySvix } from '../server/intake';
 import { runDailyJobs } from '../server/jobs';
 import { readEnv, type Services } from '../server/services';
 import { LocalFileStore } from '../server/storage';
@@ -16,7 +16,7 @@ import { LocalFileStore } from '../server/storage';
 const coi = (o: { insured: string; expiry: string; limit?: string; extra?: string }) => new TextEncoder().encode(
   `%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n2 0 obj << /Type /Page >> endobj\nBT (Certificate of insurance) Tj (Named insured: ${o.insured}) Tj (Insurer: Hartwell Mutual) Tj (Policy number: HM-2231) Tj (Effective: 2026-01-01) Tj (Expiry: ${o.expiry}) Tj (Each occurrence: ${o.limit ?? '2,000,000'}) Tj (General aggregate: 4,000,000) Tj ${o.extra ?? ''} ET\ntrailer\n%%EOF\n`);
 
-interface H { svc: Services; db: MemoryDb; files: LocalFileStore; mail: any[]; clock: { now: Date }; users: Record<string, any>; aiCalls: number }
+interface H { svc: Services; db: MemoryDb; files: LocalFileStore; mail: any[]; clock: { now: Date }; users: Record<string, any>; aiCalls: number; inbound: MemoryInbound }
 let h: H;
 function harness(): H {
   const db = new MemoryDb();
@@ -24,13 +24,15 @@ function harness(): H {
   const mail: any[] = []; const users: Record<string, any> = {};
   const clock = { now: new Date('2026-06-15T15:00:00Z') }; // a Monday, 10:00 in Chicago
   const mock = new MockAiProvider();
-  const self: H = { svc: null as any, db, files, mail, clock, users, aiCalls: 0 };
+  const inbound = new MemoryInbound();
+  const self: H = { svc: null as any, db, files, mail, clock, users, aiCalls: 0, inbound };
   self.svc = {
     mode: 'memory', db, files,
     auth: { async verify(t) { const u = users[t]; if (!u) throw new Error('bad'); return { uid: t, email: u.email, emailVerified: true }; } },
     mail: { configured: true, async send(m) { mail.push(m); return { ok: true, dev: true }; } },
     ai: { name: 'mock', call: async (c) => { self.aiCalls++; return mock.call(c); } },
-    env: { ...readEnv({ APP_URL: 'http://test', INBOUND_EMAIL_SECRET: 'inbound-secret', INBOUND_EMAIL_DOMAIN: 'in.example' } as any) },
+    inbound,
+    env: { ...readEnv({ APP_URL: 'http://test', RESEND_WEBHOOK_SECRET: 'whsec_dGVzdC1yZXNlbmQtc2VjcmV0LWtleQ==', INBOUND_EMAIL_DOMAIN: 'in.example' } as any) },
     now: () => (clock.now = new Date(clock.now.getTime() + 1)),
     async queueExtraction(orgId, versionId) { await processVersion(self.svc, orgId, versionId); },
     async queueIntake(orgId, id) { await processIntake(self.svc, orgId, id); },
@@ -171,43 +173,52 @@ describe('automatic chasing', () => {
   });
 });
 
-describe('email intake', () => {
-  it('parses addresses and refuses bad secrets', async () => {
-    expect(intakeKeyFrom({ to: ['docs-abcdefghijkl1234@in.example'] })).toBe('abcdefghijkl1234');
+describe('email intake (Resend)', () => {
+  it('verifies Resend signatures, rejects replays, and parses addresses', async () => {
+    const secret = h.svc.env.resendWebhookSecret!;
+    const raw = '{"type":"email.received","data":{"email_id":"abc12345"}}';
+    const now = new Date('2026-06-15T15:00:00Z');
+    const hd = signSvix(secret, raw, 'msg_1', now);
+    expect(verifySvix(secret, raw, { id: hd['svix-id'], timestamp: hd['svix-timestamp'], signature: hd['svix-signature'] }, now)).toBe(true);
+    expect(verifySvix(secret, raw + ' ', { id: hd['svix-id'], timestamp: hd['svix-timestamp'], signature: hd['svix-signature'] }, now)).toBe(false);
+    expect(verifySvix(secret, raw, { id: hd['svix-id'], timestamp: hd['svix-timestamp'], signature: hd['svix-signature'] }, new Date(now.getTime() + 6 * 60_000))).toBe(false);
+    expect(verifySvix('whsec_b3RoZXI=', raw, { id: hd['svix-id'], timestamp: hd['svix-timestamp'], signature: hd['svix-signature'] }, now)).toBe(false);
+    expect((await handleInboundEmail(h.svc, raw, { get: () => null })).status).toBe(401);
+    expect(intakeKeyFrom({ to: ['Docs <docs-abcdefghijkl1234@in.example>'] })).toBe('abcdefghijkl1234');
     expect(intakeKeyFrom({ to: ['someone@in.example'] })).toBeNull();
-    expect(parseInbound({ From: 'A <a@x.example>', FromFull: { Email: 'A@X.example' }, ToFull: [{ Email: 'docs-abc@in.example' }], Attachments: [] }).from).toBe('a@x.example');
-    expect((await handleInboundEmail(h.svc, '{}', 'wrong')).status).toBe(403);
   });
-  it('attaches when certain, queues when not, and never crosses organisations', async () => {
+  it('attaches when certain, queues when not, ignores repeats, and never crosses organisations', async () => {
     const o = await setup();
     await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [o.subcontractorId] }, o.orgId);
     const setupRes = await ok('owner1', 'intake.setup', {}, o.orgId);
     expect(setupRes.address).toMatch(/^docs-[a-z0-9]+@in\.example$/);
-    const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
-    const send = (from: string, to: string, bytes: Uint8Array) => handleInboundEmail(h.svc, JSON.stringify({ FromFull: { Email: from, Name: 'Rae' }, ToFull: [{ Email: to }], Subject: 'Our insurance', MessageID: 'm-1', Attachments: [{ Name: 'cert.pdf', ContentType: 'application/pdf', Content: b64(bytes) }] }), 'inbound-secret');
+    const send = (from: string, bytes: Uint8Array, emailId?: string) => simulateResendDelivery(h.svc, h.inbound, { from, fromName: 'Rae', to: [setupRes.address], subject: 'Our insurance', text: 'Attached.', emailId, attachments: [{ filename: 'cert.pdf', contentType: 'application/pdf', bytes }, { filename: 'logo.png', contentType: 'image/png', bytes: new Uint8Array(300) }] });
 
     // From a known contact, one outstanding requirement, the right kind of document: attached automatically.
-    expect((await send('rae@renew.example', setupRes.address, coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }))).body).toMatchObject({ accepted: 1 });
-    const sub = await ok('owner1', 'subs.get', { subcontractorId: o.subcontractorId }, o.orgId);
+    expect((await send('rae@renew.example', coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }), 'email-0001')).body).toMatchObject({ routed: true });
+    // Resend retries the same event: nothing happens twice.
+    expect((await send('rae@renew.example', coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }), 'email-0001')).body).toMatchObject({ duplicate: true });
     const all = await ok('owner1', 'intake.list', { all: true }, o.orgId);
+    expect(all.recent).toHaveLength(1); // the tiny logo image was skipped
     expect(all.recent[0]).toMatchObject({ status: 'attached', attached: { automatic: true, subcontractorName: 'Renew Co Ltd' } });
-    const vId = all.recent[0].attached.versionId;
-    const review = await ok('owner1', 'reviews.get', { versionId: vId }, o.orgId);
+    const review = await ok('owner1', 'reviews.get', { versionId: all.recent[0].attached.versionId }, o.orgId);
     expect(review.version.intake).toMatchObject({ from: 'rae@renew.example', subject: 'Our insurance' });
     expect(review.version.extraction.reusedFrom).toMatch(/^intake:/);
-    expect(sub).toBeTruthy();
 
     // Unknown sender, and the document names nobody we know: waits for a person.
-    await send('broker@bigbroker.example', setupRes.address, coi({ insured: 'Nobody Known Ltd', expiry: '2027-01-01' }));
+    await send('broker@bigbroker.example', coi({ insured: 'Nobody Known Ltd', expiry: '2027-01-01' }));
     const q = await ok('owner1', 'intake.list', {}, o.orgId);
     expect(q.items).toHaveLength(1);
-    expect(q.items[0].status).toBe('needs_match');
+    expect(q.items[0]).toMatchObject({ status: 'needs_match', fromName: 'Rae', textPreview: 'Attached.' });
     await ok('owner1', 'intake.resolve', { intakeId: q.items[0].id, subcontractorId: o.subcontractorId, requirementId: o.gl }, o.orgId);
     expect((await ok('owner1', 'intake.list', {}, o.orgId)).items).toHaveLength(0);
 
-    // Same file again: recorded as a duplicate, not attached twice.
-    await send('rae@renew.example', setupRes.address, coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }));
+    // Same file again in a new email: recorded as a duplicate, not attached twice.
+    await send('rae@renew.example', coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }));
     expect((await ok('owner1', 'intake.list', { all: true }, o.orgId)).recent[0].status).toBe('duplicate');
+
+    // An address that isn't an organisation's is accepted and dropped.
+    expect((await simulateResendDelivery(h.svc, h.inbound, { from: 'x@y.example', to: ['docs-unknownkey12345@in.example'], attachments: [] })).body).toMatchObject({ routed: false });
 
     // Another organisation can't see or resolve these items.
     h.users.other = { email: 'x@other.example' };
