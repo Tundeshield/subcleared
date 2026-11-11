@@ -8,7 +8,7 @@ module.exports = {
       colors: {
         canvas: v('canvas'), paper: v('paper'), surface: v('paper'), raised: v('raised'), line: v('line'), 'line-strong': v('line-strong'),
         ink: v('ink'), muted: v('muted'), faint: v('faint'),
-        accent: v('accent'), 'accent-hover': v('accent-hover'), 'accent-tint': v('accent-tint'),
+        accent: v('accent'), 'accent-hover': v('accent-hover'), 'accent-tint': v('accent-tint'), 'accent-bright': v('accent-bright'), night: v('night'),
         success: v('success'), warning: v('warning'), danger: v('danger'), info: v('info'),
         'success-tint': v('success-tint'), 'warning-tint': v('warning-tint'), 'danger-tint': v('danger-tint'), 'info-tint': v('info-tint'),
       },

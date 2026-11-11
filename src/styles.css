@@ -23,6 +23,8 @@
   --accent: 21 94 117;        /* #155E75 (7.0:1 on white) */
   --accent-hover: 14 76 95;   /* #0E4C5F */
   --accent-tint: 231 240 243; /* #E7F0F3 */
+  --accent-bright: 103 199 217; /* #67C7D9 accent on dark surfaces (marketing) */
+  --night: 13 18 21;          /* #0D1215 dark marketing surface */
   /* Status — meaning only */
   --success: 30 120 74;       /* #1E784A ready, approved, in date */
   --warning: 155 88 0;        /* #9B5800 expiring, attention */
@@ -79,3 +81,16 @@
 .slide-in { animation: si 0.2s ease-out; }
 @keyframes si { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { *, .skeleton { animation: none !important; transition: none !important; } }
+
+/* Marketing pages: entrance motion, only when the visitor hasn't asked for less. */
+@media (prefers-reduced-motion: no-preference) {
+  .rise { animation: rise 0.7s cubic-bezier(.2,.7,.2,1) both; }
+  .rise-1 { animation-delay: .06s; } .rise-2 { animation-delay: .14s; } .rise-3 { animation-delay: .22s; } .rise-4 { animation-delay: .34s; } .rise-5 { animation-delay: .5s; }
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity .6s ease, transform .6s cubic-bezier(.2,.7,.2,1); }
+  .reveal.is-in { opacity: 1; transform: none; }
+  .float-slow { animation: float 7s ease-in-out infinite; }
+  html:focus-within { scroll-behavior: smooth; }
+}
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.night-grid { background-image: linear-gradient(rgb(255 255 255 / .045) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / .045) 1px, transparent 1px); background-size: 56px 56px; mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 30%, transparent 75%); }

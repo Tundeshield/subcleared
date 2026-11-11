@@ -1,19 +1,25 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useSession } from '../../lib/session';
-import { Logo } from '../../ui';
+import { cx, Logo } from '../../ui';
 
-export function PublicNav() {
+export function PublicNav({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
   const { authUser } = useSession();
+  const { pathname } = useLocation();
+  const dark = tone === 'dark';
+  const anchor = (id: string) => (pathname === '/' ? `#${id}` : `/#${id}`);
+  const quiet = dark ? 'btn text-white/70 hover:text-white hover:bg-white/[0.06] px-3' : 'btn-ghost';
   return (
-    <header className="border-b border-line bg-canvas/95 backdrop-blur sticky top-0 z-30">
-      <div className="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
-        <Link to="/" aria-label="SubCleared home"><Logo /></Link>
+    <header className={dark ? 'relative z-30' : 'border-b border-line bg-canvas/95 backdrop-blur sticky top-0 z-30'}>
+      <div className="max-w-6xl mx-auto px-5 sm:px-8 h-16 sm:h-[4.5rem] flex items-center justify-between gap-4">
+        <Link to="/" aria-label="SubCleared home"><Logo inverse={dark} /></Link>
         <nav className="flex items-center gap-1 sm:gap-2" aria-label="Site">
-          <Link to="/pricing" className="btn-ghost">Pricing</Link>
-          {authUser ? <Link to="/app/overview" className="btn-primary">Open SubCleared</Link> : <>
-            <Link to="/login" className="btn-ghost">Sign in</Link>
-            <Link to="/signup" className="btn-primary hidden sm:inline-flex">Start free trial</Link>
+          <a href={anchor('how')} className={cx(quiet, 'hidden md:inline-flex')}>How it works</a>
+          <a href={anchor('features')} className={cx(quiet, 'hidden md:inline-flex')}>Features</a>
+          <Link to="/pricing" className={cx(quiet, 'hidden sm:inline-flex')}>Pricing</Link>
+          {authUser ? <Link to="/app/overview" className={dark ? 'btn bg-white text-night hover:bg-white/90' : 'btn-primary'}>Open SubCleared</Link> : <>
+            <Link to="/login" className={quiet}>Sign in</Link>
+            <Link to="/signup" className={dark ? 'btn bg-white text-night hover:bg-white/90' : 'btn-primary'}>Get started</Link>
           </>}
         </nav>
       </div>
@@ -23,10 +29,10 @@ export function PublicNav() {
 
 export function PublicFooter() {
   return (
-    <footer className="border-t border-line mt-28">
+    <footer className="border-t border-line mt-24 sm:mt-32">
       <div className="max-w-6xl mx-auto px-5 sm:px-8 py-12 grid sm:grid-cols-[1fr_auto] gap-8 text-sm text-muted">
         <div><Logo descriptor /><p className="mt-5 max-w-md leading-relaxed">For contractors who need to know which subcontractors are ready to work. SubCleared is not an insurance broker and does not make legal coverage determinations.</p></div>
-        <nav className="flex gap-6 items-start" aria-label="Footer"><Link to="/pricing" className="hover:text-ink">Pricing</Link><Link to="/login" className="hover:text-ink">Sign in</Link><Link to="/signup" className="hover:text-ink">Start free trial</Link></nav>
+        <nav className="flex flex-wrap gap-x-6 gap-y-3 items-start" aria-label="Footer"><a href="/#how" className="hover:text-ink">How it works</a><a href="/#features" className="hover:text-ink">Features</a><Link to="/pricing" className="hover:text-ink">Pricing</Link><Link to="/login" className="hover:text-ink">Sign in</Link><Link to="/signup" className="hover:text-ink">Get started</Link></nav>
       </div>
     </footer>
   );

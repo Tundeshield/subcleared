@@ -34,19 +34,21 @@ export const Icon = {
 
 // --- Identity ---------------------------------------------------------------------
 /** The mark: a site barrier, raised — cleared to proceed. */
-export function Mark({ className = 'w-6 h-6' }: { className?: string }) {
+export function Mark({ className = 'w-6 h-6', inverse = false }: { className?: string; inverse?: boolean }) {
+  const base = inverse ? '#FFFFFF' : 'rgb(var(--ink))';
+  const accent = inverse ? 'rgb(var(--accent-bright))' : 'rgb(var(--accent))';
   return (
     <svg viewBox="0 0 32 32" className={className} aria-hidden>
-      <rect x="6" y="9" width="4" height="16" rx="1" fill="rgb(var(--ink))" />
-      <rect x="4" y="24" width="13" height="3" rx="1" fill="rgb(var(--ink))" />
-      <rect x="8" y="9.2" width="20" height="4" rx="1" fill="rgb(var(--accent))" transform="rotate(-34 8 11.2)" />
+      <rect x="6" y="9" width="4" height="16" rx="1" fill={base} />
+      <rect x="4" y="24" width="13" height="3" rx="1" fill={base} />
+      <rect x="8" y="9.2" width="20" height="4" rx="1" fill={accent} transform="rotate(-34 8 11.2)" />
     </svg>
   );
 }
-export function Logo({ className = '', descriptor = false }: { className?: string; descriptor?: boolean }) {
+export function Logo({ className = '', descriptor = false, inverse = false }: { className?: string; descriptor?: boolean; inverse?: boolean }) {
   return (
-    <span className={cx('inline-flex items-center gap-2.5 text-ink', className)}>
-      <Mark className="w-7 h-7 -mt-0.5" />
+    <span className={cx('inline-flex items-center gap-2.5', inverse ? 'text-white' : 'text-ink', className)}>
+      <Mark className="w-7 h-7 -mt-0.5" inverse={inverse} />
       <span className="leading-none">
         <span className="block text-[1.125rem] font-semibold tracking-[-0.02em]">SubCleared</span>
         {descriptor && <span className="block mt-1 text-[0.6rem] font-medium tracking-[0.14em] text-faint">SUBCONTRACTOR COMPLIANCE &amp; READINESS</span>}
