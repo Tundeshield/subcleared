@@ -12,7 +12,7 @@ import type {
 import { audit, bad, C, HttpError, id, rateLimit, reqStr, sha256, str } from './core';
 import type { Db } from './db';
 import { sendEmail } from './email';
-import { createUploadSlot, finalizeUploadSlot } from './handlers/documents';
+import { createUploadSlot, finalizeUploadSlot, reportUploadFailureFor } from './handlers/documents';
 import type { Services } from './services';
 
 const SESSION_MINUTES = 120;
@@ -179,6 +179,11 @@ export async function portalUploadCreate(svc: Services, db: Db, input: any, ip?:
     subcontractorId: p.sub.id, requirementId: rid, fileName: input.fileName, mimeType: input.mimeType, size: input.size,
     projectIds: [],
   });
+}
+
+export async function portalUploadFailed(svc: Services, db: Db, input: any, ip?: string) {
+  const p = await ctxFromSession(svc, db, input.session, ip);
+  return reportUploadFailureFor({ svc, db, org: p.org }, { type: 'portal', id: p.contactId, name: p.contactName }, id(input.versionId, 'Upload'), input.detail, p.sub.id);
 }
 
 export async function portalUploadFinalize(svc: Services, db: Db, input: any, ip?: string) {

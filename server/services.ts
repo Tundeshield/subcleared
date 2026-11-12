@@ -3,7 +3,7 @@ import { DEFAULT_PLANS, type Plan } from '../src/domain/plans';
 import { FirestoreDb, type Db } from './db';
 import { AnthropicProvider, type AiProvider } from './ai';
 import { ResendInbound, type InboundSource } from './intake';
-import { GcsFileStore, type FileStore } from './storage';
+import { GcsFileStore, storageCorsOrigins, type FileStore } from './storage';
 
 export interface Identity { uid: string; email: string; emailVerified: boolean; name?: string }
 
@@ -136,7 +136,7 @@ export async function getFirebaseServices(): Promise<Services> {
   firebaseServices = {
     mode: 'firebase',
     db: new FirestoreDb(firestore),
-    files: new GcsFileStore(getStorage(app).bucket() as any),
+    files: new GcsFileStore(getStorage(app).bucket() as any, storageCorsOrigins()),
     auth: {
       async verify(token) {
         const d = await auth.verifyIdToken(token, true);

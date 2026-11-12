@@ -1,6 +1,6 @@
 [
   {
-    "origin": ["https://YOUR-SITE.netlify.app", "http://localhost:5173"],
+    "origin": ["https://subcleared.io", "https://www.subcleared.io", "https://subcleared.netlify.app"],
     "method": ["PUT", "GET"],
     "responseHeader": ["Content-Type", "x-goog-content-length-range"],
     "maxAgeSeconds": 3600

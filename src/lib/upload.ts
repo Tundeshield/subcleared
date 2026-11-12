@@ -22,7 +22,12 @@ function put(url: string, headers: Record<string, string>, file: File, onProgres
     for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
     xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status}). Please try again.`)));
-    xhr.onerror = () => reject(new Error('Upload interrupted. Check your connection and try again.'));
+    xhr.onerror = () => reject(Object.assign(
+      new Error(navigator.onLine === false
+        ? 'You appear to be offline. Check your connection and try again.'
+        : "The file couldn't be sent to secure storage. Please try again in a minute. If it keeps happening, we've been told and are looking into it."),
+      { transfer: true },
+    ));
     xhr.onabort = () => reject(new Error('Upload cancelled.'));
     signal?.addEventListener('abort', () => xhr.abort());
     xhr.send(file);
@@ -45,7 +50,17 @@ export async function uploadDocument(
   const slot = 'portal' in kind
     ? await api('portal.uploadCreate', { session: kind.portal, ...meta }, { portal: true })
     : await api('uploads.create', { ...kind.internal, ...meta });
-  await put(slot.upload.url, slot.upload.headers, file, (p) => onProgress('uploading', p), signal);
+  try {
+    await put(slot.upload.url, slot.upload.headers, file, (p) => onProgress('uploading', p), signal);
+  } catch (e: any) {
+    if (e?.transfer || /Upload failed/.test(e?.message ?? '')) {
+      const detail = `${e.message} · online=${navigator.onLine} · origin=${location.origin}`;
+      await ('portal' in kind
+        ? api('portal.uploadFailed', { session: kind.portal, versionId: slot.versionId, detail }, { portal: true })
+        : api('uploads.failed', { versionId: slot.versionId, detail })).catch(() => undefined);
+    }
+    throw e;
+  }
   onProgress('verifying', 1);
   const out = 'portal' in kind
     ? await api('portal.uploadFinalize', { session: kind.portal, versionId: slot.versionId }, { portal: true })

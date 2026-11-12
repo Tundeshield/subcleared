@@ -32,7 +32,7 @@ const ORG_ACTIONS: Record<string, OrgHandler> = {
   'subs.addNote': subs.addNote, 'subs.import': subs.importSubs,
   'requirements.list': reqs.listRequirements, 'requirements.history': reqs.requirementHistory, 'requirements.create': reqs.createRequirement,
   'requirements.update': reqs.updateRequirement, 'templates.save': reqs.saveTemplate, 'overrides.set': reqs.setOverride, 'overrides.revoke': reqs.revokeOverride,
-  'uploads.create': docs.createUpload, 'uploads.finalize': docs.finalizeUpload, 'files.url': docs.fileUrl, 'documents.list': docs.listDocuments,
+  'uploads.create': docs.createUpload, 'uploads.finalize': docs.finalizeUpload, 'uploads.failed': docs.reportUploadFailure, 'files.url': docs.fileUrl, 'documents.list': docs.listDocuments,
   'documents.get': docs.getDocument, 'documents.update': docs.updateDocument, 'reviews.queue': docs.reviewQueue, 'reviews.get': docs.getReview,
   'reviews.claim': docs.claimReview, 'reviews.saveMetadata': docs.saveMetadata, 'reviews.decide': docs.decideReview, 'reviews.confirmChecked': docs.confirmChecked, 'reviews.verify': docs.recordVerification,
   'requests.create': requests.createRequest, 'requests.forProject': requests.requestForProject, 'requests.list': requests.listRequests, 'requests.resend': requests.resendRequest, 'links.revoke': requests.revokeLink,
@@ -46,7 +46,7 @@ const ORG_ACTIONS: Record<string, OrgHandler> = {
 
 const PORTAL_ACTIONS: Record<string, (svc: Services, db: any, input: any, ip?: string) => Promise<unknown>> = {
   'portal.open': portal.portalOpen, 'portal.state': portal.portalState, 'portal.uploadCreate': portal.portalUploadCreate,
-  'portal.uploadFinalize': portal.portalUploadFinalize, 'portal.updateContact': portal.portalUpdateContact, 'portal.fileUrl': portal.portalFileUrl,
+  'portal.uploadFinalize': portal.portalUploadFinalize, 'portal.uploadFailed': portal.portalUploadFailed, 'portal.updateContact': portal.portalUpdateContact, 'portal.fileUrl': portal.portalFileUrl,
 };
 
 export interface ApiRequest { action: string; input: any; authorization?: string | null; orgId?: string | null; ip?: string }

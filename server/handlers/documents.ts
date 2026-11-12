@@ -58,7 +58,8 @@ export async function createUploadSlot(base: Base, actor: UploadActor, input: {
   const key = `quarantine/${base.org.id}/${vid}`;
   const v: DocumentVersion = {
     id: vid, documentId: doc.id, subcontractorId: input.subcontractorId, requirementId: doc.requirementId,
-    versionNumber: versions.reduce((m, x) => Math.max(m, x.versionNumber), 0) + 1, fileName, mimeType: mime, size, storagePath: key,
+    // Abandoned transfers don't count: a retry after a failed upload is still version 1.
+    versionNumber: versions.filter((x) => x.reviewStatus !== 'uploading').reduce((m, x) => Math.max(m, x.versionNumber), 0) + 1, fileName, mimeType: mime, size, storagePath: key,
     uploadedAt: now, uploadedBy: { type: actor.type, id: actor.id, name: actor.name }, scan: { status: 'pending' },
     extraction: { status: 'not_started' }, metadata: {}, reviewStatus: 'uploading', verification: 'received', revision: 0,
   };
@@ -107,6 +108,7 @@ export async function finalizeUploadSlot(base: Base, actor: UploadActor, version
     extraction: { status: extractionOn ? 'queued' : 'not_configured' }, uploadedAt: now, revision: 1,
   });
   await base.db.update(C.doc(base.org.id, 'documents', v.documentId), { currentVersionId: v.id, updatedAt: now });
+  await base.db.set(C.doc(base.org.id, 'health', 'uploads'), { status: 'ok', at: now }).catch(() => undefined);
   await base.db.update(C.doc(base.org.id, 'subcontractors', v.subcontractorId), { lastActivityAt: now });
 
   // Fulfil open requests that asked for this requirement.
@@ -154,6 +156,29 @@ export async function createUpload(ctx: Ctx, input: any) {
     documentId: input.documentId ? id(input.documentId, 'Document') : undefined, title: input.title,
     fileName: input.fileName, mimeType: input.mimeType, size: input.size, projectIds: ids(input.projectIds, 'Projects'),
   });
+}
+
+/**
+ * The browser tells us a transfer to storage failed. Nothing is recorded as submitted;
+ * this only leaves a trace for administrators, since the storage provider never sees
+ * a request the browser blocked.
+ */
+export async function reportUploadFailureFor(base: Base, actor: UploadActor, versionId: string, detail: unknown, allowedSubId?: string) {
+  const vpath = C.doc(base.org.id, 'versions', versionId);
+  const v = await base.db.get<DocumentVersion>(vpath);
+  if (!v || v.uploadedBy.id !== actor.id || (allowedSubId && v.subcontractorId !== allowedSubId)) throw notFound('Upload not found');
+  if (v.reviewStatus !== 'uploading') return { recorded: false };
+  const at = base.svc.now().toISOString();
+  const d = String(detail ?? '').slice(0, 300);
+  await base.db.update(vpath, { transferError: { at, detail: d } } as any);
+  await base.db.set(C.doc(base.org.id, 'health', 'uploads'), { status: 'failing', at, detail: d, versionId, subcontractorId: v.subcontractorId }).catch(() => undefined);
+  console.error(JSON.stringify({ event: 'upload.transfer_failed', org: base.org.id, version: versionId, subcontractor: v.subcontractorId, actor: actor.type, mime: v.mimeType, size: v.size, detail: d }));
+  return { recorded: true };
+}
+
+export async function reportUploadFailure(ctx: Ctx, input: any) {
+  need(ctx, 'documents.upload');
+  return reportUploadFailureFor(ctx, { type: 'user', id: ctx.member.uid, name: ctx.member.name }, id(input.versionId, 'Upload'), input.detail);
 }
 
 export async function finalizeUpload(ctx: Ctx, input: any) {

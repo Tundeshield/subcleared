@@ -506,3 +506,68 @@ describe('Project workflow in one step', () => {
     expect((await call('other', 'requests.forProject', { projectId, subcontractorIds: [a.subcontractorId] }, other.orgId)).status).toBe(404);
   });
 });
+
+describe('portal uploads (production upload defect, Nov 2026)', () => {
+  const PNG = () => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82, 1, 2, 3, 4, 0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
+  const JPG = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 0xff, 0xd9]);
+  async function portalFor(o: any) {
+    const { projectId } = await ok('owner1', 'projects.create', { name: 'TEST Riverside Apartments', status: 'active' }, o.orgId);
+    for (const r of [o.gl, o.wc, o.biz]) await ok('owner1', 'projects.setRequirement', { projectId, requirementId: r, mandatory: true }, o.orgId);
+    const { subcontractorId } = await ok('owner1', 'subs.create', { legalName: 'TEST Subcontractor Ltd', trade: 'General', contacts: [{ name: 'Tess', email: 'tess@test.example', primary: true }] }, o.orgId);
+    await ok('owner1', 'projects.assign', { projectId, subcontractorIds: [subcontractorId] }, o.orgId);
+    const sub = (await ok('owner1', 'subs.get', { subcontractorId }, o.orgId)).subcontractor;
+    await ok('owner1', 'requests.create', { subcontractorId, contactIds: [sub.contacts[0].id], requirementIds: [o.gl, o.wc, o.biz], projectIds: [projectId] }, o.orgId);
+    const { session } = await ok(null, 'portal.open', { token: linkToken(h.mail.find((m) => m.to === 'tess@test.example')) });
+    return { session, subcontractorId, projectId };
+  }
+  const put = (slot: any, bytes: Uint8Array) => h.files.write(new URL(slot.upload.url).searchParams.get('key')!, bytes);
+
+  it('accepts PNG, JPEG and PDF one after another and files each against its requirement', async () => {
+    const o = await setupOrg();
+    const p = await portalFor(o);
+    const files = [[o.gl, 'pl.png', 'image/png', PNG()], [o.wc, 'el.jpg', 'image/jpeg', JPG()], [o.biz, 'reg.pdf', 'application/pdf', PDF()]] as const;
+    for (const [rid, name, mime, bytes] of files) {
+      const slot = await ok(null, 'portal.uploadCreate', { session: p.session, requirementId: rid, fileName: name, mimeType: mime, size: bytes.length });
+      put(slot, bytes);
+      expect(await ok(null, 'portal.uploadFinalize', { session: p.session, versionId: slot.versionId })).toMatchObject({ status: 'awaiting_review' });
+    }
+    const queue = await ok('owner1', 'reviews.queue', {}, o.orgId);
+    expect(queue.items).toHaveLength(3);
+    const docs = await ok('owner1', 'documents.list', { subcontractorId: p.subcontractorId }, o.orgId);
+    expect(new Set(JSON.stringify(docs).match(/"requirementId":"[^"]+"/g))).toEqual(new Set([o.gl, o.wc, o.biz].map((x) => `"requirementId":"${x}"`)));
+  });
+
+  it('records an interrupted transfer without filing anything, and a retry is still version 1 with no duplicate', async () => {
+    const o = await setupOrg();
+    const p = await portalFor(o);
+    const first = await ok(null, 'portal.uploadCreate', { session: p.session, requirementId: o.gl, fileName: 'pl.png', mimeType: 'image/png', size: 32 });
+    // The browser's PUT never reached storage.
+    expect((await call(null, 'portal.uploadFinalize', { session: p.session, versionId: first.versionId })).status).toBe(409);
+    expect(await ok(null, 'portal.uploadFailed', { session: p.session, versionId: first.versionId, detail: 'blocked' })).toEqual({ recorded: true });
+    expect((await h.db.get<any>(`orgs/${o.orgId}/health/uploads`))?.status).toBe('failing');
+    expect((await ok('owner1', 'reviews.queue', {}, o.orgId)).items).toHaveLength(0);
+    // Retry succeeds; same document, version 1, one item to review.
+    const retry = await ok(null, 'portal.uploadCreate', { session: p.session, requirementId: o.gl, fileName: 'pl.png', mimeType: 'image/png', size: 32 });
+    expect(retry.documentId).toBe(first.documentId);
+    put(retry, PNG());
+    await ok(null, 'portal.uploadFinalize', { session: p.session, versionId: retry.versionId });
+    await ok(null, 'portal.uploadFinalize', { session: p.session, versionId: retry.versionId }); // double-submit is harmless
+    const queue = await ok('owner1', 'reviews.queue', {}, o.orgId);
+    expect(queue.items).toHaveLength(1);
+    expect((await h.db.get<any>(`orgs/${o.orgId}/versions/${retry.versionId}`)).versionNumber).toBe(1);
+    expect((await h.db.get<any>(`orgs/${o.orgId}/health/uploads`))?.status).toBe('ok');
+  });
+
+  it('refuses invalid sessions and uploads into another organisation', async () => {
+    const a = await setupOrg('owner1', 'owner@acme.example');
+    const pa = await portalFor(a);
+    const slot = await ok(null, 'portal.uploadCreate', { session: pa.session, requirementId: a.gl, fileName: 'pl.png', mimeType: 'image/png', size: 32 });
+    expect((await call(null, 'portal.uploadCreate', { session: 'forged', requirementId: a.gl, fileName: 'x.png', mimeType: 'image/png', size: 32 })).status).toBeGreaterThanOrEqual(400);
+    expect((await call(null, 'portal.uploadFinalize', { session: 'forged', versionId: slot.versionId })).status).toBeGreaterThanOrEqual(400);
+    h.users.ownerB = { email: 'b@b.example', verified: true };
+    const { orgId: bOrg } = await ok('ownerB', 'org.register', { orgName: 'Other Co', country: 'United States', timezone: 'America/Chicago', name: 'B' });
+    expect((await call('ownerB', 'uploads.finalize', { versionId: slot.versionId }, bOrg)).status).toBe(404);
+    expect((await call('ownerB', 'uploads.failed', { versionId: slot.versionId }, bOrg)).status).toBe(404);
+    expect((await call('ownerB', 'uploads.finalize', { versionId: slot.versionId }, a.orgId)).status).toBe(403);
+  });
+});

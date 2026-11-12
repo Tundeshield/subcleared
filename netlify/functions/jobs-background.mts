@@ -12,13 +12,15 @@ export default async (req: Request) => {
   if (!secret || got.length !== secret.length || !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(secret))) return new Response('Forbidden', { status: 403 });
   const svc = await getFirebaseServices();
   const startedAt = new Date().toISOString();
+  // Browser uploads depend on the bucket's CORS rules; check them every run.
+  const storageCors = await ((svc.files as any).ensureUploadCors?.() ?? Promise.resolve(null)).catch((e: any) => ({ ok: false, error: e?.message }));
   try {
     const summary = await runDailyJobs(svc);
     const failedOrgs = summary.filter((s: any) => s.error).length;
-    await svc.db.set('jobRuns/latest', { startedAt, finishedAt: new Date().toISOString(), ok: failedOrgs === 0, orgs: summary.length, failedOrgs, summary: JSON.parse(JSON.stringify(summary)).slice(0, 200) });
+    await svc.db.set('jobRuns/latest', { startedAt, finishedAt: new Date().toISOString(), ok: failedOrgs === 0, orgs: summary.length, failedOrgs, storageCors, summary: JSON.parse(JSON.stringify(summary)).slice(0, 200) });
     console.log('[jobs]', JSON.stringify(summary));
   } catch (e: any) {
-    await svc.db.set('jobRuns/latest', { startedAt, finishedAt: new Date().toISOString(), ok: false, error: String(e?.message ?? e).slice(0, 500) });
+    await svc.db.set('jobRuns/latest', { startedAt, finishedAt: new Date().toISOString(), ok: false, storageCors, error: String(e?.message ?? e).slice(0, 500) });
     console.error('[jobs] failed', e);
   }
   return new Response('ok');

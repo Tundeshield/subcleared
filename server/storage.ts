@@ -18,9 +18,61 @@ export interface FileStore {
   setMetadata?(key: string, meta: Record<string, string>): Promise<void>;
 }
 
+/**
+ * Browsers upload straight to the bucket, so the bucket must allow the app's own
+ * origins (and only those) to PUT. Without this every upload fails in the browser
+ * before it reaches storage, with no trace on the server.
+ */
+export function storageCorsOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
+  const out = new Set<string>();
+  const add = (u?: string) => { if (!u) return; try { const o = new URL(u).origin; if (o.startsWith('https://')) out.add(o); } catch { /* ignore */ } };
+  for (const u of [env.APP_URL, env.URL]) {
+    add(u);
+    try { const h = new URL(u!).hostname; if (!h.startsWith('www.') && h.split('.').length === 2) add(`https://www.${h}`); } catch { /* ignore */ }
+  }
+  if (env.SITE_NAME) add(`https://${env.SITE_NAME}.netlify.app`);
+  for (const u of (env.STORAGE_CORS_ORIGINS || '').split(',')) add(u.trim());
+  return [...out];
+}
+
+export interface CorsStatus { ok: boolean; changed?: boolean; origins: string[]; error?: string; fix?: string }
+
+export const UPLOAD_CORS_RULE = { method: ['PUT', 'GET'], responseHeader: ['Content-Type', 'x-goog-content-length-range'], maxAgeSeconds: 3600 };
+
+/** Rules to apply, or null when the existing ones already allow every origin. Keeps rules someone else added. */
+export function mergeCors(existing: any[] | undefined, origins: string[]): any[] | null {
+  const rules = existing ?? [];
+  const allows = (o: string) => rules.some((r) => (r.origin ?? []).some((x: string) => x === o || x === '*') && (r.method ?? []).includes('PUT')
+    && UPLOAD_CORS_RULE.responseHeader.every((h) => (r.responseHeader ?? []).some((x: string) => x.toLowerCase() === h.toLowerCase())));
+  const missing = origins.filter((o) => !allows(o));
+  if (!missing.length) return null;
+  return [...rules, { origin: missing, ...UPLOAD_CORS_RULE }];
+}
+
 export class GcsFileStore implements FileStore {
-  constructor(private bucket: import('@google-cloud/storage').Bucket) {}
+  private corsReady: Promise<CorsStatus> | null = null;
+  constructor(private bucket: import('@google-cloud/storage').Bucket, private corsOrigins: string[] = []) {}
+  /** Makes sure browsers on the app's domains may upload. Checked once per instance; retried after a failure. */
+  ensureUploadCors(): Promise<CorsStatus> {
+    if (!this.corsOrigins.length) return Promise.resolve({ ok: false, origins: [], error: 'No https app origins configured (APP_URL)' });
+    this.corsReady ??= (async (): Promise<CorsStatus> => {
+      const [meta] = await this.bucket.getMetadata();
+      const next = mergeCors((meta as any).cors, this.corsOrigins);
+      if (next) {
+        await this.bucket.setCorsConfiguration(next as any);
+        console.info(JSON.stringify({ event: 'storage.cors_configured', bucket: this.bucket.name, origins: this.corsOrigins }));
+      }
+      return { ok: true, changed: !!next, origins: this.corsOrigins };
+    })().catch((e: any): CorsStatus => {
+      this.corsReady = null;
+      const fix = `Run: gcloud storage buckets update gs://${this.bucket.name} --cors-file=firebase/storage-cors.json`;
+      console.error(JSON.stringify({ event: 'storage.cors_failed', bucket: this.bucket.name, origins: this.corsOrigins, error: e?.message, fix }));
+      return { ok: false, origins: this.corsOrigins, error: String(e?.message ?? e).slice(0, 300), fix };
+    });
+    return this.corsReady;
+  }
   async uploadUrl(key: string, contentType: string, ttlSeconds = 900): Promise<UploadTarget> {
+    await this.ensureUploadCors();
     const expires = Date.now() + ttlSeconds * 1000;
     const range = `0,${MAX_UPLOAD_BYTES}`;
     const [url] = await this.bucket.file(key).getSignedUrl({
