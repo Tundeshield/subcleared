@@ -4,7 +4,7 @@ import { api, setOrgId } from '../../lib/api';
 import { auth } from '../../lib/auth';
 import { COUNTRIES, countryDefaults } from '../../domain/locale';
 import { useSession } from '../../lib/session';
-import { Callout, Checkbox, Field, FormError, Spinner } from '../../ui';
+import { Callout, Checkbox, Field, FormError, LoadingBlock, Spinner } from '../../ui';
 import { AuthCard } from './PublicShell';
 
 function Unconfigured() {
@@ -157,7 +157,7 @@ export function Onboarding() {
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
   useEffect(() => { if (authUser?.name && !name) setName(authUser.name); }, [authUser, name]);
-  if (!ready) return <div className="min-h-screen grid place-items-center"><Spinner /></div>;
+  if (!ready) return <LoadingBlock className="min-h-screen" />;
   if (!authUser) return <Navigate to="/login?next=/onboarding" replace />;
   if (!authUser.emailVerified) return <Navigate to="/verify-email" replace />;
   if (me?.org) return <Navigate to="/app/overview" replace />;
@@ -191,7 +191,7 @@ export function AcceptInvite() {
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
   const next = `/accept-invite?token=${encodeURIComponent(token)}`;
-  if (!ready) return <div className="min-h-screen grid place-items-center"><Spinner /></div>;
+  if (!ready) return <LoadingBlock className="min-h-screen" />;
   if (!authUser) {
     return (
       <AuthCard title="You've been invited to SubCleared" subtitle="Sign in or create an account with the email address the invitation was sent to.">

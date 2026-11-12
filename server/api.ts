@@ -49,7 +49,7 @@ const PORTAL_ACTIONS: Record<string, (svc: Services, db: any, input: any, ip?: s
   'portal.uploadFinalize': portal.portalUploadFinalize, 'portal.uploadFailed': portal.portalUploadFailed, 'portal.updateContact': portal.portalUpdateContact, 'portal.fileUrl': portal.portalFileUrl,
 };
 
-export interface ApiRequest { action: string; input: any; authorization?: string | null; orgId?: string | null; ip?: string }
+export interface ApiRequest { action: string; input: any; authorization?: string | null; orgId?: string | null; ip?: string; /** Records how long each stage took (for the Server-Timing header). */ mark?: (stage: string) => void }
 export interface ApiResponse { status: number; body: unknown }
 
 export const ACTION_NAMES = [...Object.keys(ORG_ACTIONS), ...Object.keys(PORTAL_ACTIONS), 'me', 'me.update', 'org.register', 'invitations.accept'];
@@ -75,6 +75,7 @@ async function dispatch(svc: Services, req: ApiRequest) {
 
   if (PORTAL_ACTIONS[action]) {
     if (req.ip) await rateLimit(svc.db, `portal-ip:${req.ip}`, 600, 600, svc.now());
+    req.mark?.('limit');
     return PORTAL_ACTIONS[action](svc, svc.db, input, req.ip);
   }
 
@@ -82,7 +83,9 @@ async function dispatch(svc: Services, req: ApiRequest) {
   if (!token) throw new HttpError(401, 'Please sign in', 'unauthenticated');
   let identity: Identity;
   try { identity = await svc.auth.verify(token); } catch (e: any) { throw new HttpError(401, 'Your session has expired. Please sign in again.', 'unauthenticated'); }
+  req.mark?.('auth');
   await rateLimit(svc.db, `user:${identity.uid}`, 1200, 300, svc.now());
+  req.mark?.('limit');
 
   if (action === 'me') return org.me(svc, svc.db, identity, req.orgId ?? undefined);
   if (action === 'me.update') return org.updateProfile(svc, svc.db, identity, input);
@@ -96,6 +99,7 @@ async function dispatch(svc: Services, req: ApiRequest) {
   const [o, member] = await svc.db.getMany<any>([C.org(orgId), C.doc(orgId, 'members', identity.uid)]) as [Organisation | null, Member | null];
   // Same response for "no such org" and "not a member": no tenant enumeration.
   if (!o || !member || member.status !== 'active') throw new HttpError(403, 'You do not have access to this organisation', 'no_access');
+  req.mark?.('access');
   applyOrgFormatting(o.settings);
   const ctx: Ctx = { svc, db: svc.db, identity, org: o, member, ip: req.ip, source: 'web' };
   return handler(ctx, input);

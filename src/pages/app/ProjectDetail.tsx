@@ -6,9 +6,7 @@ import { api, dataChanged, useApi, useMutation } from '../../lib/api';
 import { exportCsv, exportPdf } from '../../lib/export';
 import { useSession } from '../../lib/session';
 import { AskBox } from './Ask';
-import {
-  Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Drawer, Empty, ErrorState, Field, FormError, Glyph, HelpTip, humanize, Icon, KeyValue, Menu, MoreButton,
-  PageHeader, PageLoading, ReadinessBadge, ReadinessBar, SampleTag, SearchInput, Spinner, StatusText, Tabs, Toolbar, useToast, newRowKey } from '../../ui';
+import { Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Drawer, Empty, ErrorState, Field, FormError, Glyph, HelpTip, humanize, Icon, KeyValue, Menu, MoreButton, newRowKey, PageHeader, PageLoading, ReadinessBadge, ReadinessBar, SampleTag, SearchInput, Skeleton, Spinner, StatusText, Tabs, Toolbar, useToast } from '../../ui';
 import { ProjectDrawer } from './Projects';
 import { activityLine, RequestDialog } from './shared';
 
@@ -330,7 +328,7 @@ function RequirementsTab({ data }: { data: any }) {
 function DocumentsTab({ projectId }: { projectId: string }) {
   const { data, error, loading } = useApi<any>('documents.list', { projectId });
   const nav = useNavigate();
-  if (loading && !data) return <Spinner />;
+  if (loading && !data) return <Skeleton rows={3} />;
   if (error) return <ErrorState error={error} />;
   if (!data.items.length) return <Empty title="No documents yet">Documents from subcontractors on this project appear here once submitted.</Empty>;
   return (
@@ -351,7 +349,7 @@ function DocumentsTab({ projectId }: { projectId: string }) {
 
 function ActivityTab({ projectId }: { projectId: string }) {
   const { data, error, loading } = useApi<any>('audit.list', { ref: projectId, limit: 200 });
-  if (loading && !data) return <Spinner />;
+  if (loading && !data) return <Skeleton rows={3} />;
   if (error) return <ErrorState error={error} />;
   if (!data.items.length) return <Empty title="No activity yet" />;
   return (

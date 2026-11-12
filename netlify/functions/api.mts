@@ -16,10 +16,21 @@ export default async (req: Request, context: Context) => {
     console.error('Service init failed', e);
     return new Response(JSON.stringify({ error: 'The server is not configured yet. See the deployment guide.', code: 'not_configured' }), { status: 503, headers: JSON_HEADERS });
   }
-  const res = await handleApi(svc, {
-    action, input, authorization: req.headers.get('authorization'), orgId: req.headers.get('x-org-id'), ip: context.ip,
+  // Per-request timing: stage durations and database round trips, sent as Server-Timing (no data, durations only).
+  const t0 = Date.now(); let last = t0; const stages: string[] = []; let dbCalls = 0; let dbMs = 0;
+  const mark = (stage: string) => { const n = Date.now(); stages.push(`${stage};dur=${n - last}`); last = n; };
+  const db = new Proxy(svc.db, { get(target: any, prop) {
+    const v = target[prop];
+    if (typeof v !== 'function' || prop === 'newId') return v;
+    return async (...args: any[]) => { const s = Date.now(); dbCalls++; try { return await v.apply(target, args); } finally { dbMs += Date.now() - s; } };
+  } });
+  const res = await handleApi({ ...svc, db }, {
+    action, input, authorization: req.headers.get('authorization'), orgId: req.headers.get('x-org-id'), ip: context.ip, mark,
   });
-  return new Response(JSON.stringify(res.body), { status: res.status, headers: JSON_HEADERS });
+  mark('handler');
+  const timing = [...stages, `db;desc="${dbCalls} calls";dur=${dbMs}`, `total;dur=${Date.now() - t0}`].join(', ');
+  if (Date.now() - t0 > 1500) console.warn(JSON.stringify({ event: 'api.slow', action, ms: Date.now() - t0, dbCalls, dbMs }));
+  return new Response(JSON.stringify(res.body), { status: res.status, headers: { ...JSON_HEADERS, 'Server-Timing': timing } });
 };
 
 export const config: Config = { path: '/api/*' };

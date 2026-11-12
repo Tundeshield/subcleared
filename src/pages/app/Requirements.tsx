@@ -202,7 +202,7 @@ function HistoryDialog({ req, onClose }: { req: any; onClose: () => void }) {
   const { data } = useApi<any>('requirements.history', { requirementId: req.id });
   return (
     <Dialog open onClose={onClose} title={`${req.name}: version history`} width="max-w-2xl">
-      {!data ? <Spinner /> : <ol className="border-t border-line">{data.versions.map((v: any) => (
+      {!data ? <Skeleton rows={3} /> : <ol className="border-t border-line">{data.versions.map((v: any) => (
         <li key={v.version} className="py-4 border-b border-line">
           <div className="flex justify-between gap-3"><span className="font-medium">Version {v.version}</span><span className="text-xs text-faint">{formatDateTime(v.updatedAt)}{v.changedBy ? ` · ${v.changedBy}` : ''}</span></div>
           <div className="text-sm text-muted mt-1">{v.defaultMandatory ? 'Mandatory' : 'Optional'} · {v.expiryRequired ? 'expiry required' : 'no expiry'} · {v.reviewRequired ? 'review required' : 'accepted automatically'}{v.active ? '' : ' · inactive'}</div>

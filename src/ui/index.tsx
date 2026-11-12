@@ -188,6 +188,15 @@ export function Spinner({ className = 'w-4 h-4' }: { className?: string }) {
 export function Skeleton({ rows = 5 }: { rows?: number }) {
   return <div className="py-4 space-y-4" aria-busy="true" aria-label="Loading">{Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton h-4" style={{ width: `${88 - (i % 3) * 16}%` }} />)}</div>;
 }
+/** The one loading indicator for a whole area: centred in the space it fills, with an optional short label. */
+export function LoadingBlock({ label, className = 'min-h-[50vh]' }: { label?: string; className?: string }) {
+  return (
+    <div className={cx('w-full flex flex-col items-center justify-center gap-3 text-muted text-center', className)} aria-busy="true">
+      <Spinner className="w-6 h-6" />
+      {label && <p>{label}</p>}
+    </div>
+  );
+}
 export function PageLoading() {
   return <div className="space-y-6"><div className="skeleton h-8 w-72" /><div className="skeleton h-4 w-96" /><Skeleton rows={8} /></div>;
 }

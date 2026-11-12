@@ -12,6 +12,13 @@
   # The extraction test set travels with the functions so accuracy can be measured against the production model.
   included_files = ["tests/fixtures/certificates/**"]
 
+# A missing build file must be a 404, not the app's HTML (which the browser would
+# otherwise try to run as JavaScript and cache for a year under /assets/*).
+[[redirects]]
+  from = "/assets/*"
+  to = "/404.html"
+  status = 404
+
 # SPA routing (API routes are declared in each function's config.path)
 [[redirects]]
   from = "/*"

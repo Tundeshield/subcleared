@@ -6,7 +6,7 @@ import { useParams } from 'react-router-dom';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import { api } from '../../lib/api';
 import { ACCEPT, precheck, uploadDocument } from '../../lib/upload';
-import { cx, Field, FormError, Glyph, toneText, Icon, Logo, Progress, Spinner, Tabs } from '../../ui';
+import { cx, Field, FormError, Glyph, toneText, Icon, LoadingBlock, Logo, Progress, Spinner, Tabs } from '../../ui';
 
 type Phase = { k: 'opening' } | { k: 'code'; hint: string; org: string; devCode?: string } | { k: 'ready' } | { k: 'error'; title: string; message: string };
 
@@ -39,7 +39,7 @@ export default function Portal() {
   }, [token, key, load]); // eslint-disable-line
   useEffect(() => { if (session) load(session); else open(); }, []); // eslint-disable-line
 
-  if (phase.k === 'opening' || (phase.k === 'ready' && !state)) return <Shell><div className="py-24 text-muted flex flex-col items-start gap-3"><Spinner className="w-5 h-5" /><p>Opening your secure link…</p></div></Shell>;
+  if (phase.k === 'opening' || (phase.k === 'ready' && !state)) return <Shell><LoadingBlock label="Opening your secure link…" className="min-h-[calc(100vh-3.5rem)] pb-14" /></Shell>;
   if (phase.k === 'error') return <Shell><div className="py-16"><Glyph tone="blocked" className="w-6 h-6" /><h1 className="text-2xl font-medium mt-4">{phase.title}</h1><p className="text-muted mt-3 leading-relaxed">{phase.message}</p><p className="text-sm text-faint mt-8 leading-relaxed">For security, links are personal, time-limited and can be withdrawn. Contact the company that sent it if you still need to submit documents.</p></div></Shell>;
   if (phase.k === 'code') return <Shell><CodeStep phase={phase} onSubmit={(c) => open(c)} onResend={() => open()} /></Shell>;
 

@@ -5,7 +5,7 @@ import { money } from '../../domain/locale';
 import { METADATA_FIELDS, VALUE_FIELDS } from '../../domain/library';
 import { api, useApi, useMutation } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Empty, ErrorState, FormError, humanize, KeyValue, Menu, MoreButton, PageHeader, PageLoading, SampleTag, Spinner, useToast, VerificationLabel } from '../../ui';
+import { Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Empty, ErrorState, FormError, humanize, KeyValue, Menu, MoreButton, PageHeader, PageLoading, SampleTag, Skeleton, Spinner, useToast, VerificationLabel } from '../../ui';
 import { openFile, UploadDialog } from './shared';
 
 export function FilePreview({ versionId, mimeType, fetcher, className }: { versionId: string; mimeType: string; fetcher?: () => Promise<{ url: string }>; className?: string }) {
@@ -122,7 +122,7 @@ function ProjectsDialog({ doc, subId, onClose }: { doc: any; subId: string; onCl
   const toast = useToast();
   return (
     <Dialog open onClose={onClose} title="Associated projects" description="By default a document counts for every project that needs it. Restrict it when the evidence is site-specific, such as a method statement." footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button><button className="btn-primary" disabled={busy} onClick={async () => { await run({ documentId: doc.id, projectIds: sel }); toast('Saved'); onClose(); }}>{busy && <Spinner />}Save</button></>}>
-      {!sub.data ? <Spinner /> : <div className="space-y-3">
+      {!sub.data ? <Skeleton rows={3} /> : <div className="space-y-3">
         <Checkbox checked={sel.length === 0} onChange={(v) => v && setSel([])} label="Every project that requires it" />
         {sub.data.projects.map((p: any) => <Checkbox key={p.id} checked={sel.includes(p.id)} onChange={(v) => setSel(v ? [...sel, p.id] : sel.filter((x) => x !== p.id))} label={`Only ${p.name}`} />)}
       </div>}

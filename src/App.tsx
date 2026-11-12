@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useSession } from './lib/session';
 import AppLayout from './pages/app/AppLayout';
@@ -6,31 +6,33 @@ import { AcceptInvite, AuthAction, ForgotPassword, Login, Onboarding, Signup, Ve
 import Landing from './pages/public/Landing';
 import Pricing from './pages/public/Pricing';
 import Design from './pages/public/Design';
-import { PageLoading, Spinner } from './ui';
+import { LoadingBlock, PageLoading } from './ui';
+import { ErrorBoundary } from './ui/ErrorBoundary';
+import { lazyPage } from './lib/lazyPage';
 
-const Overview = lazy(() => import('./pages/app/Overview'));
-const Projects = lazy(() => import('./pages/app/Projects'));
-const ProjectDetail = lazy(() => import('./pages/app/ProjectDetail'));
-const Subcontractors = lazy(() => import('./pages/app/Subcontractors'));
-const SubDetail = lazy(() => import('./pages/app/SubDetail'));
-const Requirements = lazy(() => import('./pages/app/Requirements'));
-const Documents = lazy(() => import('./pages/app/Documents'));
-const DocumentDetail = lazy(() => import('./pages/app/DocumentDetail'));
-const Reviews = lazy(() => import('./pages/app/Reviews'));
-const Inbox = lazy(() => import('./pages/app/Inbox'));
-const ReviewDetail = lazy(() => import('./pages/app/ReviewDetail'));
-const Renewals = lazy(() => import('./pages/app/Renewals'));
-const Compliance = lazy(() => import('./pages/app/Compliance'));
-const Reports = lazy(() => import('./pages/app/Reports'));
-const Notifications = lazy(() => import('./pages/app/Notifications'));
-const Settings = lazy(() => import('./pages/app/Settings'));
-const Team = lazy(() => import('./pages/app/Team'));
-const Billing = lazy(() => import('./pages/app/Billing'));
-const Portal = lazy(() => import('./pages/portal/Portal'));
-const DevMailbox = lazy(() => import('./pages/public/DevMailbox'));
+const Overview = lazyPage(() => import('./pages/app/Overview'));
+const Projects = lazyPage(() => import('./pages/app/Projects'));
+const ProjectDetail = lazyPage(() => import('./pages/app/ProjectDetail'));
+const Subcontractors = lazyPage(() => import('./pages/app/Subcontractors'));
+const SubDetail = lazyPage(() => import('./pages/app/SubDetail'));
+const Requirements = lazyPage(() => import('./pages/app/Requirements'));
+const Documents = lazyPage(() => import('./pages/app/Documents'));
+const DocumentDetail = lazyPage(() => import('./pages/app/DocumentDetail'));
+const Reviews = lazyPage(() => import('./pages/app/Reviews'));
+const Inbox = lazyPage(() => import('./pages/app/Inbox'));
+const ReviewDetail = lazyPage(() => import('./pages/app/ReviewDetail'));
+const Renewals = lazyPage(() => import('./pages/app/Renewals'));
+const Compliance = lazyPage(() => import('./pages/app/Compliance'));
+const Reports = lazyPage(() => import('./pages/app/Reports'));
+const Notifications = lazyPage(() => import('./pages/app/Notifications'));
+const Settings = lazyPage(() => import('./pages/app/Settings'));
+const Team = lazyPage(() => import('./pages/app/Team'));
+const Billing = lazyPage(() => import('./pages/app/Billing'));
+const Portal = lazyPage(() => import('./pages/portal/Portal'));
+const DevMailbox = lazyPage(() => import('./pages/public/DevMailbox'));
 
 function FullScreenLoading() {
-  return <div className="min-h-screen grid place-items-center text-muted"><Spinner className="w-6 h-6" /></div>;
+  return <LoadingBlock className="min-h-screen" />;
 }
 
 function RequireOrg({ children }: { children: ReactNode }) {
@@ -46,6 +48,7 @@ function RequireOrg({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
+    <ErrorBoundary full>
     <Suspense fallback={<FullScreenLoading />}>
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -88,10 +91,15 @@ export default function App() {
         <Route path="*" element={<div className="min-h-screen grid place-items-center px-6"><div><h1 className="text-2xl font-medium">Page not found</h1><p className="text-muted mt-2">That address doesn't match anything in SubCleared.</p><a href="/" className="btn-secondary mt-6">Go to the home page</a></div></div>} />
       </Routes>
     </Suspense>
+    </ErrorBoundary>
   );
 }
 
-function S({ children }: { children: ReactNode }) { return <Suspense fallback={<PageLoading />}>{children}</Suspense>; }
+/** Each page has its own error boundary, reset when the address changes, so one failure doesn't take down the layout. */
+function S({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  return <ErrorBoundary key={pathname}><Suspense fallback={<PageLoading />}>{children}</Suspense></ErrorBoundary>;
+}
 
 /** Old addresses (in past emails, Stripe settings and bookmarks) keep working, query string included. */
 function KeepQuery({ to }: { to: string }) {

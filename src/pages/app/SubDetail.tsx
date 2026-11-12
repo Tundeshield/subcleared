@@ -5,10 +5,7 @@ import { formatDate, formatDateTime } from '../../domain/dates';
 import type { RequirementStatus } from '../../domain/types';
 import { useApi, useMutation } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import {
-  Callout, Confirm, cx, Dialog, DocStatus, Empty, ErrorState, Field, FormError, humanize, KeyValue, Menu, MoreButton, PageHeader, PageLoading, ReadinessBadge,
-  SampleTag, Spinner, StatusText, Tabs, useToast, VerificationLabel,
-} from '../../ui';
+import { Callout, Confirm, cx, Dialog, DocStatus, Empty, ErrorState, Field, FormError, humanize, KeyValue, Menu, MoreButton, PageHeader, PageLoading, ReadinessBadge, SampleTag, Skeleton, Spinner, StatusText, Tabs, useToast, VerificationLabel } from '../../ui';
 import { activityLine, openFile, RequestDialog, UploadDialog } from './shared';
 import { SubDrawer } from './Subcontractors';
 
@@ -132,7 +129,7 @@ function HistoryDialog({ subId, projectId, projectName, onClose }: { subId: stri
   const [open, setOpen] = useState<string | null>(null);
   return (
     <Dialog open onClose={onClose} title="Compliance history" description={`${projectName} · each change in readiness, with the rule versions that produced it`} width="max-w-3xl">
-      {!data ? <Spinner /> : data.items.length === 0 ? <Empty title="No evaluations yet" /> : (
+      {!data ? <Skeleton rows={3} /> : data.items.length === 0 ? <Empty title="No evaluations yet" /> : (
         <ol className="border-t border-line">{data.items.map((e: any) => (
           <li key={e.id} className="border-b border-line">
             <button className="w-full text-left py-3 flex items-center gap-4" onClick={() => setOpen(open === e.id ? null : e.id)} aria-expanded={open === e.id}>
@@ -324,7 +321,7 @@ function ActivityTab({ data }: { data: any }) {
       </section>
       <section>
         <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Activity</h2>
-        {!audit.data ? <Spinner /> : audit.data.items.length === 0 ? <p className="text-muted mt-4">No activity yet.</p> : (
+        {!audit.data ? <Skeleton rows={3} /> : audit.data.items.length === 0 ? <p className="text-muted mt-4">No activity yet.</p> : (
           <ol className="max-h-[720px] overflow-y-auto">{audit.data.items.map((e: any) => (
             <li key={e.id} className="py-3 border-b border-line"><div>{activityLine(e)}</div>{e.after?.reason && <div className="text-sm text-muted">“{e.after.reason}”</div>}<div className="text-xs text-faint mt-0.5">{formatDateTime(e.at)}</div></li>
           ))}</ol>
