@@ -68,3 +68,66 @@ export async function checkJobHealth(svc: Services) {
   await svc.db.set('opsAlerts/jobs', { ...h, since: now.toISOString(), previous: was, emailed: delivered });
   return { ...h, alerted: true, emailed: delivered };
 }
+
+const median = (xs: number[]) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const pct = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 10 : null);
+const hours = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) / 3_600_000;
+
+/**
+ * The six internal effectiveness measures, computed from records SubCleared already keeps.
+ * Operator-only (served behind the jobs token); never shown to customers. Sample data is excluded.
+ */
+export async function operationalMetrics(svc: Pick<Services, 'db' | 'now'>) {
+  const now = svc.now().toISOString();
+  const orgs = await svc.db.list<any>('orgs');
+  const acc = { subToSubmitHours: [] as number[], requestsClosed: 0, requestsFulfilled: 0, manualResends: 0, fieldsCompared: 0, fieldsCorrected: 0,
+    emailedTotal: 0, emailedAuto: 0, reviewHours: [] as number[], stuck: [] as { org: string; what: string; id: string; since: string }[] };
+  const CONFIRMABLE = ['namedInsured', 'issuer', 'referenceNumber', 'issueDate', 'expiryDate'];
+  for (const org of orgs) {
+    const col = (n: string) => svc.db.list<any>(`orgs/${org.id}/${n}`);
+    const [subs, versions, requests, reviews, intake, emails] = await Promise.all([col('subcontractors'), col('versions'), col('requests'), col('reviews'), col('intake'), col('deliveryLogs').catch(() => [])]);
+    const real = new Set(subs.filter((s: any) => !s.sample).map((s: any) => s.id));
+    const submitted = versions.filter((v: any) => real.has(v.subcontractorId) && !['uploading', 'quarantined'].includes(v.reviewStatus));
+    for (const s of subs.filter((x: any) => real.has(x.id))) {
+      const first = submitted.filter((v: any) => v.subcontractorId === s.id).map((v: any) => v.uploadedAt).sort()[0];
+      if (first && s.createdAt) acc.subToSubmitHours.push(hours(s.createdAt, first));
+    }
+    for (const r of requests.filter((x: any) => real.has(x.subcontractorId) && x.type !== 'renewal')) {
+      if (r.status === 'cancelled') acc.manualResends++;
+      if (['fulfilled', 'expired', 'cancelled'].includes(r.status)) acc.requestsClosed++;
+      if (r.status === 'fulfilled') acc.requestsFulfilled++;
+    }
+    for (const v of versions.filter((x: any) => real.has(x.subcontractorId) && x.reviewStatus === 'approved' && x.extraction?.status === 'completed')) {
+      for (const k of CONFIRMABLE) {
+        const f = v.extraction.fields?.[k];
+        const confirmed = v.metadata?.[k];
+        if (!f || f.value === null || f.value === undefined || confirmed === undefined || confirmed === '') continue;
+        acc.fieldsCompared++;
+        if (String(f.value).trim().toLowerCase() !== String(confirmed).trim().toLowerCase()) acc.fieldsCorrected++;
+      }
+    }
+    for (const i of intake) {
+      if (!['attached', 'needs_match', 'dismissed', 'duplicate'].includes(i.status) || i.status === 'duplicate') continue;
+      acc.emailedTotal++;
+      if (i.status === 'attached' && i.attached?.automatic) acc.emailedAuto++;
+    }
+    const byVersion = new Map(versions.map((v: any) => [v.id, v]));
+    for (const r of reviews.filter((x: any) => x.decision !== 'comment')) {
+      const v: any = byVersion.get(r.versionId);
+      if (v && real.has(v.subcontractorId) && v.uploadedAt && r.at) acc.reviewHours.push(hours(v.uploadedAt, r.at));
+    }
+    const old = (t?: string) => !!t && hours(t, now) > 24;
+    for (const v of versions) if (['queued', 'processing', 'failed'].includes(v.extraction?.status) && old(v.uploadedAt)) acc.stuck.push({ org: org.id, what: `reading ${v.extraction.status}`, id: v.id, since: v.uploadedAt });
+    for (const i of intake) if (['processing', 'failed'].includes(i.status) && old(i.receivedAt)) acc.stuck.push({ org: org.id, what: `emailed document ${i.status}`, id: i.id, since: i.receivedAt });
+    for (const e of emails) if (e.status === 'failed' && old(e.updatedAt ?? e.createdAt)) acc.stuck.push({ org: org.id, what: 'email failed', id: e.id, since: e.updatedAt ?? e.createdAt });
+  }
+  return {
+    at: now, organisations: orgs.length,
+    medianHoursSubcontractorAddedToFirstSubmission: median(acc.subToSubmitHours), subcontractorsWithSubmission: acc.subToSubmitHours.length,
+    requestsFulfilledPercentOfClosed: pct(acc.requestsFulfilled, acc.requestsClosed), requestsClosed: acc.requestsClosed, manualResends: acc.manualResends,
+    extractedFieldsCorrectedPercent: pct(acc.fieldsCorrected, acc.fieldsCompared), fieldsCompared: acc.fieldsCompared,
+    emailedDocumentsMatchedAutomaticallyPercent: pct(acc.emailedAuto, acc.emailedTotal), emailedDocuments: acc.emailedTotal,
+    medianHoursSubmissionToDecision: median(acc.reviewHours), decisions: acc.reviewHours.length,
+    stuckOrFailedOlderThan24h: acc.stuck.length, stuck: acc.stuck.slice(0, 50),
+  };
+}

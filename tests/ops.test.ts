@@ -44,3 +44,27 @@ describe('operator monitoring', () => {
     expect(scrub('docs-0123456789abcdefghij0123456789abcdefghij')).toContain('[redacted]');
   });
 });
+
+describe('operational metrics', () => {
+  it('computes the six measures from existing records, ignoring sample data', async () => {
+    const { operationalMetrics } = await import('../server/ops');
+    const { svc } = svcAt('2026-11-12T12:00:00Z', []);
+    const db = svc.db;
+    await db.set('orgs/o1', { id: 'o1' });
+    await db.set('orgs/o1/subcontractors/s1', { id: 's1', createdAt: '2026-11-01T09:00:00Z' });
+    await db.set('orgs/o1/subcontractors/s2', { id: 's2', createdAt: '2026-11-01T09:00:00Z', sample: true });
+    await db.set('orgs/o1/versions/v1', { id: 'v1', subcontractorId: 's1', uploadedAt: '2026-11-03T09:00:00Z', reviewStatus: 'approved', metadata: { issuer: 'Hartwell', expiryDate: '2027-06-30' }, extraction: { status: 'completed', fields: { issuer: { value: 'Hartwell', confidence: 0.9 }, expiryDate: { value: '2027-06-03', confidence: 0.9 } } } });
+    await db.set('orgs/o1/versions/v2', { id: 'v2', subcontractorId: 's2', uploadedAt: '2026-11-01T10:00:00Z', reviewStatus: 'approved', metadata: {}, extraction: { status: 'completed', fields: {} } });
+    await db.set('orgs/o1/versions/v3', { id: 'v3', subcontractorId: 's1', uploadedAt: '2026-11-05T09:00:00Z', reviewStatus: 'awaiting_review', extraction: { status: 'failed' } });
+    await db.set('orgs/o1/requests/r1', { id: 'r1', subcontractorId: 's1', type: 'request', status: 'fulfilled' });
+    await db.set('orgs/o1/requests/r2', { id: 'r2', subcontractorId: 's1', type: 'request', status: 'cancelled' });
+    await db.set('orgs/o1/reviews/a', { id: 'a', versionId: 'v1', decision: 'approved', at: '2026-11-03T13:00:00Z' });
+    await db.set('orgs/o1/intake/i1', { id: 'i1', status: 'attached', attached: { automatic: true } });
+    await db.set('orgs/o1/intake/i2', { id: 'i2', status: 'needs_match' });
+    const m = await operationalMetrics(svc);
+    expect(m).toMatchObject({
+      medianHoursSubcontractorAddedToFirstSubmission: 48, requestsFulfilledPercentOfClosed: 50, manualResends: 1,
+      extractedFieldsCorrectedPercent: 50, emailedDocumentsMatchedAutomaticallyPercent: 50, medianHoursSubmissionToDecision: 4, stuckOrFailedOlderThan24h: 1,
+    });
+  });
+});
