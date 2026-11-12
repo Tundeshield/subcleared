@@ -266,6 +266,20 @@ describe('delivery problems, recovery and honest checks', () => {
     expect(h.mail.length).toBe(before); // no reminder to a dead address
   });
 
+  it('treats a spam complaint like a bounce: stop chasing and tell the requester', async () => {
+    const o = await setup();
+    h.svc.mail.send = async (m) => { h.mail.push(m); return { ok: true, id: `prov-${h.mail.length}` }; };
+    await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [o.subcontractorId] }, o.orgId);
+    const raw = JSON.stringify({ type: 'email.complained', created_at: h.svc.now().toISOString(), data: { email_id: `prov-${h.mail.length}`, to: ['rae@renew.example'] } });
+    const hd = signSvix(h.svc.env.resendWebhookSecret!, raw, 'msg_c1', h.svc.now());
+    expect((await handleInboundEmail(h.svc, raw, { get: (n: string) => (hd as any)[n] })).body).toMatchObject({ flagged: 'complained' });
+    const notes = await ok('owner1', 'notifications.list', {}, o.orgId);
+    expect(notes.items.length).toBeGreaterThan(0);
+    const before = h.mail.length;
+    h.clock.now = new Date('2026-06-19T15:00:00Z'); await runDailyJobs(h.svc);
+    expect(h.mail.length).toBe(before);
+  });
+
   it('retries a document reading that failed, at most three times in total', async () => {
     const o = await setup();
     let fail = true;
