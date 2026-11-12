@@ -30,6 +30,8 @@ export interface AssessInput {
   kind?: string;
   kindConfidence?: number;
   subcontractor: { legalName: string; tradingName?: string };
+  /** The contractor's own name, to check the certificate holder. */
+  orgName?: string;
   projects: { id: string; name: string; startDate?: string; endDate?: string }[];
   today: string;
   nowIso: string;
@@ -107,13 +109,25 @@ export function assess(i: AssessInput): Assessment {
         : { key: `crit:${c.key}`, label: describeCriterion(c), outcome: n >= Number(c.value ?? 0) ? 'pass' : 'fail', detail: `Shows ${formatAmount(n, c.currency)}.`, evidence: ev(x) });
     } else if (c.type === 'boolean') {
       const yes = x.value === true || x.value === 'true';
-      checks.push({ key: `crit:${c.key}`, label: describeCriterion(c), outcome: yes ? 'pass' : 'fail', detail: yes ? 'Shown on the document.' : 'Not shown on the document.', evidence: ev(x) });
+      // A certificate can tick "additional insured" or "waiver" without the policy actually carrying that endorsement.
+      const endorsementOnCertificate = yes && i.kind === 'insurance_certificate' && /additionalInsured|waiverOfSubrogation/.test(c.key);
+      checks.push(endorsementOnCertificate
+        ? { key: `crit:${c.key}`, label: describeCriterion(c), outcome: 'warn', detail: 'The certificate says so, but a certificate alone doesn’t prove the endorsement. Ask for the endorsement page if your contract relies on it.', evidence: ev(x) }
+        : { key: `crit:${c.key}`, label: describeCriterion(c), outcome: yes ? 'pass' : 'fail', detail: yes ? 'Shown on the document.' : 'Not shown on the document.', evidence: ev(x) });
     } else if (c.type === 'text_equals') {
       const ok = String(x.value).trim().toLowerCase() === String(c.value ?? '').trim().toLowerCase();
       checks.push({ key: `crit:${c.key}`, label: describeCriterion(c), outcome: ok ? 'pass' : 'fail', detail: `Shows “${x.value}”.`, evidence: ev(x) });
     } else {
       checks.push({ key: `crit:${c.key}`, label: describeCriterion(c), outcome: 'pass', detail: `Shows “${x.value}”.`, evidence: ev(x) });
     }
+  }
+
+  // 4b. Certificate holder: usually the contractor itself.
+  const holder = trusted('certificateHolder');
+  if (holder && i.orgName && i.kind === 'insurance_certificate') {
+    checks.push(namesMatch(String(holder.value), [i.orgName])
+      ? { key: 'holder', label: 'Issued to you', outcome: 'pass', detail: `Certificate holder is “${holder.value}”.`, evidence: ev(holder) }
+      : { key: 'holder', label: 'Issued to you', outcome: 'warn', detail: `Certificate holder is “${holder.value}”, not ${i.orgName}. Check whether your contract needs it issued to you.`, evidence: ev(holder) });
   }
 
   // 5. Anything critical for this kind of document that couldn't be read.

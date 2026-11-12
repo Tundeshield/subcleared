@@ -3,7 +3,7 @@ import type { DocumentRecord, DocumentRequest, DocumentVersion, Organisation, Po
 import { audit, bad, C, type Ctx, id, ids, need, notFound, oneOf, randomToken, sha256, str } from '../core';
 import { loadOrgData, recompute } from '../data';
 import type { Db } from '../db';
-import { sendEmail } from '../email';
+import { replyToFor, sendEmail } from '../email';
 import type { Services } from '../services';
 import { loadSub, visibleSubIds } from './subs';
 
@@ -66,6 +66,8 @@ export async function createRequest(ctx: Ctx, input: any) {
       subcontractorId: s.id, contactEmail: contact.email, requirementIds, projectIds, fullPortal: type === 'portal_access', days, requestId: rid,
       requireEmailCode: type === 'portal_access',
     });
+    // A person deliberately sending to this address again clears an earlier bounce, so chasing resumes.
+    await ctx.db.delete(C.doc(ctx.org.id, 'emailProblems', sha256(contact.email.toLowerCase()).slice(0, 32))).catch(() => undefined);
     const req: DocumentRequest = {
       id: rid, type, subcontractorId: s.id, contactId: contact.id, contactEmail: contact.email, contactName: contact.name, projectIds, requirementIds,
       message, dueDate, status: 'sent', linkId: link.linkId, createdBy: { uid: ctx.member.uid, name: ctx.member.name }, createdAt: ctx.svc.now().toISOString(),
@@ -74,7 +76,7 @@ export async function createRequest(ctx: Ctx, input: any) {
     await ctx.db.set(C.doc(ctx.org.id, 'requests', rid), req as any);
     const list = defs.map((d) => `• ${d!.name}`).join('\n');
     const log = await sendEmail(ctx, {
-      to: contact.email, template: `sub.${type}`, dedupeKey: `request:${rid}`, replyTo: ctx.member.email,
+      to: contact.email, template: `sub.${type}`, dedupeKey: `request:${rid}`, replyTo: replyToFor(ctx, ctx.member.email),
       subject: type === 'portal_access' ? `${ctx.org.name} invited you to its compliance portal` : type === 'renewal' ? `${ctx.org.name}: please send an updated document` : `${ctx.org.name} requests compliance documents`,
       heading: type === 'portal_access' ? `Manage your paperwork for ${ctx.org.name}` : `${ctx.org.name} needs documents from ${s.legalName}`,
       body: [
@@ -86,7 +88,7 @@ export async function createRequest(ctx: Ctx, input: any) {
         dueDate ? `Please submit by ${formatDate(dueDate)}.` : '',
         type === 'portal_access' ? '' : 'How to send them: open the link, choose each document and upload a PDF or a clear photo — from a phone is fine. You can see what has been accepted and replace anything that needs changing.',
         `No account is needed. This secure link is for ${contact.email} only and expires in ${days} days.`,
-        `Questions about what's needed? Reply to this email to reach ${ctx.member.name} at ${ctx.org.name}.`,
+        replyToFor(ctx)?.length && type !== 'portal_access' ? `You can also simply reply to this email with the documents attached. Questions go to ${ctx.member.name} at ${ctx.org.name}.` : `Questions about what's needed? Reply to this email to reach ${ctx.member.name} at ${ctx.org.name}.`,
       ].filter(Boolean).join('\n\n'),
       cta: { label: type === 'portal_access' ? 'Open the portal' : 'Upload documents', url: link.url },
     });
@@ -231,7 +233,7 @@ export async function requestForProject(ctx: Ctx, input: any) {
     try {
       const r = await createRequest(ctx, { subcontractorId: sid, type: 'request', contactIds: [contact.id], requirementIds: defs.map((d) => d.id), projectIds: [projectId], dueDate: input.dueDate, message: input.message });
       const failed = r.results.find((x: any) => x.emailStatus === 'failed');
-      results.push({ subcontractorId: sid, name: sub.legalName, status: failed ? 'failed' : 'sent', documents: defs.length, detail: failed ? `Link created but email not sent: ${failed.emailError}` : `Sent to ${contact.name}` });
+      results.push({ subcontractorId: sid, name: sub.legalName, status: failed ? 'failed' : 'sent', documents: defs.length, detail: failed ? failed.emailError : `Sent to ${contact.name}` });
     } catch (e: any) {
       results.push({ subcontractorId: sid, name: sub.legalName, status: 'failed', documents: defs.length, detail: e.message });
     }

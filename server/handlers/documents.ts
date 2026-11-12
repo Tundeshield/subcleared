@@ -303,7 +303,8 @@ export async function reviewQueue(ctx: Ctx) {
         subcontractorId: v.subcontractorId, subcontractor: subs.get(v.subcontractorId)?.legalName, title: docs.get(v.documentId)?.title,
         requirement: v.requirementId ? defs.get(v.requirementId)?.name : undefined, extraction: v.extraction.status,
         triage: v.assessment?.triage, check: v.assessment?.summary, viaEmail: !!v.intake,
-        lockedBy: lockFresh ? v.lock : null, status: v.reviewStatus, replacing: !!docs.get(v.documentId)?.approvedVersionId,
+        read: v.extraction.status === 'completed' ? { namedInsured: v.extraction.fields?.namedInsured?.value, expiryDate: v.extraction.fields?.expiryDate?.value, issuer: v.extraction.fields?.issuer?.value, referenceNumber: v.extraction.fields?.referenceNumber?.value } : undefined,
+        lockedBy: lockFresh && v.lock!.uid !== ctx.member.uid ? v.lock : null, status: v.reviewStatus, replacing: !!docs.get(v.documentId)?.approvedVersionId,
         ageHours: Math.round((now - new Date(v.uploadedAt).getTime()) / 3_600_000), projects: projectsFor(v),
       };
     }).sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt));
@@ -501,4 +502,43 @@ export async function recordVerification(ctx: Ctx, input: any) {
   await ctx.db.update(C.doc(ctx.org.id, 'versions', v.id), { verification: 'independently_verified' });
   await audit(ctx, { action: 'document.independently_verified', entity: { type: 'document', id: v.documentId, label: v.fileName }, after: rec, refs: [v.subcontractorId, v.id] });
   return { ok: true };
+}
+
+/**
+ * Approves several documents in one decision, but only ones where every
+ * automatic check passed (re-checked now, against the requirement as it
+ * stands) and every value comes from a confident reading. The reviewer sees
+ * each document's details before confirming; anything else is refused and
+ * stays in the queue for a one-by-one review.
+ */
+export async function confirmChecked(ctx: Ctx, input: any) {
+  need(ctx, 'documents.review');
+  const ids = Array.isArray(input.versionIds) ? input.versionIds.slice(0, 50) : [];
+  if (!ids.length) throw bad('Choose at least one document');
+  const { assessVersion } = await import('../ai');
+  const { TRUST } = await import('../../src/domain/assessment');
+  const results: { versionId: string; ok: boolean; reason?: string }[] = [];
+  for (const vid of ids) {
+    try {
+      const v = await visibleVersion(ctx, vid);
+      if (!['submitted', 'awaiting_review', 'under_review'].includes(v.reviewStatus)) { results.push({ versionId: vid, ok: false, reason: 'Already decided' }); continue; }
+      const a = await assessVersion(ctx.svc, ctx.org, v);
+      if (a?.triage !== 'looks_good') { results.push({ versionId: vid, ok: false, reason: 'Not every check passed; review it on its own' }); continue; }
+      const metadata: any = { values: {} };
+      for (const [k, f] of Object.entries(v.extraction.fields ?? {})) {
+        if (f.value === null || f.value === undefined || f.confidence < TRUST) continue;
+        if (METADATA_FIELDS.some((m) => m.key === k)) metadata[k] = String(f.value);
+        else if (VALUE_FIELDS.some((m) => m.key === k)) metadata.values[k] = f.value;
+      }
+      await decideReview(ctx, {
+        versionId: vid, decision: 'approve', revision: v.revision, metadata,
+        internalComment: 'Approved together with other documents after every automatic check passed.',
+        checklist: a.checks.map((c) => ({ key: c.key, label: c.label, passed: c.outcome === 'pass' ? true : c.outcome === 'fail' ? false : null })),
+      });
+      results.push({ versionId: vid, ok: true });
+    } catch (e: any) {
+      results.push({ versionId: vid, ok: false, reason: e.message });
+    }
+  }
+  return { results, approved: results.filter((r) => r.ok).length };
 }

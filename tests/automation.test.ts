@@ -149,7 +149,7 @@ describe('automatic chasing', () => {
     h.clock.now = new Date('2026-06-18T15:00:00Z'); await runDailyJobs(h.svc); await runDailyJobs(h.svc);
     expect(to('sam@slow.example')).toHaveLength(1);
     expect(to('sam@slow.example')[0].text).toMatch(/automatic reminder/i);
-    expect(to('sam@slow.example')[0].replyTo).toBe('owner1@acme.example');
+    expect(to('sam@slow.example')[0].replyTo).toEqual(['owner1@acme.example']);
     // Renew Co sends the document: its reminders stop.
     await upload(o.orgId, o.subcontractorId, o.gl, coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }));
     expect(to('rae@renew.example')).toHaveLength(1);
@@ -225,5 +225,104 @@ describe('email intake (Resend)', () => {
     const other = await ok('other', 'org.register', { orgName: 'Other Co', country: 'Ireland', timezone: 'Europe/Dublin' });
     expect((await ok('other', 'intake.list', { all: true }, other.orgId)).recent).toHaveLength(0);
     expect((await call('other', 'intake.resolve', { intakeId: q.items[0].id, subcontractorId: o.subcontractorId, requirementId: o.gl }, other.orgId)).status).toBe(404);
+  });
+});
+
+describe('delivery problems, recovery and honest checks', () => {
+  it('explains an unverified sender in plain words and records it for administrators', async () => {
+    const o = await setup();
+    h.svc.mail.send = async () => ({ ok: false, error: 'The subcleared.app domain is not verified. Please, add and verify your domain on https://resend.com/domains' });
+    const r = await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [o.subcontractorId] }, o.orgId);
+    expect(r.results[0].status).toBe('failed');
+    expect(r.results[0].detail).toMatch(/sending domain isn’t verified/);
+    const dash = await ok('owner1', 'dashboard', {}, o.orgId);
+    expect(dash.mailHealth).toMatchObject({ status: 'sender_unverified' });
+  });
+
+  it('stops chasing an address that bounced, tells the requester, and resumes after a deliberate resend', async () => {
+    const o = await setup();
+    h.svc.mail.send = async (m) => { h.mail.push(m); return { ok: true, id: `prov-${h.mail.length}` }; };
+    await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [o.subcontractorId] }, o.orgId);
+    const providerId = `prov-${h.mail.length}`;
+    const raw = JSON.stringify({ type: 'email.bounced', created_at: h.svc.now().toISOString(), data: { email_id: providerId, to: ['rae@renew.example'], bounce: { message: 'Mailbox does not exist' } } });
+    const hd = signSvix(h.svc.env.resendWebhookSecret!, raw, 'msg_b1', h.svc.now());
+    expect((await handleInboundEmail(h.svc, raw, { get: (n: string) => (hd as any)[n] })).body).toMatchObject({ flagged: 'bounced' });
+    const notes = await ok('owner1', 'notifications.list', {}, o.orgId);
+    expect(notes.items.some((n: any) => /bounced/.test(n.title))).toBe(true);
+    const dash = await ok('owner1', 'dashboard', {}, o.orgId);
+    expect(dash.needs.some((n: any) => /bounced/.test(n.issue))).toBe(true);
+    const before = h.mail.length;
+    h.clock.now = new Date('2026-06-19T15:00:00Z'); await runDailyJobs(h.svc);
+    expect(h.mail.length).toBe(before); // no reminder to a dead address
+  });
+
+  it('retries a document reading that failed, at most three times in total', async () => {
+    const o = await setup();
+    let fail = true;
+    const real = h.svc.ai!.call;
+    h.svc.ai = { name: 'flaky', call: async (c) => { if (fail) throw new Error('Provider overloaded'); return real(c); } };
+    const v = await upload(o.orgId, o.subcontractorId, o.gl, coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }));
+    expect((await ok('owner1', 'reviews.get', { versionId: v }, o.orgId)).version.extraction.status).toBe('failed');
+    fail = false;
+    await runDailyJobs(h.svc);
+    const r = await ok('owner1', 'reviews.get', { versionId: v }, o.orgId);
+    expect(r.version.extraction.status).toBe('completed');
+    expect(r.assessment.triage).toBe('looks_good');
+  });
+
+  it('recovers an emailed message whose processing failed, without filing anything twice', async () => {
+    const o = await setup();
+    await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [o.subcontractorId] }, o.orgId);
+    const { address } = await ok('owner1', 'intake.setup', {}, o.orgId);
+    const orig = h.inbound.listAttachments.bind(h.inbound);
+    let down = true;
+    h.inbound.listAttachments = async (id: string) => { if (down) throw new Error('Resend 503'); return orig(id); };
+    await simulateResendDelivery(h.svc, h.inbound, { from: 'rae@renew.example', to: [address], subject: 'Cert', attachments: [{ filename: 'cert.pdf', contentType: 'application/pdf', bytes: coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }) }] });
+    expect((await ok('owner1', 'intake.list', { all: true }, o.orgId)).failed).toHaveLength(1);
+    down = false;
+    await runDailyJobs(h.svc); await runDailyJobs(h.svc);
+    const l = await ok('owner1', 'intake.list', { all: true }, o.orgId);
+    expect(l.failed).toHaveLength(0);
+    expect(l.recent.filter((x: any) => x.status === 'attached')).toHaveLength(1);
+  });
+
+  it('records unsupported files and emails with nothing to file instead of dropping them', async () => {
+    const o = await setup();
+    const { address } = await ok('owner1', 'intake.setup', {}, o.orgId);
+    await simulateResendDelivery(h.svc, h.inbound, { from: 'rae@renew.example', to: [address], subject: 'Docs', attachments: [{ filename: 'insurance.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', bytes: new Uint8Array(5000) }] });
+    await simulateResendDelivery(h.svc, h.inbound, { from: 'rae@renew.example', to: [address], subject: 'Question about the request', text: 'Do you need the PL or EL certificate?', attachments: [] });
+    const l = await ok('owner1', 'intake.list', { all: true }, o.orgId);
+    expect(l.recent.find((x: any) => x.fileName === 'insurance.docx')).toMatchObject({ status: 'rejected' });
+    expect(l.empty[0]).toMatchObject({ subject: 'Question about the request' });
+  });
+
+  it('does not let a certificate stand in for an endorsement, and flags the wrong certificate holder', () => {
+    const a = assess({
+      requirement: { name: 'Additional insured endorsement', category: 'Insurance', documentType: 'Endorsement', expiryRequired: true, version: 1, criteria: [{ key: 'additionalInsured', label: 'Additional insured status', type: 'boolean', value: true }] },
+      fields: { namedInsured: { value: 'Renew Co Ltd', confidence: 0.95 }, expiryDate: { value: '2027-06-30', confidence: 0.95 }, additionalInsured: { value: true, confidence: 0.9 }, certificateHolder: { value: 'Someone Else Ltd', confidence: 0.9 } },
+      kind: 'insurance_certificate', kindConfidence: 0.95, subcontractor: { legalName: 'Renew Co Ltd' }, orgName: 'Acme Build',
+      projects: [], today: '2026-06-15', nowIso: '2026-06-15T00:00:00Z',
+    });
+    expect(a.checks.find((c) => c.key === 'crit:additionalInsured')).toMatchObject({ outcome: 'warn' });
+    expect(a.checks.find((c) => c.key === 'crit:additionalInsured')!.detail).toMatch(/endorsement/);
+    expect(a.checks.find((c) => c.key === 'holder')).toMatchObject({ outcome: 'warn' });
+  });
+});
+
+describe('bulk confirmation', () => {
+  it('approves only documents whose checks all pass right now', async () => {
+    const o = await setup();
+    const good = await upload(o.orgId, o.subcontractorId, o.gl, coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }));
+    const { subcontractorId: s2 } = await ok('owner1', 'subs.create', { legalName: 'Other Trades Ltd', trade: 'General', contacts: [{ name: 'O', email: 'o@other.example' }] }, o.orgId);
+    await ok('owner1', 'projects.assign', { projectId: o.projectId, subcontractorIds: [s2] }, o.orgId);
+    const wrong = await upload(o.orgId, s2, o.gl, coi({ insured: 'Somebody Else Ltd', expiry: '2027-06-30' }));
+    const r = await ok('owner1', 'reviews.confirmChecked', { versionIds: [good, wrong] }, o.orgId);
+    expect(r.approved).toBe(1);
+    expect(r.results.find((x: any) => x.versionId === wrong)).toMatchObject({ ok: false });
+    const g = await ok('owner1', 'reviews.get', { versionId: good }, o.orgId);
+    expect(g.version.reviewStatus).toBe('approved');
+    expect(g.version.metadata).toMatchObject({ expiryDate: '2027-06-30', namedInsured: 'Renew Co Ltd' });
+    const p = await ok('owner1', 'projects.get', { projectId: o.projectId }, o.orgId);
+    expect(p.subcontractors.find((s: any) => s.id === o.subcontractorId).readiness).toBe('ready');
   });
 });

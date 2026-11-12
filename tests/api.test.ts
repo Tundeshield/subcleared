@@ -350,7 +350,7 @@ describe('renewals and reminders', () => {
     h.svc.mail.send = async () => ({ ok: false, error: 'SMTP down' });
     await runDailyJobs(h.svc);
     const logs = await ok('owner1', 'deliveryLogs.list', {}, o.orgId);
-    expect(logs.items.some((l: any) => l.status === 'failed' && l.error === 'SMTP down')).toBe(true);
+    expect(logs.items.some((l: any) => l.status === 'failed' && l.detail === 'SMTP down' && /SMTP down/.test(l.error))).toBe(true);
     h.svc.mail.send = orig;
     const before = h.mail.length;
     await runDailyJobs(h.svc);

@@ -31,7 +31,7 @@ export interface EmailInput {
   dedupeKey?: string;
   footer?: string;
   /** Where replies go — the person who sent the request, so subcontractors can ask questions. */
-  replyTo?: string;
+  replyTo?: string | string[];
 }
 
 /**
@@ -39,7 +39,26 @@ export interface EmailInput {
  * was already sent is never sent again (scheduler retries are safe); failed
  * deliveries are retried and their attempt count increments.
  */
-export async function sendEmail(ctx: { db: Db; svc: Services; org: { id: string; name: string } }, input: EmailInput): Promise<DeliveryLog> {
+/**
+ * Turns provider errors into something a customer can act on. The raw text is
+ * kept in `detail` for the delivery log.
+ */
+export function explainMailError(raw?: string): { message: string; kind: 'sender_unverified' | 'testing_only' | 'not_configured' | 'other' } {
+  const e = raw ?? '';
+  if (/domain is not verified|verify your domain|not verified/i.test(e)) return { kind: 'sender_unverified', message: 'Email can’t be sent yet: the sending domain isn’t verified with the email provider. Share the link below instead. An administrator can see how to fix this in Settings → Email delivery.' };
+  if (/only send testing emails|testing emails to your own/i.test(e)) return { kind: 'testing_only', message: 'Email is in test mode and can only go to the account owner. Share the link below instead. An administrator can fix this in Settings → Email delivery.' };
+  if (/not configured|RESEND_API_KEY/i.test(e)) return { kind: 'not_configured', message: 'Email isn’t set up for this workspace yet. Share the link below instead.' };
+  return { kind: 'other', message: e ? `The email couldn’t be sent (${e}). Share the link below instead.` : 'The email couldn’t be sent. Share the link below instead.' };
+}
+
+/** Where replies go: the person who asked, plus the organisation's intake address so attached documents are filed. */
+export function replyToFor(ctx: { svc: Services; org: { settings?: { intakeKey?: string } } }, requesterEmail?: string): string[] | undefined {
+  const intake = ctx.org.settings?.intakeKey && ctx.svc.env.inboundDomain && ctx.svc.inbound ? `docs-${ctx.org.settings.intakeKey}@${ctx.svc.env.inboundDomain}` : undefined;
+  const list = [requesterEmail, intake].filter(Boolean) as string[];
+  return list.length ? list : undefined;
+}
+
+export async function sendEmail(ctx: { db: Db; svc: Services; org: { id: string; name: string; settings?: any } }, input: EmailInput): Promise<DeliveryLog> {
   const now = ctx.svc.now().toISOString();
   const logId = input.dedupeKey ? sha256(`email:${input.dedupeKey}`).slice(0, 24) : ctx.db.newId();
   const path = C.doc(ctx.org.id, 'deliveryLogs', logId);
@@ -52,13 +71,20 @@ export async function sendEmail(ctx: { db: Db; svc: Services; org: { id: string;
   await ctx.db.set(path, log as any);
   const { html, text } = renderEmail({ orgName: ctx.org.name, heading: input.heading, body: input.body, cta: input.cta, footer: input.footer });
   const res = await ctx.svc.mail.send({ to: input.to, subject: input.subject, html, text, replyTo: input.replyTo });
+  const explained = res.ok ? null : explainMailError(res.error);
   const final: DeliveryLog = {
     ...log,
     status: res.ok ? (res.dev ? 'dev_logged' : 'sent') : 'failed',
     providerId: res.id,
-    error: res.ok ? undefined : res.error,
+    error: res.ok ? undefined : explained!.message,
+    detail: res.ok ? undefined : res.error?.slice(0, 300),
     updatedAt: ctx.svc.now().toISOString(),
-  };
+  } as DeliveryLog;
   await ctx.db.set(path, final as any);
+  // Lets bounce and complaint events find this message later.
+  if (res.ok && res.id) await ctx.db.set(`emailIndex/${res.id.replace(/\//g, '_')}`, { orgId: ctx.org.id, logId, to: input.to, at: final.updatedAt }).catch(() => undefined);
+  // One health record per organisation, so administrators see a broken sender immediately.
+  const health = res.ok ? { status: 'ok', at: final.updatedAt } : { status: explained!.kind, at: final.updatedAt, detail: res.error?.slice(0, 300) };
+  await ctx.db.set(C.doc(ctx.org.id, 'health', 'mail'), health).catch(() => undefined);
   return final;
 }

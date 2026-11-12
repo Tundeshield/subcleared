@@ -34,7 +34,7 @@ const ORG_ACTIONS: Record<string, OrgHandler> = {
   'requirements.update': reqs.updateRequirement, 'templates.save': reqs.saveTemplate, 'overrides.set': reqs.setOverride, 'overrides.revoke': reqs.revokeOverride,
   'uploads.create': docs.createUpload, 'uploads.finalize': docs.finalizeUpload, 'files.url': docs.fileUrl, 'documents.list': docs.listDocuments,
   'documents.get': docs.getDocument, 'documents.update': docs.updateDocument, 'reviews.queue': docs.reviewQueue, 'reviews.get': docs.getReview,
-  'reviews.claim': docs.claimReview, 'reviews.saveMetadata': docs.saveMetadata, 'reviews.decide': docs.decideReview, 'reviews.verify': docs.recordVerification,
+  'reviews.claim': docs.claimReview, 'reviews.saveMetadata': docs.saveMetadata, 'reviews.decide': docs.decideReview, 'reviews.confirmChecked': docs.confirmChecked, 'reviews.verify': docs.recordVerification,
   'requests.create': requests.createRequest, 'requests.forProject': requests.requestForProject, 'requests.list': requests.listRequests, 'requests.resend': requests.resendRequest, 'links.revoke': requests.revokeLink,
   'renewals.list': requests.listRenewals, 'renewals.request': requests.requestRenewals,
   'reports.run': reports.runReport, 'compliance.overview': reports.complianceOverview, 'compliance.history': reports.evaluationHistory,

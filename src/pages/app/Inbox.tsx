@@ -23,6 +23,20 @@ export default function Inbox() {
           <ul>{waiting.map((i: any) => <Item key={i.id} item={i} data={data} onDone={() => { reload(); dataChanged(); }} />)}</ul>
         )}
       </section>
+      {data.failed?.length > 0 && (
+        <section className="mt-8"><Callout tone="warn" title={`${data.failed.length} email${data.failed.length === 1 ? '' : 's'} couldn’t be processed yet`}>
+          {data.failed.map((f: any) => <div key={f.id}>From {f.from}{f.subject ? ` (“${f.subject}”)` : ''} — {f.attempts >= 3 ? 'tried three times; ask the sender to upload through their link' : 'SubCleared will try again automatically within the hour'}.</div>)}
+        </Callout></section>
+      )}
+      {data.empty?.length > 0 && (
+        <section className="mt-12">
+          <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Emails with nothing to file</h2>
+          <p className="text-sm text-muted mt-3">These arrived without a PDF or image attached. Replies to requests also reach the person who sent the request.</p>
+          <ul>{data.empty.map((m: any) => (
+            <li key={m.id} className="py-3 border-b border-line text-sm"><div className="font-medium">{m.subject || '(no subject)'}</div><div className="text-muted">From {m.fromName ? `${m.fromName} <${m.from}>` : m.from} · {formatDateTime(m.receivedAt)}</div>{m.text && <div className="text-faint mt-1 line-clamp-2">{m.text}</div>}</li>
+          ))}</ul>
+        </section>
+      )}
       {data.recent.length > 0 && (
         <section className="mt-12">
           <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Recently handled</h2>

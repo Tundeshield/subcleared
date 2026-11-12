@@ -181,7 +181,7 @@ export async function assessVersion(svc: Services, org: Organisation, v: Documen
   const ps = projects.filter((p) => live.has(p.id) && needing.has(p.id) && !['archived', 'completed'].includes(p.status));
   return assess({
     requirement: def, fields: v.extraction.fields ?? {}, kind: v.extraction.kind, kindConfidence: v.extraction.kindConfidence,
-    subcontractor: sub, projects: ps.map((p) => ({ id: p.id, name: p.name, startDate: p.startDate, endDate: p.endDate })),
+    subcontractor: sub, orgName: org.name, projects: ps.map((p) => ({ id: p.id, name: p.name, startDate: p.startDate, endDate: p.endDate })),
     today: todayIn(org.settings.timezone, svc.now()), nowIso: svc.now().toISOString(),
   });
 }

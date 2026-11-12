@@ -53,6 +53,7 @@ export async function me(svc: Services, db: Db, identity: Identity, orgId?: stri
     plans: svc.env.plans,
     billingConfigured: !!svc.env.stripeSecret,
     emailConfigured: svc.mail.configured,
+    emailFrom: svc.mail.from,
     extractionConfigured: !!svc.ai,
     intakeConfigured: !!svc.env.resendWebhookSecret && !!svc.inbound && !!svc.env.inboundDomain,
     mode: svc.mode,
@@ -314,9 +315,11 @@ export async function updateNotificationPrefs(ctx: Ctx, input: any) {
 }
 
 export async function deliveryLogs(ctx: Ctx) {
+  const health = await ctx.db.get<any>(C.doc(ctx.org.id, 'health', 'mail'));
   need(ctx, 'settings.manage');
   const logs = await ctx.db.list<any>(C.col(ctx.org.id, 'deliveryLogs'));
-  return { items: logs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 300) };
+  const problems = await ctx.db.list<any>(C.col(ctx.org.id, 'emailProblems'));
+  return { items: logs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 300), health, problems, from: ctx.svc.mail.from, configured: ctx.svc.mail.configured };
 }
 
 // --- Audit -----------------------------------------------------------------------
@@ -441,6 +444,11 @@ export async function dashboard(ctx: Ctx, input: any) {
   type Need = { tone: 'progress' | 'blocked' | 'attention'; item: string; itemLink: string; context?: string; issue: string; action: string; link: string; rank: number };
   const needs: Need[] = [];
   const pname = (id: string) => projects.find((p) => p.id === id)?.name;
+  // Addresses that bounced or complained: chasing has stopped, so a person must act.
+  for (const p of await ctx.db.list<any>(C.col(ctx.org.id, 'emailProblems'))) {
+    const s = data.subs.find((x) => x.contacts.some((c) => c.email.toLowerCase() === p.email));
+    needs.push({ tone: 'blocked', item: s?.legalName ?? p.email, itemLink: s ? `/app/subcontractors/${s.id}` : '/app/settings/delivery', context: p.email, issue: p.kind === 'bounced' ? 'Email to this address bounced — reminders have stopped' : 'This address marked our email as spam — reminders have stopped', action: 'Fix contact', link: s ? `/app/subcontractors/${s.id}` : '/app/settings/delivery', rank: 0 });
+  }
   // Emailed documents that couldn't be matched with confidence.
   const inbox = can(ctx, 'documents.upload') ? (await ctx.db.list<any>(C.col(ctx.org.id, 'intake'), [['status', '==', 'needs_match']])) : [];
   for (const i of inbox.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt))) {
@@ -467,7 +475,7 @@ export async function dashboard(ctx: Ctx, input: any) {
     const first = probs[0] ?? vs.find((v) => triage(v) !== 'looks_good') ?? vs[0];
     needs.push({
       tone: probs.length ? 'blocked' : 'progress', item: subName.get(sid) ?? 'Subcontractor', itemLink: `/app/subcontractors/${sid}`, issue,
-      action: !probs.length && !other ? (vs.length === 1 ? 'Confirm' : 'Confirm all') : 'Review', link: `/app/reviews/${first.id}`, rank: probs.length ? 0 : 1,
+      action: !probs.length && !other ? (vs.length === 1 ? 'Confirm' : 'Confirm all') : 'Review', link: !probs.length && !other && vs.length > 1 ? '/app/reviews?confirm=1' : `/app/reviews/${first.id}`, rank: probs.length ? 0 : 1,
     });
   }
   const changes = new Map<string, { r: typeof rows[number]; names: string[] }>();
@@ -505,6 +513,7 @@ export async function dashboard(ctx: Ctx, input: any) {
     },
     review: { total: pending.length, looksGood: pending.filter((v) => triage(v) === 'looks_good').length, toCheck: pending.filter((v) => ['check', 'not_read'].includes(triage(v))).length, problems: pending.filter((v) => triage(v) === 'problem').length },
     inbox: inbox.length, readingOn: !!ctx.svc.ai,
+    mailHealth: can(ctx, 'settings.manage') ? await ctx.db.get<any>(C.doc(ctx.org.id, 'health', 'mail')) : null,
     attention, actions: actions.slice(0, 8), actionsTotal: actions.length, needs: needs.slice(0, 12), needsTotal: needs.length,
     projects: projectSummary,
     upcoming: inForce.filter((x) => x.days <= Math.max(Number(input?.days) || 60, soon)).sort((a, b) => a.days - b.days).slice(0, 8).map((x) => ({

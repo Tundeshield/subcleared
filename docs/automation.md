@@ -79,7 +79,7 @@ Because attachments are fetched separately, large files never pass through a web
 ### Setting up Resend receiving
 
 1. In Resend, open **Emails → Receiving**. Either use the `<id>.resend.app` domain Resend gives you, or add a **subdomain** (for example `in.subcleared.app`) and point its MX record at Resend as shown there. Don't use the root domain: all its mail would go to Resend.
-2. In Resend, open **Webhooks → Add webhook**. Use the URL `https://subcleared.netlify.app/webhooks/inbound-email` (or your custom domain) and select the event `email.received`. Copy the signing secret (`whsec_…`).
+2. In Resend, open **Webhooks → Add webhook**. Use the URL `https://subcleared.netlify.app/webhooks/inbound-email` (or your custom domain) and select the events `email.received`, `email.bounced` and `email.complained`. Copy the signing secret (`whsec_…`).
 3. In Netlify, set:
    - `INBOUND_EMAIL_DOMAIN`: the receiving domain from step 1.
    - `RESEND_WEBHOOK_SECRET`: the signing secret from step 2.
@@ -87,6 +87,18 @@ Because attachments are fetched separately, large files never pass through a web
 4. Redeploy, then create the address on the Emailed documents page and send a test email with a PDF.
 
 Resend stores received emails even if the webhook is down, and retries delivery, so nothing is lost during an outage.
+
+## Outgoing email health, bounces and replies
+
+- **Sender.** SubCleared sends from `EMAIL_FROM` (default `SubCleared <notifications@subcleared.app>`). The domain must be verified in Resend, or every email fails. When it fails, administrators see a banner on the overview and step-by-step guidance in Settings → Email delivery. Requests still create links that can be copied and shared.
+- **Bounces and spam complaints.** These arrive on the same webhook. The address is flagged, automatic reminders to it stop, and the requester and the subcontractor's owner are told. The overview shows "Fix contact". Sending a request to that address again on purpose clears the flag.
+- **Replies.** Request and reminder emails reply to both the person who asked and the organisation's intake address. A subcontractor who simply replies with documents attached has them filed automatically, and their message still reaches a person.
+- **Nothing silently dropped.** Unsupported attachments (for example .docx) are recorded as not accepted, with the reason. Emails with no documents are listed under "Emails with nothing to file".
+- **Recovery.** The hourly scheduler re-queues stalled or failed work: emailed messages, attachments, and document readings that failed or were uploaded before reading was switched on. Each gets up to three attempts in total. Attachment ids are derived from the email and its position, so a retry never files anything twice.
+
+## Approving checked documents together
+
+Documents where every automatic check passed can be approved together from Documents to review. The checks are re-run at that moment against the current requirement, and only confident readings are recorded. The reviewer sees what was read for each document and can untick any of them. Anything that no longer passes is left for a one-by-one review.
 
 ## Ask SubCleared (`server/handlers/assistant.ts`)
 

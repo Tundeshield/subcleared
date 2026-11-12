@@ -130,6 +130,7 @@ function Delivery() {
     <section>
       <div className="flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-line-strong"><div><h2 className="text-lg font-semibold">Email delivery</h2><p className="text-sm text-muted mt-0.5">Every email SubCleared tried to send. Failed reminders are retried automatically, up to three times.</p></div>
         <button className="btn-secondary btn-sm" onClick={() => exportCsv('Email delivery log', [{ key: 'updatedAt', label: 'Time' }, { key: 'to', label: 'To' }, { key: 'subject', label: 'Subject' }, { key: 'status', label: 'Status' }, { key: 'attempts', label: 'Attempts' }, { key: 'error', label: 'Error' }], data.items)}>Export CSV</button></div>
+      <MailHealth data={data} />
       {data.items.length === 0 ? <Empty title="No emails sent yet" /> : (
         <><div className="overflow-x-auto"><table className="table min-w-[720px]"><thead><tr><th className="th">Time</th><th className="th">To</th><th className="th">Subject</th><th className="th">Result</th><th className="th text-right">Attempts</th></tr></thead>
           <tbody>{paged.slice.map((l: any) => <tr key={l.id}><td className="td text-muted whitespace-nowrap text-sm">{formatDateTime(l.updatedAt)}</td><td className="td text-sm break-all">{l.to}</td><td className="td text-sm">{l.subject}</td><td className={cx('td text-sm', l.status === 'failed' && 'font-medium')}>{l.status === 'dev_logged' ? 'Captured (development)' : humanize(l.status)}{l.error && <div className="text-xs text-muted font-normal">{l.error}</div>}</td><td className="td text-right tnum">{l.attempts}</td></tr>)}</tbody></table></div>
@@ -256,6 +257,29 @@ function Automation() {
           )}
         </section>
       )}
+    </div>
+  );
+}
+
+/** Plain-language status of outgoing email, with the fix when it's broken. */
+function MailHealth({ data }: { data: any }) {
+  const h = data.health;
+  const from = data.from ? String(data.from).replace(/^.*<([^>]+)>.*$/, '$1') : undefined;
+  const domain = from?.split('@')[1];
+  if (!data.configured) return <div className="my-5"><Callout tone="warn" title="Email isn’t set up">Outgoing email needs an email provider for this deployment. Until then, requests create links you can copy and share.</Callout></div>;
+  if (!h || h.status === 'ok') return <p className="text-sm text-muted my-5">Sending from <span className="text-ink">{from}</span>.{h?.status === 'ok' ? ' The last email went out normally.' : ''}</p>;
+  return (
+    <div className="my-5"><Callout tone="bad" title={h.status === 'sender_unverified' ? 'Emails aren’t being delivered: the sending domain isn’t verified' : h.status === 'testing_only' ? 'Email is in test mode' : 'The last email couldn’t be sent'}>
+      {h.status === 'sender_unverified' ? (
+        <ol className="list-decimal pl-5 space-y-1 mt-1">
+          <li>SubCleared is sending as <span className="text-ink">{from}</span>. In Resend, open Domains and add <span className="text-ink">{domain}</span> (or a domain you own, such as mail.yourcompany.com).</li>
+          <li>Add the DNS records Resend shows you, and wait for the domain to show as verified.</li>
+          <li>If you used a different domain, set <code className="font-mono">EMAIL_FROM</code> in Netlify to, for example, <code className="font-mono">SubCleared &lt;notifications@mail.yourcompany.com&gt;</code>, and redeploy.</li>
+        </ol>
+      ) : h.status === 'testing_only' ? 'Your email provider only allows sending to its own account address. Verify a sending domain with the provider to send to subcontractors.' : <>Provider response: {h.detail}</>}
+      <p className="mt-2">Until it’s fixed, requests still create secure links you can copy and send yourself. Nothing else is affected.</p>
+    </Callout>
+    {data.problems?.length > 0 && <p className="text-sm text-muted mt-3">{data.problems.length} address{data.problems.length === 1 ? ' has' : 'es have'} bounced or complained; reminders to {data.problems.length === 1 ? 'it' : 'them'} have stopped.</p>}
     </div>
   );
 }

@@ -16,6 +16,7 @@ export interface Me {
   billingConfigured: boolean;
   emailConfigured: boolean;
   extractionConfigured: boolean;
+  emailFrom?: string;
   intakeConfigured?: boolean;
   mode: 'firebase' | 'memory';
 }

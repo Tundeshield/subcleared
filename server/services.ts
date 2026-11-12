@@ -13,9 +13,11 @@ export interface AuthVerifier {
   revokeSessions?(uid: string): Promise<void>;
 }
 
-export interface MailMessage { to: string; subject: string; text: string; html: string; replyTo?: string }
+export interface MailMessage { to: string; subject: string; text: string; html: string; replyTo?: string | string[] }
 export interface Mailer {
   configured: boolean;
+  /** The From address in use, for display and diagnostics. */
+  from?: string;
   send(msg: MailMessage): Promise<{ ok: boolean; id?: string; error?: string; dev?: boolean }>;
 }
 
@@ -96,7 +98,7 @@ export function readEnv(e: NodeJS.ProcessEnv = process.env): Env {
 
 export class ResendMailer implements Mailer {
   configured: boolean;
-  constructor(private apiKey?: string, private from = 'SubCleared <notifications@subcleared.app>') { this.configured = !!apiKey; }
+  constructor(private apiKey?: string, public from = 'SubCleared <notifications@subcleared.app>') { this.configured = !!apiKey; }
   async send(msg: MailMessage) {
     if (!this.apiKey) return { ok: false, error: 'Email provider not configured (RESEND_API_KEY missing)' };
     try {

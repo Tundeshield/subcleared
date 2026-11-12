@@ -4,7 +4,7 @@ import { formatDate } from '../../domain/dates';
 import { term } from '../../domain/locale';
 import { useApi, useMutation } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { cx, ErrorState, FilterSelect, Glyph, Icon, PageLoading, Spinner, useToast } from '../../ui';
+import { Callout, cx, ErrorState, FilterSelect, Glyph, Icon, PageLoading, Spinner, useToast } from '../../ui';
 import { AskBox } from './Ask';
 
 function greeting(timezone: string) {
@@ -42,6 +42,12 @@ export default function Overview() {
 
       {!fresh && (
         <div className="max-w-3xl">
+          {data.mailHealth && data.mailHealth.status !== 'ok' && (
+            <div className="mb-8"><Callout tone="bad" title="Emails to subcontractors aren’t being delivered">
+              {data.mailHealth.status === 'sender_unverified' ? 'The sending domain isn’t verified with the email provider, so requests and reminders can’t go out. ' : data.mailHealth.status === 'testing_only' ? 'Email is in test mode and only reaches the account owner. ' : 'The last email failed to send. '}
+              Requests still create links you can copy. <Link to="/app/settings/delivery" className="link">See how to fix it</Link>
+            </Callout></div>
+          )}
           <Summary data={data} />
           {data.readingOn && <AskBox className="mt-8" />}
 

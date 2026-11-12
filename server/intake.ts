@@ -54,7 +54,7 @@ export interface IntakeItem {
 /** Where received emails and their attachments are fetched from. Production: Resend. Tests and dev: an in-memory fake. */
 export interface InboundSource {
   getEmail(emailId: string): Promise<{ text?: string; fromName?: string } | null>;
-  listAttachments(emailId: string): Promise<{ filename: string; contentType: string; size?: number; download: () => Promise<Uint8Array> }[]>;
+  listAttachments(emailId: string): Promise<{ filename: string; contentType: string; size?: number; inline?: boolean; download: () => Promise<Uint8Array> }[]>;
 }
 
 export class ResendInbound implements InboundSource {
@@ -83,6 +83,7 @@ export class ResendInbound implements InboundSource {
     }
     return out.map((a) => ({
       filename: String(a.filename ?? 'attachment'), contentType: String(a.content_type ?? '').toLowerCase(), size: Number(a.size) || undefined,
+      inline: a.content_disposition === 'inline' && !!a.content_id,
       download: async () => {
         const res = await fetch(a.download_url);
         if (!res.ok) throw new Error(`Attachment download failed (${res.status})`);
@@ -143,6 +144,7 @@ export async function handleInboundEmail(svc: Services, rawBody: string, headers
   if (!verifySvix(svc.env.resendWebhookSecret, rawBody, { id: h('id'), timestamp: h('timestamp'), signature: h('signature') }, svc.now())) return { status: 401, body: { error: 'Invalid signature' } };
   let event: any;
   try { event = JSON.parse(rawBody); } catch { return { status: 400, body: { error: 'Invalid payload' } }; }
+  if (event?.type === 'email.bounced' || event?.type === 'email.complained') return handleDeliveryProblem(svc, event);
   if (event?.type !== 'email.received') return { status: 200, body: { ok: true, ignored: event?.type } };
   const d = event.data ?? {};
   const emailId = typeof d.email_id === 'string' && /^[A-Za-z0-9-]{8,80}$/.test(d.email_id) ? d.email_id : null;
@@ -166,6 +168,42 @@ export async function handleInboundEmail(svc: Services, rawBody: string, headers
   return { status: 200, body: { ok: true, routed: true } };
 }
 
+/**
+ * A message SubCleared sent bounced or was marked as spam. The address is
+ * flagged so automatic chasing stops writing to it, and the people who care
+ * are told to check it. Sending again on purpose clears the flag.
+ */
+async function handleDeliveryProblem(svc: Services, event: any) {
+  const d = event.data ?? {};
+  const providerId = typeof d.email_id === 'string' ? d.email_id.replace(/\//g, '_') : null;
+  if (!providerId) return { status: 200, body: { ok: true } };
+  const idx = await svc.db.get<{ orgId: string; logId: string; to: string }>(`emailIndex/${providerId}`);
+  if (!idx) return { status: 200, body: { ok: true, unknown: true } };
+  const org = await svc.db.get<Organisation>(C.org(idx.orgId));
+  if (!org) return { status: 200, body: { ok: true } };
+  const kind = event.type === 'email.bounced' ? 'bounced' : 'complained';
+  const email = idx.to.toLowerCase();
+  const key = sha256(email).slice(0, 32);
+  const base = { svc, db: svc.db, org };
+  await svc.db.update(C.doc(org.id, 'deliveryLogs', idx.logId), { status: kind, updatedAt: svc.now().toISOString(), error: kind === 'bounced' ? 'The recipient’s mail server rejected this message. Check the address.' : 'The recipient marked this message as spam.' }).catch(() => undefined);
+  try {
+    await svc.db.create(C.doc(org.id, 'emailProblems', key), { id: key, email, kind, at: svc.now().toISOString(), detail: String(d.bounce?.message ?? d.bounce?.type ?? '').slice(0, 300) });
+  } catch { return { status: 200, body: { ok: true, already: true } }; }
+  const subs = (await svc.db.list<Subcontractor>(C.col(org.id, 'subcontractors'))).filter((s) => s.contacts.some((c) => c.email.toLowerCase() === email));
+  const requests = (await svc.db.list<DocumentRequest>(C.col(org.id, 'requests'))).filter((r) => r.contactEmail.toLowerCase() === email);
+  const to = new Set<string>([...subs.map((s) => s.ownerUid), ...requests.map((r) => r.createdBy.uid)].filter((u): u is string => !!u && u !== 'system'));
+  if (!to.size) (await membersWith(base, 'requests.send')).forEach((m) => to.add(m.uid));
+  for (const s of subs.length ? subs : [null]) {
+    await notifyMembers(base, [...to], {
+      type: 'escalation', title: kind === 'bounced' ? `Email to ${email} bounced` : `${email} marked our email as spam`,
+      body: `${s ? `${s.legalName}: ` : ''}automatic reminders to this address have stopped. Check the address or add another contact, then send the request again.`,
+      link: s ? `/app/subcontractors/${s.id}` : '/app/settings/delivery', dedupeKey: `mailproblem:${key}:${s?.id ?? ''}`,
+    });
+  }
+  await audit({ ...base, source: 'webhook' }, { action: `email.${kind}`, entity: { type: 'email', id: idx.logId, label: email }, actor: { type: 'system', id: 'email', name: 'Email provider' }, refs: subs.map((s) => s.id) });
+  return { status: 200, body: { ok: true, flagged: kind } };
+}
+
 /** Background: download attachments from Resend, check, scan and store each, then read and match. */
 async function fetchMessage(svc: Services, org: Organisation, emailId: string) {
   const mpath = C.doc(org.id, 'intakeMessages', emailId);
@@ -175,18 +213,24 @@ async function fetchMessage(svc: Services, org: Organisation, emailId: string) {
   try {
     const [email, attachments] = await Promise.all([svc.inbound.getEmail(emailId), svc.inbound.listAttachments(emailId)]);
     const created: string[] = [];
-    for (const a of attachments.slice(0, 10)) {
+    for (const [index, a] of attachments.slice(0, 10).entries()) {
       const fileName = a.filename.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 200);
       const mime = a.contentType === 'image/jpg' ? 'image/jpeg' : a.contentType;
-      // Signatures, logos and calendar invites are common in email; skip anything that isn't a document type we accept.
-      if (!ALLOWED_MIME.includes(mime as any) && !/\.(pdf|jpe?g|png)$/i.test(fileName)) continue;
+      // Logos and signature images embedded in the email body aren't documents.
+      if (a.inline && mime.startsWith('image/')) continue;
       if (a.size !== undefined && a.size < 2048 && mime.startsWith('image/')) continue;
-      const itemId = svc.db.newId();
+      const unsupported = !ALLOWED_MIME.includes(mime as any) && !/\.(pdf|jpe?g|png)$/i.test(fileName);
+      if (unsupported && /calendar|ics|vcard|pkcs7|signature/i.test(`${mime} ${fileName}`)) continue; // invites and email signatures
+      // Deterministic id: a retried message never files the same attachment twice.
+      const itemId = sha256(`${emailId}:${index}:${a.filename}`).slice(0, 20);
+      const existing = await svc.db.get<IntakeItem>(C.doc(org.id, 'intake', itemId));
+      if (existing) { if (existing.status === 'processing') created.push(itemId); continue; }
       const item: IntakeItem = {
         id: itemId, status: 'processing', receivedAt: msg.receivedAt, from: msg.from, fromName: email?.fromName, to: msg.to.join(', ').slice(0, 300), subject: msg.subject, messageId: msg.messageId,
         providerId: emailId, textPreview: email?.text?.slice(0, 2000), fileName, mimeType: mime, size: a.size ?? 0, sha256: '', scan: { status: 'rejected' },
       };
-      if ((a.size ?? 0) > MAX_UPLOAD_BYTES) { item.status = 'rejected'; item.rejectedReason = `Larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`; }
+      if (unsupported) { item.status = 'rejected'; item.rejectedReason = 'Only PDF, JPG and PNG files can be filed. Ask the sender for a PDF or a photo.'; }
+      else if ((a.size ?? 0) > MAX_UPLOAD_BYTES) { item.status = 'rejected'; item.rejectedReason = `Larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`; }
       else {
         const bytes = await a.download();
         item.size = bytes.length; item.sha256 = sha256(bytes);
@@ -207,12 +251,38 @@ async function fetchMessage(svc: Services, org: Organisation, emailId: string) {
       await audit({ ...base, source: 'webhook' }, { action: item.status === 'rejected' ? 'intake.rejected' : 'intake.received', entity: { type: 'intake', id: itemId, label: item.fileName }, after: { from: item.from, subject: item.subject, size: item.size, reason: item.rejectedReason, emailId }, actor: { type: 'system', id: 'email', name: `Email from ${item.from}` } });
       if (item.status === 'processing') created.push(itemId);
     }
-    await svc.db.update(mpath, { status: 'done', attachments: created.length });
+    await svc.db.update(mpath, { status: 'done', attachments: created.length, text: email?.text?.slice(0, 1000), fromName: email?.fromName });
     for (const itemId of created) await processIntake(svc, org.id, itemId);
   } catch (e: any) {
-    await svc.db.update(mpath, { status: 'failed', error: String(e?.message ?? e).slice(0, 300) });
+    await svc.db.update(mpath, { status: 'failed', error: String(e?.message ?? e).slice(0, 300), failedAt: svc.now().toISOString() });
     throw e;
   }
+}
+
+/**
+ * Picks up email work that failed or got stuck (provider outage, function
+ * timeout). Runs from the hourly scheduler. Three attempts, then it stays
+ * visible on the Emailed documents page for a person.
+ */
+export async function recoverIntake(svc: Services, org: Organisation) {
+  const now = svc.now().getTime();
+  const stale = (iso?: string, mins = 15) => !iso || now - new Date(iso).getTime() > mins * 60_000;
+  let retried = 0;
+  for (const m of await svc.db.list<any>(C.col(org.id, 'intakeMessages'))) {
+    const attempts = m.attempts ?? 1;
+    const stuck = m.status === 'queued' && stale(m.queuedAt ?? m.receivedAt);
+    if (attempts >= 3 || !(stuck || m.status === 'failed')) continue;
+    await svc.db.update(C.doc(org.id, 'intakeMessages', m.id), { status: 'queued', attempts: attempts + 1, queuedAt: svc.now().toISOString() });
+    await svc.queueIntake(org.id, `msg:${m.id}`).catch(() => undefined);
+    retried++;
+  }
+  for (const i of await svc.db.list<IntakeItem & { attempts?: number; processingAt?: string }>(C.col(org.id, 'intake'), [['status', '==', 'processing']])) {
+    if ((i.attempts ?? 1) >= 3 || !stale(i.processingAt ?? i.receivedAt, 20)) continue;
+    await svc.db.update(C.doc(org.id, 'intake', i.id), { attempts: (i.attempts ?? 1) + 1, processingAt: svc.now().toISOString() });
+    await svc.queueIntake(org.id, i.id).catch(() => undefined);
+    retried++;
+  }
+  return retried;
 }
 
 /** What this subcontractor still owes: requested and not yet received, or approved but expired/expiring. */
@@ -375,6 +445,10 @@ export async function listIntake(ctx: Ctx, input: any) {
       attached: i.attached ? { ...i.attached, subcontractorName: name(i.attached.subcontractorId), requirementName: rname(i.attached.requirementId) } : undefined,
     })),
     recent: all.filter((i) => ['attached', 'duplicate', 'rejected'].includes(i.status)).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(0, 20).map((i) => ({ id: i.id, status: i.status, fileName: i.fileName, from: i.from, receivedAt: i.receivedAt, rejectedReason: i.rejectedReason, attached: i.attached ? { ...i.attached, subcontractorName: name(i.attached.subcontractorId), requirementName: rname(i.attached.requirementId) } : undefined, duplicateOf: i.duplicateOf })),
+    // Emails with nothing to file are listed too, so no message disappears without a trace.
+    empty: (await ctx.db.list<any>(C.col(ctx.org.id, 'intakeMessages'))).filter((m) => m.status === 'done' && !m.attachments && !all.some((i) => i.providerId === m.emailId))
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(0, 10).map((m) => ({ id: m.id, from: m.from, fromName: m.fromName, subject: m.subject, receivedAt: m.receivedAt, text: m.text?.slice(0, 300) })),
+    failed: (await ctx.db.list<any>(C.col(ctx.org.id, 'intakeMessages'))).filter((m) => m.status === 'failed').map((m) => ({ id: m.id, from: m.from, subject: m.subject, receivedAt: m.receivedAt, attempts: m.attempts ?? 1, error: m.error })),
     subcontractors: subs.filter((s) => s.status !== 'archived').map((s) => ({ id: s.id, legalName: s.legalName })),
     requirements: defs.filter((d) => d.active && d.kind === 'document').map((d) => ({ id: d.id, name: d.name })),
   };

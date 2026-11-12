@@ -6,11 +6,12 @@ import { chasingOf, dueChase, inWorkingHours } from '../src/domain/automation';
 import { dueReminder } from '../src/domain/compliance';
 import { daysBetween, formatDate, todayIn } from '../src/domain/dates';
 import { processVersion } from './ai';
+import { recoverIntake } from './intake';
 import type { Assignment, DocumentRecord, DocumentRequest, DocumentVersion, Evaluation, Member, Organisation, PortalLink, Project, RequirementDefinition, Subcontractor } from '../src/domain/types';
 import { AlreadyExistsError } from './db';
 import { audit, C, membersWith, notifyMembers } from './core';
 import { recompute } from './data';
-import { sendEmail } from './email';
+import { replyToFor, sendEmail } from './email';
 import { issuePortalLink } from './handlers/requests';
 import type { Services } from './services';
 import { subscriptionUsable } from './handlers/billing';
@@ -62,6 +63,8 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
   // Subcontractors are only emailed inside the organisation's working hours (in its own timezone).
   const inHours = opts.force || inWorkingHours(org.settings, svc.now());
   // Heavier daily steps (recompute, escalations, alerts) run once per local day even though the scheduler runs hourly.
+  // Recover background work that failed or stalled, whatever the hour.
+  const recovered = await recoverWork(svc, org).catch((e) => { console.error('recover failed', org.id, e); return 0; });
   let dailyDue = true;
   if (!opts.force) { try { await svc.db.create(C.doc(org.id, 'reminders', `daily:${today}`), { id: `daily:${today}`, status: 'sent', at: svc.now().toISOString() }); } catch { dailyDue = false; } }
 
@@ -87,9 +90,10 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
     const key = `${v.id}:${due.offset}`;
     if (!(await claimReminder(svc, org, key, { versionId: v.id, documentId: d.id, subcontractorId: sub.id, offset: due.offset, expiryDate: exp }))) continue;
     try {
-      const contact = sub.contacts.find((c) => c.primary) ?? sub.contacts[0];
+      const problems = new Set((await svc.db.list<any>(C.col(org.id, 'emailProblems'))).map((p) => p.email));
+      const contact = sub.contacts.find((c) => c.primary && !problems.has(c.email.toLowerCase())) ?? sub.contacts.find((c) => !problems.has(c.email.toLowerCase()));
       const def = d.requirementId ? defsById.get(d.requirementId) : undefined;
-      let emailStatus = 'no_contact';
+      let emailStatus = contact ? 'no_contact' : sub.contacts.length ? 'address_problem' : 'no_contact';
       if (contact && d.requirementId) {
         // One open renewal request per document version; reuse it if present.
         let req = requests.find((r) => r.renewalOfVersionId === v.id && ['sent', 'acknowledged', 'partially_fulfilled'].includes(r.status));
@@ -107,7 +111,7 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
         }
         const when = days > 0 ? `expires on ${formatDate(exp)} (in ${days} day${days === 1 ? '' : 's'})` : days === 0 ? `expires today (${formatDate(exp)})` : `expired on ${formatDate(exp)}`;
         const log = await sendEmail(base, {
-          to: contact.email, template: 'sub.renewal_reminder', dedupeKey: `reminder:${key}`,
+          to: contact.email, template: 'sub.renewal_reminder', dedupeKey: `reminder:${key}`, replyTo: replyToFor(base),
           subject: days >= 0 ? `${def?.name ?? d.title} ${days === 0 ? 'expires today' : `expires in ${days} days`} — ${org.name}` : `${def?.name ?? d.title} has expired — ${org.name}`,
           heading: days >= 0 ? 'Please send an updated document' : 'Your document has expired',
           body: `Hello ${contact.name},\n\nThe ${def?.name ?? d.title} we hold for ${sub.legalName} ${when}.\n\nPlease upload the renewed document using the secure link below so ${org.name} can keep your records current.`,
@@ -134,9 +138,11 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
   const chase = chasingOf(org.settings);
   if (inHours && chase.enabled) {
     const members = await svc.db.list<Member>(C.col(org.id, 'members'));
+    const badAddresses = new Set((await svc.db.list<any>(C.col(org.id, 'emailProblems'))).map((p) => p.email));
     for (const r of requests.filter((x) => x.type === 'request' && ['sent', 'acknowledged', 'partially_fulfilled'].includes(x.status))) {
       const sub = subsById.get(r.subcontractorId);
       if (!sub || ['archived', 'suspended'].includes(sub.status)) continue;
+      if (badAddresses.has(r.contactEmail.toLowerCase())) continue; // bounced or complained: a person has been told
       const mine = versions.filter((v) => v.subcontractorId === sub.id && v.uploadedAt >= r.createdAt && !['uploading', 'quarantined'].includes(v.reviewStatus));
       const received = new Set(mine.filter((v) => !['rejected', 'info_requested'].includes(v.reviewStatus)).map((v) => v.requirementId));
       const outstanding = r.requirementIds.filter((rid) => !received.has(rid));
@@ -176,14 +182,14 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
         const requester = members.find((m) => m.uid === r.createdBy.uid && m.status === 'active');
         const last = due.index === chase.afterDays.length - 1;
         const log = await sendEmail(base, {
-          to: r.contactEmail, template: 'sub.chase', dedupeKey: `chase:${key}`, replyTo: requester?.email,
+          to: r.contactEmail, template: 'sub.chase', dedupeKey: `chase:${key}`, replyTo: replyToFor(base, requester?.email),
           subject: `Reminder: ${org.name} is still waiting for ${names.length === 1 ? names[0] : `${names.length} documents`}`,
           heading: last ? 'Final reminder: documents still needed' : 'Documents still needed',
           body: [
             `Hello ${r.contactName ?? ''}`.trim() + ',',
             `${org.name} asked ${sub.legalName} for the following on ${formatDate(r.createdAt)}, and hasn't received ${names.length === 1 ? 'it' : 'them'} yet:\n${names.map((n) => `• ${n}`).join('\n')}`,
             received.size ? 'Thank you for what you have already sent.' : '',
-            'Open the secure link below to upload them. A PDF or a clear phone photo is fine, and no account is needed.',
+            `Open the secure link below to upload them. A PDF or a clear phone photo is fine, and no account is needed.${replyToFor(base)?.length ? ' You can also reply to this email with the documents attached.' : ''}`,
             requester ? `Questions? Reply to this email to reach ${requester.name || requester.email}.` : '',
           ].filter(Boolean).join('\n\n'),
           cta: { label: 'Upload documents', url: link.url },
@@ -199,7 +205,7 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
       }
     }
   }
-  if (!dailyDue) return { reminders, chasers, escalations, failures, today, inHours, daily: false };
+  if (!dailyDue) return { reminders, chasers, escalations, failures, recovered, today, inHours, daily: false };
 
   // 3. Close requests whose links have lapsed (chasers renew the link, so only abandoned requests close).
   const nowIso = svc.now().toISOString();
@@ -245,7 +251,29 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
       body: `${rs.filter((r) => r.readiness === 'not_ready').length} not ready, ${rs.filter((r) => r.readiness === 'action_required').length} need attention.`, link: `/app/projects/${p.id}`, dedupeKey: `threshold:${p.id}:${today}`,
     });
   }
-  return { reminders, chasers, escalations, failures, today, inHours, daily: true };
+  return { reminders, chasers, escalations, failures, recovered, today, inHours, daily: true };
+}
+
+// --- Recovery --------------------------------------------------------------------
+
+/** Re-queues document reading that failed or stalled (up to three attempts in total), and email intake work. */
+async function recoverWork(svc: Services, org: Organisation) {
+  let n = await recoverIntake(svc, org);
+  if (!svc.ai) return n;
+  const now = svc.now().getTime();
+  for (const v of await svc.db.list<DocumentVersion & { extractionAttempts?: number }>(C.col(org.id, 'versions'))) {
+    const x = v.extraction;
+    if (!v.storagePath || v.scan?.status !== 'clean' || (v.extractionAttempts ?? 1) >= 3) continue;
+    const since = new Date(x.startedAt ?? v.uploadedAt).getTime();
+    const stuck = (x.status === 'queued' || x.status === 'processing') && now - since > 20 * 60_000;
+    const failed = x.status === 'failed';
+    const neverStarted = x.status === 'not_configured' && now - new Date(v.uploadedAt).getTime() < 7 * 86_400_000; // reading was switched on after upload
+    if (!(stuck || failed || neverStarted)) continue;
+    await svc.db.update(C.doc(org.id, 'versions', v.id), { extraction: { status: 'queued' }, extractionAttempts: (v.extractionAttempts ?? 1) + 1 });
+    await svc.queueExtraction(org.id, v.id).catch(() => undefined);
+    n++;
+  }
+  return n;
 }
 
 // --- Document reading ----------------------------------------------------------

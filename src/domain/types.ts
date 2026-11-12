@@ -510,7 +510,8 @@ export interface DeliveryLog {
   to: string;
   template: string;
   subject?: string;
-  status: 'queued' | 'sent' | 'failed' | 'skipped' | 'dev_logged';
+  status: 'queued' | 'sent' | 'failed' | 'skipped' | 'dev_logged' | 'bounced' | 'complained';
+  detail?: string;
   error?: string;
   providerId?: string;
   attempts: number;
