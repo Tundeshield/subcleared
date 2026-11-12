@@ -8,6 +8,15 @@ export default async (req: Request) => {
   const got = req.headers.get('x-cron-secret') || '';
   if (!secret || got.length !== secret.length || !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(secret))) return new Response('Forbidden', { status: 403 });
   const svc = await getFirebaseServices();
+  if (req.method === 'GET' && new URL(req.url).searchParams.get('report') === 'mail') {
+    // Delivery evidence only: status, template, provider id and a masked recipient. No message bodies.
+    const mask = (e: string) => e.replace(/^(.).*?(@.*)$/, '$1***$2');
+    const orgs = await svc.db.list<any>('orgs');
+    const rows: any[] = [];
+    for (const o of orgs) for (const l of await svc.db.list<any>(`orgs/${o.id}/deliveryLogs`, [], { orderBy: ['createdAt', 'desc'], limit: 15 })) rows.push({ org: o.id, at: l.updatedAt ?? l.createdAt, template: l.template, to: mask(String(l.to ?? '')), status: l.status, providerId: l.providerId ?? null, error: l.error ?? null });
+    rows.sort((x, y) => String(y.at).localeCompare(String(x.at)));
+    return Response.json({ items: rows.slice(0, 30), from: process.env.EMAIL_FROM ?? null }, { headers: { 'Cache-Control': 'no-store' } });
+  }
   if (req.method === 'GET' && new URL(req.url).searchParams.get('report') === 'metrics') {
     const { operationalMetrics } = await import('../../server/ops');
     return Response.json(await operationalMetrics(svc), { headers: { 'Cache-Control': 'no-store' } });
