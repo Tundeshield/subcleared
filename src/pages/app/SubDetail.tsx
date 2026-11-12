@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { displayReadiness, READINESS_LABELS, readinessReason } from '../../domain/compliance';
 import { formatDate, formatDateTime } from '../../domain/dates';
@@ -198,6 +198,13 @@ function RequirementsTab({ data, onRequest }: { data: any; onRequest: (rid: stri
   const revoke = useMutation('overrides.revoke');
   const toast = useToast();
   const focus = params.get('project');
+  // Arriving from "Record check" on a project or the overview opens the check straight away.
+  const checkId = params.get('check');
+  useEffect(() => {
+    if (!checkId) return;
+    const def: any = data.requirements?.find?.((d: any) => d.id === checkId);
+    if (def && def.kind !== 'document') setConfirm({ requirementId: checkId, name: def.name, def });
+  }, [checkId]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => {
     const m = new Map<string, any>();
     for (const p of data.projects) for (const r of p.results) {
@@ -236,7 +243,7 @@ function RequirementsTab({ data, onRequest }: { data: any; onRequest: (rid: stri
                     <div className="flex flex-wrap gap-1">
                       {def?.kind === 'document' && can('documents.upload') && <button className="btn-ghost btn-sm" onClick={() => setUpload(r.requirementId)}>Upload</button>}
                       {def?.kind === 'document' && can('requests.send') && needed && <button className="btn-ghost btn-sm" onClick={() => onRequest(r.requirementId)}>Request</button>}
-                      {def?.kind !== 'document' && can('documents.review') && <button className="btn-secondary btn-sm" onClick={() => setConfirm({ requirementId: r.requirementId, name: r.name, def })}>Record confirmation</button>}
+                      {def?.kind !== 'document' && can('documents.review') && <button className="btn-secondary btn-sm" onClick={() => setConfirm({ requirementId: r.requirementId, name: r.name, def })}>Record check</button>}
                       {can('requirements.override') && <button className="btn-ghost btn-sm" onClick={() => setNa({ requirementId: r.requirementId, name: r.name })}>Not applicable…</button>}
                     </div>
                   </div>
@@ -270,7 +277,7 @@ function OverrideDialog({ state, type, subcontractorId, onClose, projects }: { s
   const toast = useToast();
   if (!state) return null;
   return (
-    <Dialog open onClose={onClose} title={type === 'not_applicable' ? `Mark “${state.name}” not applicable` : `Record a confirmation: ${state.name}`} description="Recorded with your name in the audit trail and shown wherever this status appears." footer={<>
+    <Dialog open onClose={onClose} title={type === 'not_applicable' ? `Mark “${state.name}” not applicable` : `Record check: ${state.name}`} description={type === 'not_applicable' ? 'Recorded with your name in the audit trail and shown wherever this status appears.' : 'A check your team made. Recorded with your name and the date; SubCleared doesn’t verify it with the register itself.'} footer={<>
       <button className="btn-secondary" onClick={onClose}>Cancel</button>
       <button className="btn-primary" disabled={busy || !reason.trim()} onClick={async () => { await run({ type, subcontractorId, requirementId: state.requirementId, projectId: scope === 'all' ? undefined : scope, reason, validUntil: validUntil || undefined }); toast('Decision recorded'); onClose(); }}>{busy && <Spinner />}Record</button>
     </>}>

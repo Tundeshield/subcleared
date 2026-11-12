@@ -112,7 +112,7 @@ export async function loadSample(ctx: Ctx) {
     await ctx.db.update(C.doc(ctx.org.id, 'subcontractors', subcontractorId), { sample: true });
     subIds.push(subcontractorId);
   }
-  for (const [si, pis] of set.assignments) for (const pi of pis) await assignSubcontractors(quietCtx, { projectId: projectIds[pi], subcontractorIds: [subIds[si]] });
+  for (const [si, pis] of set.assignments) for (const pi of pis) await assignSubcontractors(quietCtx, { projectId: projectIds[pi], subcontractorIds: [subIds[si]], sendRequests: false });
 
   // Requirement keys → this organisation's requirement ids (by starter name).
   const { starterRequirements } = await import('../src/domain/library');

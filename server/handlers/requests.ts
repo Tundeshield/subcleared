@@ -74,6 +74,13 @@ export async function createRequest(ctx: Ctx, input: any) {
       renewalOfVersionId: input.renewalOfVersionId,
     };
     await ctx.db.set(C.doc(ctx.org.id, 'requests', rid), req as any);
+    // A newer request for the same documents replaces older open ones, so only one is ever chased.
+    if (type === 'request') {
+      const open = await ctx.db.list<DocumentRequest>(C.col(ctx.org.id, 'requests'), [['subcontractorId', '==', s.id]]);
+      for (const q of open.filter((x) => x.id !== rid && x.type === 'request' && ['sent', 'acknowledged', 'partially_fulfilled'].includes(x.status) && x.requirementIds.every((r) => requirementIds.includes(r)))) {
+        await ctx.db.update(C.doc(ctx.org.id, 'requests', q.id), { status: 'cancelled', supersededBy: rid, cancelledAt: ctx.svc.now().toISOString() });
+      }
+    }
     const list = defs.map((d) => `• ${d!.name}`).join('\n');
     const log = await sendEmail(ctx, {
       to: contact.email, template: `sub.${type}`, dedupeKey: `request:${rid}`, replyTo: replyToFor(ctx, ctx.member.email),
@@ -207,6 +214,8 @@ export async function requestRenewals(ctx: Ctx, input: any) {
 export type { DocumentRecord, Subcontractor };
 
 const REQUESTABLE = new Set(['missing', 'not_requested', 'requested', 'overdue', 'rejected', 'expired', 'expiring_soon']);
+/** Sent automatically on assignment: only what nobody has asked for yet. Open requests are already being chased; renewals have their own schedule. */
+export const AUTO_REQUESTABLE = new Set(['missing', 'not_requested', 'rejected', 'expired']);
 
 /**
  * One step from a project: request every outstanding document from each chosen
@@ -225,7 +234,8 @@ export async function requestForProject(ctx: Ctx, input: any) {
     const sub = await ctx.db.get<Subcontractor>(C.doc(ctx.org.id, 'subcontractors', sid));
     if (!sub) { results.push({ subcontractorId: sid, name: 'Unknown', status: 'failed', documents: 0, detail: 'Not found' }); continue; }
     const ev = await ctx.db.get<any>(C.doc(ctx.org.id, 'readiness', `${projectId}__${sid}`));
-    const wanted = (ev?.results ?? []).filter((r: any) => REQUESTABLE.has(r.status)).map((r: any) => r.requirementId as string);
+    const allowed = input.automatic ? AUTO_REQUESTABLE : REQUESTABLE;
+    const wanted = (ev?.results ?? []).filter((r: any) => allowed.has(r.status)).map((r: any) => r.requirementId as string);
     const defs = (await ctx.db.getMany<RequirementDefinition>(wanted.map((r: string) => C.doc(ctx.org.id, 'requirements', r)))).filter((d): d is RequirementDefinition => !!d && d.kind === 'document');
     const contact = sub.contacts.find((c) => c.primary) ?? sub.contacts[0];
     if (!defs.length) { results.push({ subcontractorId: sid, name: sub.legalName, status: 'skipped', documents: 0, detail: 'Nothing outstanding to request' }); continue; }

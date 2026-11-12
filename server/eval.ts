@@ -23,13 +23,22 @@ export interface Fixture { file: string; kind: string; fields: Record<string, st
 type Outcome = 'correct' | 'correct_unsure' | 'wrong_flagged' | 'wrong_confident' | 'missed' | 'overconfident' | 'uncertain_ok';
 
 /** What the comparison should conclude for documents that are meant to fail or pass. */
-const CHECK_EXPECTATIONS: Record<string, { subName: string; triage: 'looks_good' | 'problem' | 'check' }> = {
+const GL_REQUIREMENT = { name: 'General liability insurance', category: 'Insurance', documentType: 'Certificate of insurance', expiryRequired: true, version: 1, criteria: [{ key: 'glEachOccurrence', label: 'General liability, each occurrence', type: 'min_amount' as const, value: 1_000_000, currency: 'USD' }] };
+const PL_REQUIREMENT = { name: 'Public liability insurance', category: 'Insurance', documentType: 'Insurance certificate', expiryRequired: true, version: 1, criteria: [] };
+const COMPANY_REQUIREMENT = { name: 'Company registration', category: 'Registration', documentType: 'Company registration', expiryRequired: false, version: 1, criteria: [] };
+type Requirement = typeof GL_REQUIREMENT | typeof PL_REQUIREMENT | typeof COMPANY_REQUIREMENT;
+/** What the comparison should conclude for documents that are meant to fail or pass, against a given requirement. */
+const CHECK_EXPECTATIONS: Record<string, { subName: string; triage: 'looks_good' | 'problem' | 'check'; requirement?: Requirement }> = {
   'us-acord-clean.pdf': { subName: 'Keystone Plumbing LLC', triage: 'looks_good' },
   'wrong-company.pdf': { subName: 'Pennine Roofing Ltd', triage: 'problem' },
   'expired.pdf': { subName: 'Keystone Plumbing LLC', triage: 'problem' },
   'low-limit.pdf': { subName: 'Brookside Painting Co', triage: 'problem' },
+  // The wrong document for the requirement must never read as "looks right".
+  'vat-registration.pdf': { subName: 'Thameside Electrical Services Ltd', triage: 'problem', requirement: COMPANY_REQUIREMENT },
+  'tax-clearance.pdf': { subName: 'Thameside Electrical Services Ltd', triage: 'problem', requirement: COMPANY_REQUIREMENT },
+  'company-incorporation.pdf': { subName: 'Thameside Electrical Services Ltd', triage: 'looks_good', requirement: COMPANY_REQUIREMENT },
+  'el-only.pdf': { subName: 'Thameside Electrical Services Ltd', triage: 'problem', requirement: PL_REQUIREMENT },
 };
-const GL_REQUIREMENT = { name: 'General liability insurance', category: 'Insurance', documentType: 'Certificate of insurance', expiryRequired: true, version: 1, criteria: [{ key: 'glEachOccurrence', label: 'General liability, each occurrence', type: 'min_amount' as const, value: 1_000_000, currency: 'USD' }] };
 
 const norm = (v: unknown) => String(v).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
 function same(a: unknown, b: unknown) {
@@ -84,7 +93,7 @@ export async function runEval(svc: Services, opts: { only?: string[]; today?: st
     const x = await readDocument(svc, org, bytes, mime, 'eval');
     const rows = x.status === 'completed' ? scoreDocument(f, x) : Object.keys(f.fields).map((k) => ({ field: k, expected: f.fields[k], read: null, confidence: 0, outcome: 'missed' as Outcome }));
     const exp = CHECK_EXPECTATIONS[f.file];
-    const check = exp && x.status === 'completed' ? assess({ requirement: GL_REQUIREMENT, fields: x.fields ?? {}, kind: x.kind, kindConfidence: x.kindConfidence, subcontractor: { legalName: exp.subName }, orgName: org.name, projects: [], today, nowIso: new Date().toISOString() }) : undefined;
+    const check = exp && x.status === 'completed' ? assess({ requirement: exp.requirement ?? GL_REQUIREMENT, fields: x.fields ?? {}, kind: x.kind, kindConfidence: x.kindConfidence, kindScheme: x.kindScheme, subcontractor: { legalName: exp.subName }, orgName: org.name, projects: [], today, nowIso: new Date().toISOString() }) : undefined;
     docs.push({
       file: f.file, note: f.note, status: x.status, error: x.error, skippedReason: x.skippedReason, ms: Date.now() - t0,
       kindExpected: f.kind, kindRead: x.kind, kindConfidence: x.kindConfidence, kindCorrect: x.kind === f.kind,

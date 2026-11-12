@@ -1,5 +1,5 @@
 import { isISODate } from '../../src/domain/dates';
-import { canSeeProject } from '../../src/domain/permissions';
+import { canSeeProject, permissionsFor } from '../../src/domain/permissions';
 import type { Assignment, Member, Project, ProjectRequirement, ProjectStatus, RequirementTemplate } from '../../src/domain/types';
 import { audit, bad, C, type Ctx, diff, id, ids, need, notFound, oneOf, reqStr, requireProjectAccess, str } from '../core';
 import { loadOrgData, recompute } from '../data';
@@ -178,7 +178,12 @@ export async function assignSubcontractors(ctx: Ctx, input: any) {
     await audit(ctx, { action: 'project.subcontractor_assigned', entity: { type: 'assignment', id: aid, label: `${s.legalName} → ${p.name}` }, refs: [p.id, sid] });
   }
   await recompute(ctx, { projectId: p.id }, 'assignment.added');
-  return { ok: true };
+  // Ask for whatever is still outstanding straight away, so there is no second step to remember.
+  // Documents already approved and in date (from any project) satisfy the requirement and aren't asked for again.
+  if (input.sendRequests === false || !permissionsFor(ctx.member).has('requests.send')) return { ok: true, requests: [] };
+  const { requestForProject } = await import('./requests');
+  const r = await requestForProject(ctx, { projectId: p.id, subcontractorIds: subIds, automatic: true }).catch((e: any) => ({ results: subIds.map((sid) => ({ subcontractorId: sid, status: 'failed', detail: e.message })) }));
+  return { ok: true, requests: r.results };
 }
 
 export async function removeSubcontractor(ctx: Ctx, input: any) {

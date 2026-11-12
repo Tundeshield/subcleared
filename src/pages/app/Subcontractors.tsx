@@ -103,7 +103,7 @@ function BulkAssign({ open, onClose, ids, projects }: { open: boolean; onClose: 
   const { run, busy, error } = useMutation('projects.assign');
   const toast = useToast();
   return (
-    <Dialog open={open} onClose={onClose} title={`Assign ${ids.length} subcontractor${ids.length === 1 ? '' : 's'} to a project`} footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button><button className="btn-primary" disabled={!pid || busy} onClick={async () => { await run({ projectId: pid, subcontractorIds: ids }); toast('Assigned'); onClose(); }}>{busy && <Spinner />}Assign</button></>}>
+    <Dialog open={open} onClose={onClose} title={`Assign ${ids.length} subcontractor${ids.length === 1 ? '' : 's'} to a project`} footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button><button className="btn-primary" disabled={!pid || busy} onClick={async () => { await run({ projectId: pid, subcontractorIds: ids }).then((r: any) => { const n = (r?.requests ?? []).filter((x: any) => x.status === 'sent').length; toast(n ? `Assigned · ${n} request${n === 1 ? '' : 's'} sent` : 'Assigned'); onClose(); }).catch(() => undefined); }}>{busy && <Spinner />}Assign</button></>}>
       <Field label="Project"><select className="input" value={pid} onChange={(e) => setPid(e.target.value)}><option value="">Choose a project…</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
       <div className="mt-3"><FormError error={error} /></div>
     </Dialog>

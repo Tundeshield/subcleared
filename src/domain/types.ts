@@ -68,6 +68,8 @@ export interface Member {
   revokedPermissions?: Permission[];
   joinedAt: Timestamp;
   notificationPrefs?: Partial<Record<NotificationType, { inApp: boolean; email: boolean }>>;
+  /** Daily summary email of what needs a decision. On unless switched off (false). */
+  digest?: boolean;
 }
 
 export interface Invitation {
@@ -266,6 +268,8 @@ export interface Extraction {
   /** What the document appears to be (see src/domain/extraction.ts). */
   kind?: string;
   kindConfidence?: number;
+  /** Which list of kinds the reader used (see KIND_SCHEME). Absent = before company and tax documents were told apart. */
+  kindScheme?: number;
   /** Problems the reader noticed: unreadable areas, several documents in one file, etc. */
   issues?: string[];
   error?: string;
@@ -299,6 +303,8 @@ export interface Assessment {
   summary: string;
   checks: AssessmentCheck[];
   requirementVersion?: number;
+  /** Version of the comparison rules. Stored results from older rules are treated as "check" (never bulk-approvable). */
+  rulesVersion?: number;
   at: Timestamp;
 }
 

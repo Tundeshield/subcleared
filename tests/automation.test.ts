@@ -159,7 +159,8 @@ describe('automatic chasing', () => {
     h.clock.now = new Date('2026-06-18T15:00:00Z'); await runDailyJobs(h.svc); await runDailyJobs(h.svc);
     expect(to('sam@slow.example')).toHaveLength(1);
     expect(to('sam@slow.example')[0].text).toMatch(/automatic reminder/i);
-    expect(to('sam@slow.example')[0].replyTo).toEqual(['owner1@acme.example']);
+    // Replies reach the requester and the organisation's intake address, which now exists from sign-up.
+    expect(to('sam@slow.example')[0].replyTo).toEqual(['owner1@acme.example', expect.stringMatching(/^docs-[a-z0-9]{20}@in\.example$/)]);
     // Renew Co sends the document: its reminders stop.
     await upload(o.orgId, o.subcontractorId, o.gl, coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }));
     expect(to('rae@renew.example')).toHaveLength(1);
@@ -263,7 +264,7 @@ describe('delivery problems, recovery and honest checks', () => {
     expect(dash.needs.some((n: any) => /bounced/.test(n.issue))).toBe(true);
     const before = h.mail.length;
     h.clock.now = new Date('2026-06-19T15:00:00Z'); await runDailyJobs(h.svc);
-    expect(h.mail.length).toBe(before); // no reminder to a dead address
+    expect(h.mail.slice(before).filter((m) => m.to === 'rae@renew.example')).toHaveLength(0); // no reminder to a dead address
   });
 
   it('treats a spam complaint like a bounce: stop chasing and tell the requester', async () => {
@@ -277,7 +278,7 @@ describe('delivery problems, recovery and honest checks', () => {
     expect(notes.items.length).toBeGreaterThan(0);
     const before = h.mail.length;
     h.clock.now = new Date('2026-06-19T15:00:00Z'); await runDailyJobs(h.svc);
-    expect(h.mail.length).toBe(before);
+    expect(h.mail.slice(before).filter((m) => m.to === 'rae@renew.example')).toHaveLength(0);
   });
 
   it('retries a document reading that failed, at most three times in total', async () => {
@@ -334,6 +335,38 @@ describe('delivery problems, recovery and honest checks', () => {
 });
 
 describe('bulk confirmation', () => {
+  it('never bulk-approves a document whose kind is wrong or uncertain', async () => {
+    const o = await setup();
+    const reqs = (await ok('owner1', 'requirements.list', {}, o.orgId)).requirements;
+    const biz = reqs.find((r: any) => r.name === 'Business license').id;
+    await ok('owner1', 'projects.setRequirement', { projectId: o.projectId, requirementId: biz, mandatory: true }, o.orgId);
+    const pdf = (lines: string[]) => new TextEncoder().encode(`%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\nBT ${lines.map((l) => `(${l}) Tj`).join(' ')} ET\ntrailer\n%%EOF\n`);
+    const vat = await upload(o.orgId, o.subcontractorId, biz, pdf(['VAT registration certificate', 'Company: Renew Co Ltd', 'Issued by: HM Revenue and Customs', 'Registration number: GB123456789']));
+    const r = await ok('owner1', 'reviews.get', { versionId: vat }, o.orgId);
+    expect(r.version.extraction.kind).toBe('tax_registration');
+    expect(r.assessment.checks.find((c: any) => c.key === 'kind').outcome).toBe('fail');
+    const bulk = await ok('owner1', 'reviews.confirmChecked', { versionIds: [vat] }, o.orgId);
+    expect(bulk.approved).toBe(0);
+    expect((await ok('owner1', 'reviews.get', { versionId: vat }, o.orgId)).version.reviewStatus).toBe('awaiting_review');
+  });
+
+  it('lists past approvals that relied on the old reading for re-review, without changing them', async () => {
+    const o = await setup();
+    const reqs = (await ok('owner1', 'requirements.list', {}, o.orgId)).requirements;
+    const w9 = reqs.find((r: any) => r.name === 'Form W-9').id;
+    await ok('owner1', 'projects.setRequirement', { projectId: o.projectId, requirementId: w9, mandatory: true }, o.orgId);
+    const pdf = new TextEncoder().encode('%PDF-1.7\nBT (Form W-9 tax) Tj (Company: Renew Co Ltd) Tj ET\n%%EOF\n');
+    const vid = await upload(o.orgId, o.subcontractorId, w9, pdf);
+    const v = (await ok('owner1', 'reviews.get', { versionId: vid }, o.orgId)).version;
+    await ok('owner1', 'reviews.decide', { versionId: vid, decision: 'approve', revision: v.revision, metadata: { values: {} }, checklist: [] }, o.orgId);
+    // Simulate a reading made before company and tax documents were told apart.
+    await h.db.update(`orgs/${o.orgId}/versions/${vid}`, { extraction: { ...v.extraction, kind: 'licence_registration', kindScheme: undefined } });
+    const { rereviewCandidates } = await import('../server/rereview');
+    const rep = await rereviewCandidates(h.svc);
+    expect(rep.candidates.map((c) => c.versionId)).toEqual([vid]);
+    expect((await h.db.get<any>(`orgs/${o.orgId}/versions/${vid}`)).reviewStatus).toBe('approved');
+  });
+
   it('approves only documents whose checks all pass right now', async () => {
     const o = await setup();
     const good = await upload(o.orgId, o.subcontractorId, o.gl, coi({ insured: 'Renew Co Ltd', expiry: '2027-06-30' }));
@@ -348,5 +381,192 @@ describe('bulk confirmation', () => {
     expect(g.version.metadata).toMatchObject({ expiryDate: '2027-06-30', namedInsured: 'Renew Co Ltd' });
     const p = await ok('owner1', 'projects.get', { projectId: o.projectId }, o.orgId);
     expect(p.subcontractors.find((s: any) => s.id === o.subcontractorId).readiness).toBe('ready');
+  });
+});
+
+describe('only the user’s own decisions reach the attention list', () => {
+  async function uk(uid = 'owner1') {
+    h.users[uid] = { email: `${uid}@acme.example` };
+    const { orgId } = await ok(uid, 'org.register', { orgName: 'Harbourline Build', country: 'United Kingdom', timezone: 'Europe/London', name: 'Una Owner' });
+    const reqs = (await ok(uid, 'requirements.list', {}, orgId)).requirements;
+    const cis = reqs.find((r: any) => r.name === 'CIS verification');
+    const pl = reqs.find((r: any) => r.name === 'Public liability insurance');
+    const { projectId } = await ok(uid, 'projects.create', { name: 'Quayside', status: 'active', endDate: '2027-03-31' }, orgId);
+    for (const r of [cis, pl]) await ok(uid, 'projects.setRequirement', { projectId, requirementId: r.id, mandatory: true }, orgId);
+    return { orgId, cis, pl, projectId, uid };
+  }
+  it('a contractor-side check asks for "Record check", never a document request, and recording it makes them ready', async () => {
+    const o = await uk();
+    expect(o.cis.kind).toBe('manual_check');
+    const { subcontractorId } = await ok(o.uid, 'subs.create', { legalName: 'Lee Electrical Ltd', trade: 'Electrical', contacts: [{ name: 'Tess', email: 'tess@lee.example', primary: true }] }, o.orgId);
+    await ok(o.uid, 'projects.assign', { projectId: o.projectId, subcontractorIds: [subcontractorId] }, o.orgId);
+    const v = await upload(o.orgId, subcontractorId, o.pl.id, coi({ insured: 'Lee Electrical Limited', expiry: '2027-06-30' }));
+    const rv = (await ok(o.uid, 'reviews.get', { versionId: v }, o.orgId)).version;
+    await ok(o.uid, 'reviews.decide', { versionId: v, decision: 'approve', revision: rv.revision, metadata: { expiryDate: '2027-06-30', values: { glEachOccurrence: 5000000 } }, checklist: [] }, o.orgId);
+    let dash = await ok(o.uid, 'dashboard', {}, o.orgId);
+    const need = dash.needs.find((n: any) => n.action === 'Record check');
+    expect(need?.issue).toContain('CIS verification');
+    expect(dash.needs.some((n: any) => /Request/.test(n.action) && n.item === 'Lee Electrical Ltd')).toBe(false);
+    const req = await ok(o.uid, 'requests.forProject', { projectId: o.projectId, subcontractorIds: [subcontractorId] }, o.orgId);
+    expect(req.results[0].status).toBe('skipped'); // nothing for the subcontractor to send
+    await ok(o.uid, 'overrides.set', { type: 'manual_confirmation', subcontractorId, requirementId: o.cis.id, reason: 'Verified with HMRC online, ref V123' }, o.orgId);
+    const p = await ok(o.uid, 'projects.get', { projectId: o.projectId }, o.orgId);
+    expect(p.subcontractors[0].readiness).toBe('ready');
+    dash = await ok(o.uid, 'dashboard', {}, o.orgId);
+    expect(dash.needs.some((n: any) => n.action === 'Record check')).toBe(false);
+    const audit = await ok(o.uid, 'audit.list', {}, o.orgId);
+    expect(JSON.stringify(audit)).toContain('Verified with HMRC online');
+  });
+  it('subcontractors being chased become one quiet line; escalated ones come back as a task', async () => {
+    const o = await setup();
+    await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [o.subcontractorId] }, o.orgId);
+    let dash = await ok('owner1', 'dashboard', {}, o.orgId);
+    expect(dash.needs.some((n: any) => n.item === 'Renew Co Ltd')).toBe(false);
+    expect(dash.waiting.subcontractors).toBe(1);
+    for (const d of ['2026-06-18', '2026-06-22', '2026-06-29', '2026-07-02']) { h.clock.now = new Date(`${d}T15:00:00Z`); await runDailyJobs(h.svc); }
+    dash = await ok('owner1', 'dashboard', {}, o.orgId);
+    expect(dash.needs.find((n: any) => n.item === 'Renew Co Ltd')?.issue).toMatch(/after every reminder/);
+    expect(dash.waiting.subcontractors).toBe(0);
+  });
+  it('a project with subcontractors but no paperwork says so', async () => {
+    h.users.o2 = { email: 'o2@acme.example' };
+    const { orgId } = await ok('o2', 'org.register', { orgName: 'Empty Co', country: 'United States', timezone: 'America/Chicago', name: 'O' });
+    const { projectId } = await ok('o2', 'projects.create', { name: 'Bare', status: 'active' }, orgId);
+    const { subcontractorId } = await ok('o2', 'subs.create', { legalName: 'Solo Ltd', trade: 'X', contacts: [{ name: 'S', email: 's@solo.example', primary: true }] }, orgId);
+    await ok('o2', 'projects.assign', { projectId, subcontractorIds: [subcontractorId] }, orgId);
+    const dash = await ok('o2', 'dashboard', {}, orgId);
+    expect(dash.needs.find((n: any) => n.item === 'Bare')?.action).toBe('Choose paperwork');
+  });
+});
+
+describe('escalations', () => {
+  it('one escalation per stuck subcontractor and project, listing everything missing, never repeated', async () => {
+    const o = await setup();
+    const reqs = (await ok('owner1', 'requirements.list', {}, o.orgId)).requirements;
+    const wc = reqs.find((r: any) => r.name === "Workers' compensation insurance").id;
+    const biz = reqs.find((r: any) => r.name === 'Business license').id;
+    const { projectId: p2 } = await ok('owner1', 'projects.create', { name: 'Second Site', status: 'active' }, o.orgId);
+    for (const [p, r] of [[o.projectId, wc], [o.projectId, biz], [p2, o.gl], [p2, wc]] as const) await ok('owner1', 'projects.setRequirement', { projectId: p, requirementId: r, mandatory: true }, o.orgId);
+    const { subcontractorId: noContact } = await ok('owner1', 'subs.create', { legalName: 'Quiet Co Ltd', trade: 'Roofing' }, o.orgId);
+    await ok('owner1', 'projects.assign', { projectId: o.projectId, subcontractorIds: [noContact] }, o.orgId);
+    await ok('owner1', 'projects.assign', { projectId: p2, subcontractorIds: [o.subcontractorId, noContact] }, o.orgId);
+    await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [o.subcontractorId] }, o.orgId);
+    await ok('owner1', 'requests.forProject', { projectId: p2, subcontractorIds: [o.subcontractorId] }, o.orgId);
+    const run = async () => { for (const d of ['2026-06-18', '2026-06-22', '2026-06-29', '2026-07-02', '2026-07-03']) { h.clock.now = new Date(`${d}T15:00:00Z`); await runDailyJobs(h.svc); } };
+    await run();
+    const esc = (await ok('owner1', 'notifications.list', { limit: 300 }, o.orgId)).items.filter((n: any) => n.type === 'escalation');
+    // Renew Co: one per request (2 projects); Quiet Co: no contact, one per project (2). Never one per document.
+    expect(esc.length).toBe(4);
+    expect(esc.filter((n: any) => /Quiet Co Ltd/.test(n.title)).every((n: any) => /still missing/.test(n.title))).toBe(true);
+    const quiet = esc.find((n: any) => /Quiet Co Ltd/.test(n.title) && /3 documents/.test(n.title));
+    expect(quiet.body).toMatch(/General liability insurance.*Workers' compensation insurance.*Business license|no contact/);
+    await run(); await run();
+    expect((await ok('owner1', 'notifications.list', { limit: 300 }, o.orgId)).items.filter((n: any) => n.type === 'escalation').length).toBe(4);
+  });
+});
+
+describe('daily digest', () => {
+  const digests = () => h.mail.filter((m) => /needs? you today/.test(m.subject));
+  it('sends nothing when nothing needs a person', async () => {
+    h.users.d0 = { email: 'd0@acme.example' };
+    await ok('d0', 'org.register', { orgName: 'Quiet Ltd', country: 'United States', timezone: 'America/Chicago', name: 'D' });
+    await runDailyJobs(h.svc);
+    expect(digests()).toHaveLength(0);
+  });
+  it('one email a day per manager, grouped, linking straight to each record; respects opt-out', async () => {
+    const o = await setup();
+    await upload(o.orgId, o.subcontractorId, o.gl, coi({ insured: 'Renew Co Limited', expiry: '2027-06-30' }));
+    await runDailyJobs(h.svc);
+    expect(digests()).toHaveLength(1);
+    const d = digests()[0];
+    expect(d.to).toBe('owner1@acme.example');
+    expect(d.subject).toMatch(/1 thing needs you today/);
+    expect(d.text).toMatch(/\n\nRenew Co Ltd\n- General liability insurance: checks passed — confirm to approve — Confirm: http:\/\/test\/app\/reviews\//);
+    expect(d.html).toContain('href="http://test/app/reviews/');
+    await runDailyJobs(h.svc); await runDailyJobs(h.svc);
+    expect(digests()).toHaveLength(1); // same day: never twice
+    h.clock.now = new Date('2026-06-16T15:00:00Z'); await runDailyJobs(h.svc);
+    expect(digests()).toHaveLength(2); // next working day
+    await ok('owner1', 'notifications.prefs', { digest: false }, o.orgId);
+    h.clock.now = new Date('2026-06-17T15:00:00Z'); await runDailyJobs(h.svc);
+    expect(digests()).toHaveLength(2);
+  });
+  it('waits until morning and skips non-working days', async () => {
+    const o = await setup();
+    await upload(o.orgId, o.subcontractorId, o.gl, coi({ insured: 'Renew Co Limited', expiry: '2027-06-30' }));
+    h.clock.now = new Date('2026-06-16T10:00:00Z'); await runDailyJobs(h.svc); // 05:00 in Chicago
+    expect(digests()).toHaveLength(0);
+    h.clock.now = new Date('2026-06-20T15:00:00Z'); await runDailyJobs(h.svc); // Saturday
+    expect(digests()).toHaveLength(0);
+  });
+});
+
+describe('email intake without setup', () => {
+  it('every organisation gets its own address at sign-up; older ones get one on the next run; rotation still works', async () => {
+    const o = await setup();
+    const org = await h.db.get<any>(`orgs/${o.orgId}`);
+    expect(org.settings.intakeKey).toMatch(/^[a-z0-9]{20}$/);
+    expect((await h.db.get<any>(`intakeRoutes/${org.settings.intakeKey}`)).orgId).toBe(o.orgId);
+    const s = await ok('owner1', 'intake.list', {}, o.orgId).catch(() => null);
+    // An organisation from before automatic intake.
+    h.users.old = { email: 'old@acme.example' };
+    const { orgId: oldOrg } = await ok('old', 'org.register', { orgName: 'Old Co', country: 'United States', timezone: 'America/Chicago', name: 'O' });
+    const before = await h.db.get<any>(`orgs/${oldOrg}`);
+    await h.db.update(`orgs/${oldOrg}`, { settings: { ...before.settings, intakeKey: undefined } });
+    await runDailyJobs(h.svc);
+    const after = await h.db.get<any>(`orgs/${oldOrg}`);
+    expect(after.settings.intakeKey).toMatch(/^[a-z0-9]{20}$/);
+    expect(after.settings.intakeKey).not.toBe(org.settings.intakeKey);
+    await runDailyJobs(h.svc);
+    expect((await h.db.get<any>(`orgs/${oldOrg}`)).settings.intakeKey).toBe(after.settings.intakeKey); // never replaced silently
+    const rotated = await ok('old', 'intake.setup', { rotate: true }, oldOrg);
+    expect(rotated.address).not.toContain(after.settings.intakeKey);
+    expect((await h.db.get<any>(`intakeRoutes/${after.settings.intakeKey}`)).revokedAt).toBeTruthy();
+    expect(s).toBeTruthy();
+  });
+});
+
+describe('requests on assignment', () => {
+  const asks = (to: string) => h.mail.filter((m) => m.to === to && /requests compliance documents/.test(m.subject));
+  it('asks for what is outstanding the moment a subcontractor is assigned, reuses approved documents, and never asks twice', async () => {
+    const o = await setup();
+    const reqs = (await ok('owner1', 'requirements.list', {}, o.orgId)).requirements;
+    const wc = reqs.find((r: any) => r.name === "Workers' compensation insurance").id;
+    const { subcontractorId: sid } = await ok('owner1', 'subs.create', { legalName: 'Keystone Plumbing LLC', trade: 'Plumbing', contacts: [{ name: 'Kim', email: 'kim@keystone.example', primary: true }] }, o.orgId);
+    const a1 = await ok('owner1', 'projects.assign', { projectId: o.projectId, subcontractorIds: [sid] }, o.orgId);
+    expect(a1.requests[0]).toMatchObject({ status: 'sent', documents: 1 });
+    expect(asks('kim@keystone.example')).toHaveLength(1);
+    expect(asks('kim@keystone.example')[0].text).toContain('General liability insurance');
+    // Assigning again sends nothing new: the request is open and being chased.
+    await ok('owner1', 'projects.assign', { projectId: o.projectId, subcontractorIds: [sid] }, o.orgId);
+    expect(asks('kim@keystone.example')).toHaveLength(1);
+    // Approve the certificate, then join a second project that needs it plus workers' comp.
+    const v = await upload(o.orgId, sid, o.gl, coi({ insured: 'Keystone Plumbing LLC', expiry: '2027-06-30' }));
+    const rv = (await ok('owner1', 'reviews.get', { versionId: v }, o.orgId)).version;
+    await ok('owner1', 'reviews.decide', { versionId: v, decision: 'approve', revision: rv.revision, metadata: { expiryDate: '2027-06-30', values: { glEachOccurrence: 2000000 } }, checklist: [] }, o.orgId);
+    const { projectId: p2 } = await ok('owner1', 'projects.create', { name: 'Second Site', status: 'active' }, o.orgId);
+    for (const r of [o.gl, wc]) await ok('owner1', 'projects.setRequirement', { projectId: p2, requirementId: r, mandatory: true }, o.orgId);
+    await ok('owner1', 'projects.assign', { projectId: p2, subcontractorIds: [sid] }, o.orgId);
+    const second = asks('kim@keystone.example').at(-1)!;
+    expect(asks('kim@keystone.example')).toHaveLength(2);
+    expect(second.text).toContain("Workers' compensation insurance");
+    expect(second.text).not.toContain('General liability insurance'); // the approved one serves both projects
+    // Nothing outstanding: nothing sent.
+    const { projectId: p3 } = await ok('owner1', 'projects.create', { name: 'Third Site', status: 'active' }, o.orgId);
+    await ok('owner1', 'projects.setRequirement', { projectId: p3, requirementId: o.gl, mandatory: true }, o.orgId);
+    const a3 = await ok('owner1', 'projects.assign', { projectId: p3, subcontractorIds: [sid] }, o.orgId);
+    expect(a3.requests[0].status).toBe('skipped');
+    expect(asks('kim@keystone.example')).toHaveLength(2);
+  });
+  it('can be held back, and a resend replaces the open request instead of adding a second one to chase', async () => {
+    const o = await setup();
+    const { subcontractorId: sid } = await ok('owner1', 'subs.create', { legalName: 'Hold Co', trade: 'X', contacts: [{ name: 'H', email: 'h@hold.example', primary: true }] }, o.orgId);
+    const a = await ok('owner1', 'projects.assign', { projectId: o.projectId, subcontractorIds: [sid], sendRequests: false }, o.orgId);
+    expect(a.requests).toEqual([]);
+    expect(asks('h@hold.example')).toHaveLength(0);
+    await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [sid] }, o.orgId);
+    await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [sid] }, o.orgId);
+    const open = (await h.db.list<any>(`orgs/${o.orgId}/requests`)).filter((r) => r.subcontractorId === sid && ['sent', 'acknowledged', 'partially_fulfilled'].includes(r.status));
+    expect(open).toHaveLength(1);
   });
 });

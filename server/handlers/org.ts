@@ -1,3 +1,4 @@
+import { currentTriage } from '../../src/domain/assessment';
 import { readinessRank } from '../../src/domain/compliance';
 import { addDays, daysBetween, todayIn } from '../../src/domain/dates';
 import { starterRequirements, STARTER_TEMPLATES } from '../../src/domain/library';
@@ -127,6 +128,9 @@ export async function registerOrg(svc: Services, db: Db, identity: Identity, inp
   }, { merge: true });
   if (input.seedLibrary !== false) await seedLibrary(db, orgId, now.toISOString(), market);
   await audit({ db, svc, org, member, source: 'web' }, { action: 'organisation.created', entity: { type: 'organisation', id: orgId, label: name }, after: { name, country, timezone } });
+  // Email submission works from day one: the organisation gets its own intake address now.
+  const { provisionIntake } = await import('../intake');
+  await provisionIntake(svc, org).catch((e) => console.error('intake provisioning failed', orgId, e));
   return { orgId };
 }
 
@@ -307,6 +311,8 @@ export async function markNotifications(ctx: Ctx, input: any) {
 export const NOTIFICATION_TYPES: NotificationType[] = ['request_sent', 'document_submitted', 'awaiting_review', 'document_approved', 'document_rejected', 'info_requested', 'expiring', 'expired', 'status_changed', 'became_non_compliant', 'project_threshold', 'escalation'];
 
 export async function updateNotificationPrefs(ctx: Ctx, input: any) {
+  if (input?.digest !== undefined) await ctx.db.update(C.doc(ctx.org.id, 'members', ctx.member.uid), { digest: !!input.digest });
+  if (!input?.prefs) return { ok: true };
   const prefs: Member['notificationPrefs'] = {};
   for (const t of NOTIFICATION_TYPES) {
     const v = input?.prefs?.[t];
@@ -371,12 +377,13 @@ const MEANINGFUL = /^(document\.(uploaded|replaced|approved|rejected|info_reques
 export async function dashboard(ctx: Ctx, input: any) {
   // All independent reads at once (they used to run one after another). Recent activity reads the
   // newest audit entries only, not the whole history.
-  const [data, members, emailProblems, intakeWaiting, recentAudit] = await Promise.all([
+  const [data, members, emailProblems, intakeWaiting, recentAudit, escalations] = await Promise.all([
     loadOrgData(ctx.db, ctx.org.id),
     ctx.db.list<Member>(C.col(ctx.org.id, 'members')),
     ctx.db.list<any>(C.col(ctx.org.id, 'emailProblems')),
     can(ctx, 'documents.upload') ? ctx.db.list<any>(C.col(ctx.org.id, 'intake'), [['status', '==', 'needs_match']]) : Promise.resolve([]),
     ctx.db.list<AuditEvent>(C.col(ctx.org.id, 'audit'), [], { orderBy: ['at', 'desc'], limit: 300 }),
+    ctx.db.list<any>(C.col(ctx.org.id, 'reminders'), [['type', '==', 'escalation']]),
   ]);
   const today = todayIn(ctx.org.settings.timezone, ctx.svc.now());
   const soon = ctx.org.settings.expiringSoonDays;
@@ -464,7 +471,7 @@ export async function dashboard(ctx: Ctx, input: any) {
     needs.push({ tone: 'attention', item: i.fileName, itemLink: '/app/inbox', context: `from ${i.from}`, issue: i.suggestion?.subcontractorId ? (i.suggestion?.requirementId ? 'Emailed in — confirm where it belongs' : 'Emailed in — choose which document it is') : 'Emailed in from an unknown sender — choose who it’s from', action: 'Match document', link: '/app/inbox', rank: 1 });
   }
   // Documents waiting for a decision, triaged by the automatic comparison.
-  const triage = (v: any) => v.assessment?.triage ?? (v.extraction?.status === 'completed' ? 'check' : 'not_read');
+  const triage = (v: any) => currentTriage(v.assessment, v.extraction?.status);
   // One row per subcontractor, so a batch of uploads reads as one job, not twelve.
   const bySub = new Map<string, any[]>();
   for (const v of [...pending].sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt))) bySub.set(v.subcontractorId, [...(bySub.get(v.subcontractorId) ?? []), v]);
@@ -487,27 +494,48 @@ export async function dashboard(ctx: Ctx, input: any) {
       action: !probs.length && !other ? (vs.length === 1 ? 'Confirm' : 'Confirm all') : 'Review', link: !probs.length && !other && vs.length > 1 ? '/app/reviews?confirm=1' : `/app/reviews/${first.id}`, rank: probs.length ? 0 : 1,
     });
   }
-  const changes = new Map<string, { r: typeof rows[number]; names: string[] }>();
-  const overdue = new Map<string, { r: typeof rows[number]; names: string[] }>();
+  // Only what the user can act on goes in the list. Anything SubCleared is already chasing becomes one quiet line.
+  const escalatedRequests = new Set(escalations.map((e: any) => e.requestId).filter(Boolean));
+  const waitingSubs = new Set<string>();
+  const checks = new Map<string, { r: typeof rows[number]; names: string[]; first: string }>();
+  const stuck = new Map<string, { r: typeof rows[number]; names: string[] }>();
   for (const r of rows) for (const x of r.results) {
+    if (!x.mandatory) continue;
+    const def = defs.get(x.requirementId);
     const k = `${r.projectId}:${r.subcontractorId}`;
-    if (x.status === 'rejected') { const e = changes.get(k) ?? { r, names: [] }; e.names.push(x.requirementName); changes.set(k, e); }
-    if (x.status === 'overdue') { const e = overdue.get(k) ?? { r, names: [] }; e.names.push(x.requirementName); overdue.set(k, e); }
-  }
-  for (const { r, names } of changes.values()) needs.push({ tone: 'blocked', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, context: pname(r.projectId), issue: names.length === 1 ? `${names[0]} needs changes` : `${names.length} documents need changes`, action: 'View reason', link: `/app/projects/${r.projectId}?show=not_ready`, rank: 2 });
-  for (const x of expired) needs.push({ tone: 'blocked', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expired ${-x.days === 0 ? 'today' : `${-x.days} day${-x.days === 1 ? '' : 's'} ago`}`, action: 'Request renewal', link: '/app/renewals?window=expired', rank: 3 });
-  for (const p of projects) {
-    const pr = rows.filter((r) => r.projectId === p.id);
-    const toRequest = pr.filter((r) => r.results.some((x) => ['missing', 'not_requested'].includes(x.status) && defs.get(x.requirementId)?.kind === 'document'));
-    if (toRequest.length) needs.push({ tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: `${toRequest.length} subcontractor${toRequest.length === 1 ? ' hasn’t' : 's haven’t'} been asked for paperwork`, action: 'Request paperwork', link: `/app/projects/${p.id}`, rank: 4 });
-    else {
-      const notReady = pr.filter((r) => r.readiness === 'not_ready').length;
-      if (notReady) needs.push({ tone: 'attention', item: p.name, itemLink: `/app/projects/${p.id}`, issue: `${notReady} subcontractor${notReady === 1 ? '' : 's'} not ready`, action: 'View project', link: `/app/projects/${p.id}?show=not_ready`, rank: 6 });
+    if (def && def.kind !== 'document') {
+      // A check your team makes: nothing to ask the subcontractor for.
+      if (['missing', 'requested', 'overdue', 'expired', 'expiring_soon'].includes(x.status)) { const e = checks.get(k) ?? { r, names: [], first: x.requirementId }; e.names.push(x.requirementName); checks.set(k, e); }
+      continue;
+    }
+    if (['requested', 'overdue', 'rejected'].includes(x.status)) {
+      const open = data.requests.filter((q) => q.subcontractorId === r.subcontractorId && q.requirementIds.includes(x.requirementId) && ['sent', 'acknowledged', 'partially_fulfilled'].includes(q.status));
+      if (open.some((q) => escalatedRequests.has(q.id))) { const e = stuck.get(r.subcontractorId) ?? { r, names: [] }; if (!e.names.includes(x.requirementName)) e.names.push(x.requirementName); stuck.set(r.subcontractorId, e); }
+      else waitingSubs.add(r.subcontractorId);
     }
   }
-  for (const { r, names } of overdue.values()) needs.push({ tone: 'attention', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, context: pname(r.projectId), issue: names.length === 1 ? `${names[0]} is overdue` : `${names.length} requested documents are overdue`, action: 'Resend request', link: `/app/projects/${r.projectId}?show=not_ready`, rank: 5 });
-  for (const x of [...expiring30].sort((a, b) => a.days - b.days)) needs.push({ tone: 'attention', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expires ${x.days === 0 ? 'today' : `in ${x.days} day${x.days === 1 ? '' : 's'}`}`, action: 'Request renewal', link: '/app/renewals?window=30', rank: 7 });
+  for (const { r, names, first } of checks.values()) needs.push({ tone: 'attention', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, context: pname(r.projectId), issue: `${names.join(', ')}: your team’s check`, action: 'Record check', link: `/app/subcontractors/${r.subcontractorId}?tab=requirements&project=${r.projectId}&check=${first}`, rank: 2 });
+  for (const { r, names } of stuck.values()) needs.push({ tone: 'blocked', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, issue: `Still hasn’t sent ${names.join(', ')} after every reminder — may need a call`, action: 'View contact', link: `/app/subcontractors/${r.subcontractorId}`, rank: 2 });
+  for (const x of expired) {
+    const st = renewalStage(x.v);
+    needs.push({ tone: 'blocked', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expired ${-x.days === 0 ? 'today' : `${-x.days} day${-x.days === 1 ? '' : 's'} ago`}${st.stage === 'requested' ? ' — renewal requested' : ''}`, action: st.stage === 'replacement_received' ? 'Review replacement' : st.stage === 'not_requested' ? 'Request renewal' : 'View', link: st.stage === 'replacement_received' ? `/app/reviews/${(st as any).replacementVersionId}` : '/app/renewals?window=expired', rank: 3 });
+  }
+  for (const p of projects) {
+    const pr = rows.filter((r) => r.projectId === p.id);
+    const hasReqs = data.projectRequirements.some((x) => x.projectId === p.id && x.active);
+    if (!hasReqs && pr.length) { needs.push({ tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: 'No paperwork chosen, so nothing can be requested', action: 'Choose paperwork', link: `/app/projects/${p.id}?tab=requirements`, rank: 4 }); continue; }
+    const toRequest = pr.filter((r) => r.results.some((x) => ['missing', 'not_requested'].includes(x.status) && defs.get(x.requirementId)?.kind === 'document'));
+    if (toRequest.length) needs.push({ tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: `${toRequest.length} subcontractor${toRequest.length === 1 ? ' hasn’t' : 's haven’t'} been asked for paperwork`, action: 'Request paperwork', link: `/app/projects/${p.id}`, rank: 4 });
+  }
+  // Expiring evidence is renewed automatically; only list it when no renewal could be requested.
+  let renewing = 0;
+  for (const x of [...expiring30].sort((a, b) => a.days - b.days)) {
+    const st = renewalStage(x.v);
+    if (st.stage === 'not_requested') needs.push({ tone: 'attention', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expires ${x.days === 0 ? 'today' : `in ${x.days} day${x.days === 1 ? '' : 's'}`}`, action: 'Request renewal', link: '/app/renewals?window=30', rank: 7 });
+    else renewing++;
+  }
   needs.sort((a, b) => a.rank - b.rank);
+  const waiting = { subcontractors: waitingSubs.size, renewals: renewing };
 
   const recent = recentAudit.filter((e) => MEANINGFUL.test(e.action)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10);
   return {
@@ -523,7 +551,7 @@ export async function dashboard(ctx: Ctx, input: any) {
     review: { total: pending.length, looksGood: pending.filter((v) => triage(v) === 'looks_good').length, toCheck: pending.filter((v) => ['check', 'not_read'].includes(triage(v))).length, problems: pending.filter((v) => triage(v) === 'problem').length },
     inbox: inbox.length, readingOn: !!ctx.svc.ai,
     mailHealth: can(ctx, 'settings.manage') ? await ctx.db.get<any>(C.doc(ctx.org.id, 'health', 'mail')) : null,
-    attention, actions: actions.slice(0, 8), actionsTotal: actions.length, needs: needs.slice(0, 12), needsTotal: needs.length,
+    attention, actions: actions.slice(0, 8), actionsTotal: actions.length, needs: input?.full ? needs : needs.slice(0, 12), needsTotal: needs.length, waiting,
     projects: projectSummary,
     upcoming: inForce.filter((x) => x.days <= Math.max(Number(input?.days) || 60, soon)).sort((a, b) => a.days - b.days).slice(0, 8).map((x) => ({
       versionId: x.v.id, documentId: x.v.documentId, title: docById.get(x.v.documentId)?.title, subcontractor: subName.get(x.v.subcontractorId), subcontractorId: x.v.subcontractorId,

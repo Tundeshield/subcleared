@@ -415,17 +415,29 @@ export async function getIntakeSetup(ctx: Ctx) {
   };
 }
 
+/**
+ * Gives an organisation its own random intake address. Called when the organisation is created and,
+ * for organisations made before that, by the scheduler, so nobody has to switch email intake on.
+ */
+export async function provisionIntake(svc: Services, org: Organisation, opts: { rotate?: boolean; actor?: any } = {}) {
+  if (!svc.env.inboundDomain || !svc.env.resendWebhookSecret || !svc.inbound) return null;
+  const old = org.settings.intakeKey;
+  if (old && !opts.rotate) return old;
+  const key = randomToken(18).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20).padEnd(20, '0');
+  await svc.db.set(`intakeRoutes/${key}`, { key, orgId: org.id, createdAt: svc.now().toISOString() });
+  if (old) await svc.db.update(`intakeRoutes/${old}`, { revokedAt: svc.now().toISOString() });
+  // Only the key changes: read-modify-write of the whole settings object could undo a concurrent edit.
+  const fresh = await svc.db.get<Organisation>(C.org(org.id));
+  await svc.db.update(C.org(org.id), { settings: { ...(fresh?.settings ?? org.settings), intakeKey: key } });
+  org.settings.intakeKey = key;
+  await audit({ svc, db: svc.db, org, source: opts.actor ? 'web' : 'scheduler' } as any, { action: old ? 'intake.address_rotated' : 'intake.enabled', entity: { type: 'org', id: org.id, label: org.name }, ...(opts.actor ? { actor: opts.actor } : { actor: { type: 'system', id: 'setup', name: 'Automatic setup' } }) });
+  return key;
+}
+
 export async function enableIntake(ctx: Ctx, input: any) {
   need(ctx, 'settings.manage');
   if (!ctx.svc.env.inboundDomain || !ctx.svc.env.resendWebhookSecret || !ctx.svc.inbound) throw new HttpError(503, 'Email intake needs Resend receiving. Set INBOUND_EMAIL_DOMAIN, RESEND_WEBHOOK_SECRET and RESEND_API_KEY for this deployment.', 'not_configured');
-  const old = ctx.org.settings.intakeKey;
-  if (old && !input.rotate) return getIntakeSetup(ctx);
-  const key = randomToken(18).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20).padEnd(20, '0');
-  await ctx.db.set(`intakeRoutes/${key}`, { key, orgId: ctx.org.id, createdAt: ctx.svc.now().toISOString() });
-  if (old) await ctx.db.update(`intakeRoutes/${old}`, { revokedAt: ctx.svc.now().toISOString() });
-  await ctx.db.update(C.org(ctx.org.id), { settings: { ...ctx.org.settings, intakeKey: key } });
-  ctx.org.settings.intakeKey = key;
-  await audit(ctx, { action: old ? 'intake.address_rotated' : 'intake.enabled', entity: { type: 'org', id: ctx.org.id, label: ctx.org.name } });
+  await provisionIntake(ctx.svc, ctx.org, { rotate: !!input.rotate, actor: { type: 'user', id: ctx.member.uid, name: ctx.member.name } });
   return getIntakeSetup(ctx);
 }
 

@@ -24,11 +24,22 @@ export function namesMatch(read: string, names: (string | undefined)[]) {
   });
 }
 
+/** Bump when the comparison rules change: stored results from older rules no longer count as "looks right". */
+export const RULES_VERSION = 2;
+
+/** The triage to act on: a stored result from older rules is treated as needing a check. */
+export function currentTriage(a: { triage?: string; rulesVersion?: number } | undefined, extractionStatus?: string): 'looks_good' | 'check' | 'problem' | 'not_read' {
+  if (!a?.triage) return extractionStatus === 'completed' ? 'check' : 'not_read';
+  if (a.triage === 'looks_good' && (a.rulesVersion ?? 1) < RULES_VERSION) return 'check';
+  return a.triage as any;
+}
+
 export interface AssessInput {
   requirement: Pick<RequirementDefinition, 'name' | 'category' | 'documentType' | 'criteria' | 'expiryRequired' | 'version'> | null;
   fields: Record<string, ExtractedField>;
   kind?: string;
   kindConfidence?: number;
+  kindScheme?: number;
   subcontractor: { legalName: string; tradingName?: string };
   /** The contractor's own name, to check the certificate holder. */
   orgName?: string;
@@ -48,12 +59,39 @@ export function assess(i: AssessInput): Assessment {
   if (req && i.kind) {
     const want = expectedKinds(req);
     const kindName = KIND_LABELS[i.kind as DocumentKind] ?? i.kind;
-    if (want.length && (i.kindConfidence ?? 0) >= TRUST) {
+    const legacy = i.kind === 'licence_registration' && !i.kindScheme && !want.includes('licence_registration') && want.some((k) => k === 'company_registration' || k === 'tax_registration');
+    if (legacy) {
+      checks.push({ key: 'kind', label: 'Right kind of document', outcome: 'unclear', detail: 'Read before company and tax documents were told apart. Check which one this is.' });
+    } else if (want.length && (i.kindConfidence ?? 0) >= TRUST) {
       checks.push(want.includes(i.kind as DocumentKind)
         ? { key: 'kind', label: 'Right kind of document', outcome: 'pass', detail: `Reads as ${kindName.toLowerCase()}.` }
         : { key: 'kind', label: 'Right kind of document', outcome: 'fail', detail: `Reads as ${kindName.toLowerCase()}, but ${req.name} needs ${KIND_LABELS[want[0]].toLowerCase()}.` });
     } else if (want.length) {
       checks.push({ key: 'kind', label: 'Right kind of document', outcome: 'unclear', detail: 'Couldn’t tell confidently what kind of document this is.' });
+    }
+  }
+  // Reading a document isn't proof it's the right one: without a specific match, a person checks.
+  if (req && !checks.some((c) => c.key === 'kind')) {
+    checks.push({ key: 'kind', label: 'Right kind of document', outcome: 'unclear', detail: `Check this is the document ${req.name} asks for.` });
+  }
+
+  // 1b. Insurance: the right cover, not just an insurance certificate. Employers' liability and
+  // public liability certificates look alike; a combined certificate showing both satisfies either.
+  if (req && i.kind === 'insurance_certificate') {
+    const s = `${req.category ?? ''} ${req.documentType ?? ''} ${req.name}`.toLowerCase();
+    const wantsEl = /employers'? liability|workers'? comp/.test(s);
+    const wantsPl = !wantsEl && /public liability|general liability/.test(s);
+    const plShown = !!trusted('glEachOccurrence') || !!trusted('glAggregate');
+    const elShown = !!trusted('elLimit') || (() => { const w = trusted('wcCoverage'); return !!w && (w.value === true || w.value === 'true'); })();
+    const label = wantsEl ? `Shows ${/workers/.test(s) ? 'workers’ compensation' : 'employers’ liability'} cover` : 'Shows public or general liability cover';
+    if (wantsEl || wantsPl) {
+      const has = wantsEl ? elShown : plShown;
+      const other = wantsEl ? plShown : elShown;
+      checks.push(has
+        ? { key: 'cover', label, outcome: 'pass', detail: 'The certificate lists this cover.' }
+        : other
+          ? { key: 'cover', label, outcome: 'fail', detail: wantsEl ? 'The certificate shows public or general liability, not employers’ liability or workers’ compensation.' : 'The certificate shows employers’ liability or workers’ compensation, not public or general liability.' }
+          : { key: 'cover', label, outcome: 'unclear', detail: 'Couldn’t confirm which cover the certificate lists.' });
     }
   }
 
@@ -140,11 +178,13 @@ export function assess(i: AssessInput): Assessment {
 
   const fails = checks.filter((c) => c.outcome === 'fail');
   const unclear = checks.filter((c) => c.outcome === 'unclear');
-  const triage: Assessment['triage'] = fails.length ? 'problem' : unclear.length ? 'check' : 'looks_good';
+  // "Looks right" needs a specific positive match on the kind of document, never just a successful reading.
+  const kindPassed = checks.some((c) => c.key === 'kind' && c.outcome === 'pass');
+  const triage: Assessment['triage'] = fails.length ? 'problem' : unclear.length || !kindPassed ? 'check' : 'looks_good';
   const summary = triage === 'problem'
     ? `${fails.length} problem${fails.length === 1 ? '' : 's'}: ${fails.map((x) => x.label.toLowerCase()).join(', ')}.`
     : triage === 'check'
       ? `${unclear.length} thing${unclear.length === 1 ? '' : 's'} to check by eye: ${unclear.map((x) => x.label.toLowerCase()).join(', ')}.`
       : 'Everything that could be read matches the requirement. Confirm and approve.';
-  return { triage, summary, checks, requirementVersion: req?.version, at: i.nowIso };
+  return { triage, summary, checks, requirementVersion: req?.version, rulesVersion: RULES_VERSION, at: i.nowIso };
 }

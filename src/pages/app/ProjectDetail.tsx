@@ -193,16 +193,25 @@ function ReadinessTab({ data, focus, setFocus, onAssign, goTo }: { data: any; fo
   const flat = rows.map((s: any) => ({ ...s, contactText: s.contact ? `${s.contact.name} <${s.contact.email}>` : '', issues: issueSummary(s.results).join('; '), readinessText: humanize(s.readiness), last: formatDate(s.lastActivityAt) }));
   const needs = rows.filter((s: any) => s.readiness !== 'ready');
   const ready = rows.filter((s: any) => s.readiness === 'ready');
+  const docReqIds = new Set(data.requirements.filter((r: any) => r.definition?.kind === 'document').map((r: any) => r.requirementId));
   const row = (s: any) => {
     const issues = issueSummary(s.results);
     const counted = s.results.filter((r: any) => r.mandatory && r.status !== 'not_applicable');
     const approved = counted.filter((r: any) => ['approved', 'expiring_soon'].includes(r.status)).length;
     const toReview = s.results.find((r: any) => REVIEW.includes(r.status) && r.versionId);
     const outstanding = s.results.filter((r: any) => r.mandatory && [...MISSING, ...REQUESTED, 'expired', 'rejected'].includes(r.status) || r.status === 'expiring_soon');
-    const onlyWaiting = outstanding.length > 0 && outstanding.every((r: any) => REQUESTED.includes(r.status));
     const isOpen = !!open[s.id];
-    const next = toReview && can('documents.review') ? <Link to={`/app/reviews/${toReview.versionId}`} className="btn-secondary btn-sm">Review document</Link>
-      : outstanding.length && can('requests.send') ? <button className="btn-secondary btn-sm" onClick={() => setRequest({ sub: s.id, reqs: outstanding.map((r: any) => r.requirementId) })}>{onlyWaiting ? 'Resend request' : 'Request documents'}</button>
+    // Documents the subcontractor must send vs checks your team makes: never ask them for a check.
+    const docsOut = outstanding.filter((r: any) => docReqIds.has(r.requirementId));
+    const checksOut = s.results.filter((r: any) => r.mandatory && !docReqIds.has(r.requirementId) && [...MISSING, ...REQUESTED, 'expired', 'expiring_soon'].includes(r.status));
+    const recordCheck = checksOut.length > 0 && can('documents.review')
+      ? <Link to={`/app/subcontractors/${s.id}?tab=requirements&project=${data.project.id}&check=${checksOut[0].requirementId}`} className={cx('btn-sm', docsOut.length || toReview ? 'btn-ghost' : 'btn-secondary')} title={checksOut.map((r: any) => r.requirementName).join(', ')}>Record check</Link>
+      : null;
+    const primary = toReview && can('documents.review') ? <Link to={`/app/reviews/${toReview.versionId}`} className="btn-secondary btn-sm">Review document</Link>
+      : docsOut.length && can('requests.send') ? <button className="btn-secondary btn-sm" onClick={() => setRequest({ sub: s.id, reqs: docsOut.map((r: any) => r.requirementId) })}>{docsOut.every((r: any) => REQUESTED.includes(r.status)) ? 'Resend request' : 'Request documents'}</button>
+      : null;
+    const next = primary || recordCheck
+      ? <span className="inline-flex flex-wrap justify-end gap-1.5">{primary}{recordCheck}</span>
       : <button className="btn-ghost btn-sm" onClick={() => setOpen({ ...open, [s.id]: !isOpen })}>{isOpen ? 'Hide details' : 'View details'}</button>;
     return (
       <li key={s.id} className="border-b border-line">
@@ -232,7 +241,8 @@ function ReadinessTab({ data, focus, setFocus, onAssign, goTo }: { data: any; fo
             <ul className="rounded-md border border-line bg-paper divide-y divide-line">
               {[...s.results].sort((a: any, b: any) => Number(b.blocking) - Number(a.blocking)).map((r: any) => {
                 const act = REVIEW.includes(r.status) && r.versionId && can('documents.review') ? <Link className="btn-quiet" to={`/app/reviews/${r.versionId}`}>Review</Link>
-                  : [...MISSING, ...REQUESTED, 'expired', 'rejected', 'expiring_soon'].includes(r.status) && can('requests.send') ? <button className="btn-quiet" onClick={() => setRequest({ sub: s.id, reqs: [r.requirementId] })}>{r.status === 'expiring_soon' || r.status === 'expired' ? 'Request renewal' : r.status === 'rejected' ? 'Request replacement' : REQUESTED.includes(r.status) ? 'Send again' : 'Request'}</button>
+                  : !docReqIds.has(r.requirementId) && [...MISSING, ...REQUESTED, 'expired', 'expiring_soon'].includes(r.status) && can('documents.review') ? <Link className="btn-quiet" to={`/app/subcontractors/${s.id}?tab=requirements&project=${data.project.id}&check=${r.requirementId}`}>Record check</Link>
+                  : [...MISSING, ...REQUESTED, 'expired', 'rejected', 'expiring_soon'].includes(r.status) && docReqIds.has(r.requirementId) && can('requests.send') ? <button className="btn-quiet" onClick={() => setRequest({ sub: s.id, reqs: [r.requirementId] })}>{r.status === 'expiring_soon' || r.status === 'expired' ? 'Request renewal' : r.status === 'rejected' ? 'Request replacement' : REQUESTED.includes(r.status) ? 'Send again' : 'Request'}</button>
                   : r.documentId ? <Link className="btn-quiet" to={`/app/documents/${r.documentId}`}>View document</Link> : null;
                 return (
                   <li key={r.requirementId} className="grid sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto] gap-x-6 gap-y-1 px-4 py-3 text-sm">
@@ -385,11 +395,11 @@ function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNo
         const r = await api('subs.create', { legalName: f.legalName.trim(), trade: f.trade.trim(), contacts: [{ name: f.name.trim(), email: f.email.trim(), primary: true }] });
         ids.push(r.subcontractorId);
       }
-      await api('projects.assign', { projectId, subcontractorIds: ids });
+      // Assigning sends the outstanding requests itself (one step); nothing already approved is asked for again.
+      const r = await api<any>('projects.assign', { projectId, subcontractorIds: ids, sendRequests: canSendNow && sendNow });
       let sent = false;
       if (canSendNow && sendNow) {
-        const r = await api<any>('requests.forProject', { projectId, subcontractorIds: ids });
-        const ok = r.results.filter((x: any) => x.status === 'sent').length;
+        const ok = r.requests.filter((x: any) => x.status === 'sent').length;
         const missed = r.results.filter((x: any) => x.status !== 'sent' && x.detail !== 'Nothing outstanding to request');
         toast(`${ids.length} added · ${ok} request${ok === 1 ? '' : 's'} sent${missed.length ? ` · ${missed.length} not sent (${missed[0].detail})` : ''}`, missed.length ? 'info' : undefined);
         sent = true;

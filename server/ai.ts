@@ -11,7 +11,7 @@
 // decides to message anyone. Usage is metered per organisation per month.
 import { assess } from '../src/domain/assessment';
 import { todayIn } from '../src/domain/dates';
-import { ALL_KINDS, KIND_LABELS, SCHEMAS, type DocumentKind } from '../src/domain/extraction';
+import { ALL_KINDS, KIND_LABELS, SCHEMAS, type DocumentKind, KIND_HINTS, KIND_SCHEME } from '../src/domain/extraction';
 import { getPlan } from '../src/domain/plans';
 import type { Assignment, DocumentVersion, ExtractedField, Extraction, Organisation, Project, ProjectRequirement, RequirementDefinition, Subcontractor } from '../src/domain/types';
 import { C } from './core';
@@ -42,7 +42,7 @@ export class AnthropicProvider implements AiProvider {
   }
 }
 
-const FIELD_DOCS = ALL_KINDS.map((k) => `- ${k} (${KIND_LABELS[k]}):\n${SCHEMAS[k].map((f) => `    ${f.key} [${f.type}] ${f.label}${f.hint ? ` — ${f.hint}` : ''}`).join('\n')}`).join('\n');
+const FIELD_DOCS = ALL_KINDS.map((k) => `- ${k} (${KIND_LABELS[k]})${KIND_HINTS[k] ? ` — ${KIND_HINTS[k]}` : ''}:\n${SCHEMAS[k].map((f) => `    ${f.key} [${f.type}] ${f.label}${f.hint ? ` — ${f.hint}` : ''}`).join('\n')}`).join('\n');
 
 export const EXTRACTION_SYSTEM = `You read construction subcontractor paperwork so a person can check it quickly. You transcribe; you never judge validity or coverage.
 
@@ -190,7 +190,7 @@ export async function readDocument(svc: Services, org: Organisation, bytes: Uint
     if (!escalated && needsSecondLook(x) && svc.env.anthropicModel !== svc.env.aiFastModel) {
       try { const y = await run(svc.env.anthropicModel, false); x = y; escalated = true; } catch { /* keep the first reading */ }
     }
-    return { status: 'completed', kind: x.kind, kindConfidence: x.kindConfidence, issues: x.issues, fields: x.fields, model: x.model, escalated, usage, startedAt, completedAt: svc.now().toISOString() };
+    return { status: 'completed', kind: x.kind, kindConfidence: x.kindConfidence, kindScheme: KIND_SCHEME, issues: x.issues, fields: x.fields, model: x.model, escalated, usage, startedAt, completedAt: svc.now().toISOString() };
   } catch (e: any) {
     return { status: 'failed', error: String(e?.message ?? e).slice(0, 300), usage, startedAt, completedAt: svc.now().toISOString() };
   }
@@ -211,7 +211,7 @@ export async function assessVersion(svc: Services, org: Organisation, v: Documen
   const needing = new Set(projectReqs.filter((pr) => pr.active).map((pr) => pr.projectId));
   const ps = projects.filter((p) => live.has(p.id) && needing.has(p.id) && !['archived', 'completed'].includes(p.status));
   return assess({
-    requirement: def, fields: v.extraction.fields ?? {}, kind: v.extraction.kind, kindConfidence: v.extraction.kindConfidence,
+    requirement: def, fields: v.extraction.fields ?? {}, kind: v.extraction.kind, kindConfidence: v.extraction.kindConfidence, kindScheme: v.extraction.kindScheme,
     subcontractor: sub, orgName: org.name, projects: ps.map((p) => ({ id: p.id, name: p.name, startDate: p.startDate, endDate: p.endDate })),
     today: todayIn(org.settings.timezone, svc.now()), nowIso: svc.now().toISOString(),
   });
@@ -277,7 +277,9 @@ export class MockAiProvider implements AiProvider {
     const find = (re: RegExp) => { const m = text.match(re); return m ? m[1].trim() : null; };
     const kind = /certificate of (liability )?insurance|insurance certificate|policy number/i.test(text) ? 'insurance_certificate'
       : /method statement|risk assessment|rams/i.test(text) ? 'method_statement'
-        : /licen[cs]e|registration/i.test(text) ? 'licence_registration' : 'other';
+        : /\bvat\b|\btax\b|revenue|w-9|\butr\b/i.test(text) ? 'tax_registration'
+          : /company registration|incorporation|companies house|business registration/i.test(text) ? 'company_registration'
+            : /licen[cs]e|registration/i.test(text) ? 'licence_registration' : 'other';
     const page = 1;
     const fld = (label: RegExp, conf = 0.95) => { const v = find(label); return v ? { value: v, confidence: /\?/.test(v) ? 0.4 : conf, page, source: v } : { value: null, confidence: 0 }; };
     const money = (label: RegExp) => { const v = find(label); return v ? { value: Number(v.replace(/[^0-9.]/g, '')), confidence: 0.92, page, source: v } : { value: null, confidence: 0 }; };

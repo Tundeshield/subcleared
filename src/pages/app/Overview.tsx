@@ -67,6 +67,12 @@ export default function Overview() {
               </ul>
             )}
             {data.needsTotal > data.needs.length && <p className="text-sm text-faint mt-3">Showing the {data.needs.length} most urgent. Open a project to see everything on it.</p>}
+            {(data.waiting?.subcontractors > 0 || data.waiting?.renewals > 0) && (
+              <p className="text-sm text-muted mt-4 flex items-start gap-2"><Glyph tone="progress" className="w-3.5 h-3.5 mt-1 shrink-0" /><span>
+                {[data.waiting.subcontractors > 0 && <Link key="s" to="/app/subcontractors?issue=outstanding" className="hover:underline underline-offset-4">{data.waiting.subcontractors} subcontractor{data.waiting.subcontractors === 1 ? ' is' : 's are'} still sending paperwork</Link>,
+                  data.waiting.renewals > 0 && <Link key="r" to="/app/renewals?window=30" className="hover:underline underline-offset-4">{data.waiting.renewals} renewal{data.waiting.renewals === 1 ? '' : 's'} requested</Link>].filter(Boolean).reduce((acc: any[], x, i) => (i ? [...acc, ' · ', x] : [x]), [])}
+                . Reminders are going out automatically.</span></p>
+            )}
           </section>
 
           {data.projects.length > 0 && (

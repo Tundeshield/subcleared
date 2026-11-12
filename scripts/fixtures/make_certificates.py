@@ -196,7 +196,7 @@ def rams(path):
     W, H = A4; c = canvas.Canvas(path, pagesize=A4)
     c.setFont('Helvetica-Bold', 14); c.drawString(50, H - 70, 'Risk Assessment and Method Statement')
     c.setFont('Helvetica', 10)
-    for i, (k, v) in enumerate([('Company', 'Harbour Scaffolding Ltd'), ('Project', 'Quayside Library'), ('Activity', 'Erection and dismantling of tube and fitting scaffold'), ('Prepared by', 'D. Okafor, Contracts Manager'), ('Revision', 'B'), ('Date', '02/10/2026'), ('Review date', '02/04/2027')]):
+    for i, (k, v) in enumerate([('Company', 'Harbour Scaffolding Ltd'), ('Project', 'Quayside Library'), ('Activity', 'Erection and dismantling of tube and fitting scaffold'), ('Prepared by', 'D. Hughes, Contracts Manager'), ('Revision', 'B'), ('Date', '02/10/2026'), ('Review date', '02/04/2027')]):
         c.drawString(50, H - 100 - i * 16, f'{k}:'); c.drawString(170, H - 100 - i * 16, v)
     c.drawString(50, H - 240, '1. Sequence of works ... (continued on page 2)')
     footer(c, W); c.showPage()
@@ -204,6 +204,24 @@ def rams(path):
     footer(c, W); c.save()
 rams(f'{OUT}/method-statement.pdf')
 add('method-statement.pdf', 'method_statement', {'namedInsured': 'Harbour Scaffolding Ltd', 'projectReference': 'Quayside Library', 'issueDate': '2026-10-02', 'expiryDate': '2027-04-02'}, 'Two-page method statement, UK dates')
+
+# 13-16. Company and tax documents that look alike, and an employers' liability-only certificate.
+def simple(path, title, rows, note=None):
+    W, H = A4; c = canvas.Canvas(path, pagesize=A4)
+    c.setFont('Helvetica-Bold', 15); c.drawString(50, H - 70, title)
+    c.setFont('Helvetica', 10)
+    for i, (k, v) in enumerate(rows):
+        c.drawString(50, H - 104 - i * 18, f'{k}:'); c.drawString(210, H - 104 - i * 18, v)
+    if note: c.drawString(50, H - 120 - len(rows) * 18, note)
+    footer(c, W); c.save()
+simple(f'{OUT}/vat-registration.pdf', 'Certificate of Registration for VAT', [('Name', 'Thameside Electrical Services Ltd'), ('VAT registration number', 'GB 284 7716 52'), ('Effective date of registration', '1 May 2021'), ('Issued by', 'HM Revenue & Customs')], 'This certificate confirms registration for Value Added Tax.')
+add('vat-registration.pdf', 'tax_registration', {'namedInsured': 'Thameside Electrical Services Ltd', 'issuer': 'HM Revenue & Customs', 'referenceNumber': 'GB 284 7716 52', 'issueDate': '2021-05-01'}, 'VAT registration certificate (a tax document, not a company registration)')
+simple(f'{OUT}/tax-clearance.pdf', 'Tax Clearance Certificate', [('Taxpayer', 'Thameside Electrical Services Ltd'), ('Reference', 'TC-2026-118204'), ('Date of issue', '3 February 2026'), ('Valid until', '2 February 2027'), ('Issued by', 'Revenue Commissioners')], 'The taxpayer named above is in good standing with the tax authority.')
+add('tax-clearance.pdf', 'tax_registration', {'namedInsured': 'Thameside Electrical Services Ltd', 'referenceNumber': 'TC-2026-118204', 'issueDate': '2026-02-03', 'expiryDate': '2027-02-02'}, 'Tax clearance certificate (a tax document, not a company registration)')
+simple(f'{OUT}/company-incorporation.pdf', 'Certificate of Incorporation of a Private Limited Company', [('Company name', 'Thameside Electrical Services Ltd'), ('Company number', '09876543'), ('Incorporated on', '14 March 2016'), ('Registrar', 'Registrar of Companies for England and Wales')], 'The company is limited by shares and its registered office is in England and Wales.')
+add('company-incorporation.pdf', 'company_registration', {'namedInsured': 'Thameside Electrical Services Ltd', 'referenceNumber': '09876543', 'issueDate': '2016-03-14'}, 'Certificate of incorporation')
+simple(f'{OUT}/el-only.pdf', 'Certificate of Employers\' Liability Insurance', [('Policy holder', 'Thameside Electrical Services Ltd'), ('Insurer', 'Albion General Insurance plc'), ('Policy number', 'EL-447190'), ('Period of insurance', '01/06/2026 to 31/05/2027'), ('Limit of indemnity', 'GBP 10,000,000 any one occurrence')], 'Employers\' Liability (Compulsory Insurance) Act 1969. This certificate covers employers\' liability only.')
+add('el-only.pdf', 'insurance_certificate', {'namedInsured': 'Thameside Electrical Services Ltd', 'issuer': 'Albion General Insurance plc', 'referenceNumber': 'EL-447190', 'issueDate': '2026-06-01', 'expiryDate': '2027-05-31', 'elLimit': 10000000, 'wcCoverage': True}, "Employers' liability only: must not pass as public liability")
 
 with open(f'{OUT}/truth.json', 'w') as f: json.dump(truth, f, indent=2)
 print(len(truth), 'documents written to', os.path.abspath(OUT))

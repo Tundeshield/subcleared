@@ -5,7 +5,7 @@ import { COUNTRIES, CURRENCIES, LOCALES, MARKETS, setFormatting } from '../../do
 import { api, useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
-import { Callout, Checkbox, Confirm, cx, Empty, ErrorState, Field, FilterSelect, FormError, humanize, PageHeader, Pagination, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
+import { Callout, Checkbox, Confirm, cx, Disclosure, Empty, ErrorState, Field, FilterSelect, FormError, humanize, PageHeader, Pagination, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
 
 const SECTIONS = [['organisation', 'Organisation'], ['automation', 'Reminders and automation'], ['profile', 'Profile and notifications'], ['delivery', 'Email delivery'], ['audit', 'Audit log'], ['data', 'Sample data']] as const;
 
@@ -108,14 +108,20 @@ function Profile() {
       </section>
       <section>
         <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Notifications</h2>
-        <p className="text-sm text-muted mt-3">Choose how you hear about each event. In-app notifications appear under the bell.</p>
+        <div className="mt-4">
+          <Checkbox checked={me!.member!.digest !== false} onChange={async (v) => { await save.run({ digest: v }); await refresh(); toast(v ? 'Daily summary on' : 'Daily summary off'); }}
+            label="Daily summary email" hint="One email on working mornings listing only what needs you. Nothing is sent when there’s nothing to do." />
+        </div>
+        <Disclosure className="mt-6 border-t" title="Individual notifications" note="optional">
+        <p className="text-sm text-muted">Choose how you hear about each event. In-app notifications appear under the bell.</p>
         <table className="table mt-4"><thead><tr><th className="th">When</th><th className="th w-24">In app</th><th className="th w-24">Email</th></tr></thead>
           <tbody>{NOTIFS.map(([k, l]) => (
             <tr key={k}><td className="td py-3">{l}</td>
               <td className="td py-3"><Checkbox checked={prefs[k]?.inApp ?? true} onChange={(v) => setPrefs({ ...prefs, [k]: { ...prefs[k], inApp: v } })} label={<span className="sr-only">In app: {l}</span>} /></td>
               <td className="td py-3"><Checkbox checked={prefs[k]?.email ?? false} onChange={(v) => setPrefs({ ...prefs, [k]: { ...prefs[k], email: v } })} label={<span className="sr-only">Email: {l}</span>} /></td></tr>
           ))}</tbody></table>
-        <div className="pt-5 flex justify-end"><button className="btn-primary" disabled={save.busy} onClick={async () => { await save.run({ prefs }); await refresh(); toast('Preferences saved'); }}>{save.busy && <Spinner />}Save preferences</button></div>
+        <div className="pt-5 flex justify-end"><button className="btn-secondary" disabled={save.busy} onClick={async () => { await save.run({ prefs }); await refresh(); toast('Preferences saved'); }}>{save.busy && <Spinner />}Save preferences</button></div>
+        </Disclosure>
       </section>
     </div>
   );

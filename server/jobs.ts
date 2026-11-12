@@ -2,11 +2,11 @@ import { applyOrgFormatting } from '../src/domain/locale';
 // Background jobs: daily renewal reminders/escalations, and AI extraction.
 // Every job is idempotent: reminder keys are created with create() (fails if
 // it exists), so overlapping or retried runs cannot send duplicates.
-import { chasingOf, dueChase, inWorkingHours } from '../src/domain/automation';
+import { chasingOf, dueChase, inWorkingHours, localClock, workingHoursOf } from '../src/domain/automation';
 import { dueReminder } from '../src/domain/compliance';
 import { daysBetween, formatDate, todayIn } from '../src/domain/dates';
 import { processVersion } from './ai';
-import { recoverIntake } from './intake';
+import { provisionIntake, recoverIntake } from './intake';
 import type { Assignment, DocumentRecord, DocumentRequest, DocumentVersion, Evaluation, Member, Organisation, PortalLink, Project, RequirementDefinition, Subcontractor } from '../src/domain/types';
 import { AlreadyExistsError } from './db';
 import { audit, C, membersWith, notifyMembers } from './core';
@@ -63,10 +63,15 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
   // Subcontractors are only emailed inside the organisation's working hours (in its own timezone).
   const inHours = opts.force || inWorkingHours(org.settings, svc.now());
   // Heavier daily steps (recompute, escalations, alerts) run once per local day even though the scheduler runs hourly.
+  // Organisations created before automatic intake get their address here, once.
+  if (!org.settings.intakeKey) await provisionIntake(svc, org).catch((e) => console.error('intake provisioning failed', org.id, e));
   // Recover background work that failed or stalled, whatever the hour.
   const recovered = await recoverWork(svc, org).catch((e) => { console.error('recover failed', org.id, e); return 0; });
   let dailyDue = true;
   if (!opts.force) { try { await svc.db.create(C.doc(org.id, 'reminders', `daily:${today}`), { id: `daily:${today}`, status: 'sent', at: svc.now().toISOString() }); } catch { dailyDue = false; } }
+
+  // 0. One short daily email per manager with only what needs them (after 07:00 local, working days).
+  const digests = await sendDigests(svc, org, opts).catch((e) => { console.error('digest failed', org.id, e); return 0; });
 
   // 1. Expiry reminders for the evidence currently in force.
   for (const d of inHours ? docs : []) {
@@ -205,7 +210,7 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
       }
     }
   }
-  if (!dailyDue) return { reminders, chasers, escalations, failures, recovered, today, inHours, daily: false };
+  if (!dailyDue) return { reminders, chasers, escalations, failures, recovered, digests, today, inHours, daily: false };
 
   // 3. Close requests whose links have lapsed (chasers renew the link, so only abandoned requests close).
   const nowIso = svc.now().toISOString();
@@ -220,38 +225,34 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
   // 4. Date-driven readiness changes (expiring soon / expired).
   await recompute(base, {}, 'scheduled.daily', 'scheduler');
 
-  // 5. Escalations: mandatory items still missing beyond the configured period.
+  // 5. Escalation for paperwork nobody is chasing. Anything on an open request is already followed up
+  // and escalated once by step 2, so it is skipped here. What's left (no contact, request closed) gets
+  // one notification per subcontractor and project, listing everything still missing, once.
+  // (Replaces the old per-item escalations; the project "below 80% ready" alert is folded into the daily digest.)
   const readiness = await svc.db.list<Evaluation & { id: string }>(C.col(org.id, 'readiness'));
+  const openReqs = requests.filter((q) => ['sent', 'acknowledged', 'partially_fulfilled'].includes(q.status));
   for (const r of readiness) {
     const a = assignments.find((x) => x.active && x.projectId === r.projectId && x.subcontractorId === r.subcontractorId);
     const p = projects.find((x) => x.id === r.projectId);
     if (!a || !p || !liveProjects.has(p.id)) continue;
     if (daysBetween(a.assignedAt.slice(0, 10), today) < org.settings.escalationDays) continue;
-    for (const x of r.results.filter((y) => y.blocking && ['missing', 'requested', 'overdue'].includes(y.status))) {
-      const key = `esc:${p.id}:${r.subcontractorId}:${x.requirementId}`;
-      try { await svc.db.create(C.doc(org.id, 'reminders', key), { id: key, type: 'escalation', status: 'sent', at: nowIso }); } catch { continue; }
-      const recipients = [p.managerUid, ...p.adminUids].filter(Boolean) as string[];
-      if (!recipients.length) recipients.push(...(await membersWith(base, 'requirements.manage')).map((m) => m.uid));
-      await notifyMembers(base, recipients, {
-        type: 'escalation', title: `Escalation: ${subsById.get(r.subcontractorId)?.legalName} still missing ${x.requirementName}`,
-        body: `Mandatory for ${p.name}; outstanding for more than ${org.settings.escalationDays} days. ${x.reason}`, link: `/app/projects/${p.id}`, dedupeKey: key,
-      });
-      escalations++;
-    }
+    const unchased = r.results.filter((y) => y.blocking && ['missing', 'requested', 'overdue'].includes(y.status)
+      && defsById.get(y.requirementId)?.kind === 'document'
+      && !openReqs.some((q) => q.subcontractorId === r.subcontractorId && q.requirementIds.includes(y.requirementId)));
+    if (!unchased.length) continue;
+    const key = `esc-sub:${p.id}:${r.subcontractorId}`;
+    try { await svc.db.create(C.doc(org.id, 'reminders', key), { id: key, type: 'escalation', status: 'sent', at: nowIso, items: unchased.map((x) => x.requirementId) }); } catch { continue; }
+    const recipients = [p.managerUid, ...p.adminUids].filter(Boolean) as string[];
+    if (!recipients.length) recipients.push(...(await membersWith(base, 'requirements.manage')).map((m) => m.uid));
+    const sub = subsById.get(r.subcontractorId);
+    await notifyMembers(base, recipients, {
+      type: 'escalation', title: `${sub?.legalName} still missing ${unchased.length === 1 ? unchased[0].requirementName : `${unchased.length} documents`} for ${p.name}`,
+      body: `${unchased.map((x) => x.requirementName).join(', ')}. Nothing is being chased${sub && !sub.contacts.length ? ' because there is no contact on file' : ''}: request it or add a contact.`, link: `/app/subcontractors/${r.subcontractorId}?tab=requirements&project=${p.id}`, dedupeKey: key,
+    });
+    escalations++;
   }
 
-  // 6. Project threshold: alert when fewer than 80% of assigned subcontractors are ready.
-  for (const p of projects.filter((x) => liveProjects.has(x.id) && x.status === 'active')) {
-    const rs = readiness.filter((r) => r.projectId === p.id && assignments.some((a) => a.active && a.projectId === p.id && a.subcontractorId === r.subcontractorId));
-    if (rs.length < 2) continue;
-    const pct = Math.round((rs.filter((r) => r.readiness === 'ready').length / rs.length) * 100);
-    if (pct >= 80) continue;
-    await notifyMembers(base, [p.managerUid].filter(Boolean) as string[], {
-      type: 'project_threshold', title: `${p.name}: only ${pct}% of subcontractors are ready`,
-      body: `${rs.filter((r) => r.readiness === 'not_ready').length} not ready, ${rs.filter((r) => r.readiness === 'action_required').length} need attention.`, link: `/app/projects/${p.id}`, dedupeKey: `threshold:${p.id}:${today}`,
-    });
-  }
-  return { reminders, chasers, escalations, failures, recovered, today, inHours, daily: true };
+  return { reminders, chasers, escalations, failures, recovered, digests, today, inHours, daily: true };
 }
 
 // --- Recovery --------------------------------------------------------------------
@@ -281,4 +282,48 @@ async function recoverWork(svc: Services, org: Organisation) {
 /** Kept for the background function and dev server; the pipeline lives in ./ai. */
 export async function runExtraction(svc: Services, orgId: string, versionId: string) {
   return processVersion(svc, orgId, versionId);
+}
+
+// --- Daily digest ------------------------------------------------------------------
+/**
+ * One email per manager per working day, from the same list as the overview's "Needs your attention",
+ * so it only ever holds things a person can act on. Nothing is sent when that list is empty.
+ */
+export async function sendDigests(svc: Services, org: Organisation, opts: JobOptions = {}) {
+  const today = todayIn(org.settings.timezone, svc.now());
+  const clock = localClock(org.settings.timezone, svc.now());
+  if (!opts.force && (clock.hour < 7 || !workingHoursOf(org.settings).days.includes(clock.weekday))) return 0;
+  const { permissionsFor } = await import('../src/domain/permissions');
+  const { dashboard } = await import('./handlers/org');
+  const members = (await svc.db.list<Member>(C.col(org.id, 'members'))).filter((m) => m.status === 'active' && m.digest !== false
+    && (permissionsFor(m).has('documents.review') || permissionsFor(m).has('requests.send')));
+  let sent = 0;
+  for (const m of members) {
+    const key = `digest:${m.uid}:${today}`;
+    if (!(await claimReminder(svc, org, key, { type: 'digest', uid: m.uid }))) continue;
+    try {
+      const ctx: any = { svc, db: svc.db, org, member: m, identity: { uid: m.uid, email: m.email, emailVerified: true, name: m.name }, source: 'scheduler' };
+      const d = await dashboard(ctx, { full: true });
+      const lines: { group: string; text: string; url: string }[] = d.needs.map((n: any) => ({ group: n.context ? `${n.item} · ${n.context}` : n.item, text: `${n.issue} — ${n.action}`, url: `${svc.env.appUrl}${n.link}` }));
+      if (d.mailHealth && d.mailHealth.status && d.mailHealth.status !== 'ok') lines.unshift({ group: 'Email delivery', text: 'Emails to subcontractors are failing — Fix in Settings', url: `${svc.env.appUrl}/app/settings/delivery` });
+      if (!lines.length) { await svc.db.update(C.doc(org.id, 'reminders', key), { status: 'sent', empty: true, at: svc.now().toISOString() }); continue; }
+      const groups = new Map<string, { text: string; url: string }[]>();
+      for (const l of lines) groups.set(l.group, [...(groups.get(l.group) ?? []), { text: l.text, url: l.url }]);
+      const n = lines.length;
+      const log = await sendEmail({ db: svc.db, svc, org }, {
+        to: m.email, template: 'member.digest', dedupeKey: key,
+        subject: `${n} thing${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} you today — ${org.name}`,
+        heading: `${n} thing${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} you today`,
+        body: [d.waiting?.subcontractors ? `${d.waiting.subcontractors} subcontractor${d.waiting.subcontractors === 1 ? ' is' : 's are'} still sending paperwork; reminders are going out automatically.` : ''].filter(Boolean).join('') || 'Everything else is running on its own.',
+        groups: [...groups].slice(0, 15).map(([title, ls]) => ({ title, lines: ls })),
+        cta: { label: 'Open SubCleared', url: `${svc.env.appUrl}/app/overview` },
+        footer: 'A daily summary of what needs a decision. Turn it off in Settings → Profile and notifications.',
+      });
+      await svc.db.update(C.doc(org.id, 'reminders', key), { status: log.status === 'failed' ? 'failed' : 'sent', items: n, at: svc.now().toISOString() });
+      if (log.status !== 'failed') sent++;
+    } catch (e: any) {
+      await svc.db.update(C.doc(org.id, 'reminders', key), { status: 'failed', error: String(e?.message ?? e).slice(0, 200) });
+    }
+  }
+  return sent;
 }

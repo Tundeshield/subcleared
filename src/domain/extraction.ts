@@ -8,6 +8,8 @@ export type DocumentKind =
   | 'insurance_certificate'
   | 'insurance_endorsement'
   | 'licence_registration'
+  | 'company_registration'
+  | 'tax_registration'
   | 'method_statement'
   | 'training_certificate'
   | 'agreement'
@@ -19,7 +21,9 @@ export interface SchemaField { key: string; label: string; type: FieldType; crit
 export const KIND_LABELS: Record<DocumentKind, string> = {
   insurance_certificate: 'Insurance certificate',
   insurance_endorsement: 'Insurance endorsement',
-  licence_registration: 'Licence or registration',
+  licence_registration: 'Trade licence or scheme registration',
+  company_registration: 'Company or business registration',
+  tax_registration: 'Tax registration or clearance',
   method_statement: 'Method statement or risk assessment',
   training_certificate: 'Training or competence card',
   agreement: 'Signed agreement',
@@ -56,6 +60,22 @@ export const SCHEMAS: Record<DocumentKind, SchemaField[]> = {
     { key: 'additionalInsured', label: 'Additional insured / indemnity to principal', type: 'boolean' },
     { key: 'waiverOfSubrogation', label: 'Waiver of subrogation', type: 'boolean' },
     { key: 'additionalInsuredParties', label: 'Parties named', type: 'text' },
+  ],
+  company_registration: [
+    holder('Company'),
+    { key: 'issuer', label: 'Registry', type: 'text', hint: 'e.g. Companies House, the state or city that issued it' },
+    { key: 'referenceNumber', label: 'Company or registration number', type: 'text' },
+    { key: 'jurisdiction', label: 'Jurisdiction', type: 'text' },
+    { key: 'issueDate', label: 'Incorporation or registration date', type: 'date' },
+    { key: 'expiryDate', label: 'Expiry or renewal date', type: 'date' },
+  ],
+  tax_registration: [
+    holder('Registered name'),
+    { key: 'issuer', label: 'Tax authority', type: 'text' },
+    { key: 'referenceNumber', label: 'Tax, VAT or reference number', type: 'text' },
+    { key: 'coverageType', label: 'Type', type: 'text', hint: 'e.g. VAT registration, tax clearance, CIS registration, W-9' },
+    { key: 'issueDate', label: 'Date', type: 'date' },
+    { key: 'expiryDate', label: 'Valid until', type: 'date' },
   ],
   licence_registration: [
     holder('Holder'),
@@ -102,6 +122,17 @@ export const SCHEMAS: Record<DocumentKind, SchemaField[]> = {
 
 export const ALL_KINDS = Object.keys(SCHEMAS) as DocumentKind[];
 
+/** Version of the kind list. Readings before 2 used one kind for company, tax and trade registrations. */
+export const KIND_SCHEME = 2;
+
+/** What separates the kinds, for the reader. Tax and company documents look alike and must not be confused. */
+export const KIND_HINTS: Partial<Record<DocumentKind, string>> = {
+  company_registration: 'proof the business exists: certificate of incorporation, company registration, business registration, articles of organisation',
+  tax_registration: 'tax documents: VAT registration, tax clearance or good-standing certificate, CIS registration, UTR letter, W-9 or tax ID — never a company registration even if it shows a registration number',
+  licence_registration: 'a licence or scheme membership to do the work: trade or contractor licence, Gas Safe, NICEIC, NAPIT, local business licence',
+  insurance_certificate: 'evidence of insurance cover; say in issues which covers it shows (public/general liability, employers liability/workers compensation, auto, umbrella)',
+};
+
 export function fieldLabel(key: string, kind?: string): string {
   const k = (kind && (SCHEMAS as any)[kind]) ? (SCHEMAS as any)[kind] as SchemaField[] : [];
   const hit = k.find((f) => f.key === key) ?? ALL_KINDS.flatMap((x) => SCHEMAS[x]).find((f) => f.key === key);
@@ -113,6 +144,10 @@ export function expectedKinds(def: { category?: string; documentType?: string; n
   const s = `${def.category ?? ''} ${def.documentType ?? ''} ${def.name ?? ''}`.toLowerCase();
   if (/endorse|indemnity to principal|additional insured/.test(s)) return ['insurance_endorsement', 'insurance_certificate'];
   if (/insur|certificate of insurance|coi|liability|compensation/.test(s)) return ['insurance_certificate', 'insurance_endorsement'];
+  // Tax and company documents are told apart: a VAT certificate never satisfies a company registration.
+  if (/\btax\b|\bvat\b|w-?9|\bcis\b|\butr\b|withholding|tax clearance/.test(s)) return ['tax_registration'];
+  if (/company registration|incorporation|business registration|companies house|registered company|certificate of formation/.test(s)) return ['company_registration'];
+  if (/business licen[cs]e/.test(s)) return ['licence_registration', 'company_registration'];
   if (/licen[cs]e|registration|gas safe|niceic|napit|competent person/.test(s)) return ['licence_registration'];
   if (/rams|method statement|risk assessment|jha|safety plan/.test(s)) return ['method_statement'];
   if (/training|cscs|card|competen|qualification/.test(s)) return ['training_certificate'];

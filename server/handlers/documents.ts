@@ -1,3 +1,4 @@
+import { currentTriage } from '../../src/domain/assessment';
 import { checkCriteria, describeCriterion } from '../../src/domain/compliance';
 import { daysBetween, isISODate, todayIn } from '../../src/domain/dates';
 import { ALLOWED_MIME, MAX_UPLOAD_BYTES } from '../../src/domain/fileSafety';
@@ -327,7 +328,7 @@ export async function reviewQueue(ctx: Ctx) {
         versionId: v.id, documentId: v.documentId, fileName: v.fileName, versionNumber: v.versionNumber, uploadedAt: v.uploadedAt, uploadedBy: v.uploadedBy,
         subcontractorId: v.subcontractorId, subcontractor: subs.get(v.subcontractorId)?.legalName, title: docs.get(v.documentId)?.title,
         requirement: v.requirementId ? defs.get(v.requirementId)?.name : undefined, extraction: v.extraction.status,
-        triage: v.assessment?.triage, check: v.assessment?.summary, viaEmail: !!v.intake,
+        triage: currentTriage(v.assessment, v.extraction?.status), check: v.assessment?.summary, viaEmail: !!v.intake,
         read: v.extraction.status === 'completed' ? { namedInsured: v.extraction.fields?.namedInsured?.value, expiryDate: v.extraction.fields?.expiryDate?.value, issuer: v.extraction.fields?.issuer?.value, referenceNumber: v.extraction.fields?.referenceNumber?.value } : undefined,
         lockedBy: lockFresh && v.lock!.uid !== ctx.member.uid ? v.lock : null, status: v.reviewStatus, replacing: !!docs.get(v.documentId)?.approvedVersionId,
         ageHours: Math.round((now - new Date(v.uploadedAt).getTime()) / 3_600_000), projects: projectsFor(v),

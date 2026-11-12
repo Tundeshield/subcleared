@@ -180,5 +180,55 @@
     },
     "note": "Two-page method statement, UK dates",
     "expectLowConfidence": []
+  },
+  {
+    "file": "vat-registration.pdf",
+    "kind": "tax_registration",
+    "fields": {
+      "namedInsured": "Thameside Electrical Services Ltd",
+      "issuer": "HM Revenue & Customs",
+      "referenceNumber": "GB 284 7716 52",
+      "issueDate": "2021-05-01"
+    },
+    "note": "VAT registration certificate (a tax document, not a company registration)",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "tax-clearance.pdf",
+    "kind": "tax_registration",
+    "fields": {
+      "namedInsured": "Thameside Electrical Services Ltd",
+      "referenceNumber": "TC-2026-118204",
+      "issueDate": "2026-02-03",
+      "expiryDate": "2027-02-02"
+    },
+    "note": "Tax clearance certificate (a tax document, not a company registration)",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "company-incorporation.pdf",
+    "kind": "company_registration",
+    "fields": {
+      "namedInsured": "Thameside Electrical Services Ltd",
+      "referenceNumber": "09876543",
+      "issueDate": "2016-03-14"
+    },
+    "note": "Certificate of incorporation",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "el-only.pdf",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Thameside Electrical Services Ltd",
+      "issuer": "Albion General Insurance plc",
+      "referenceNumber": "EL-447190",
+      "issueDate": "2026-06-01",
+      "expiryDate": "2027-05-31",
+      "elLimit": 10000000,
+      "wcCoverage": true
+    },
+    "note": "Employers' liability only: must not pass as public liability",
+    "expectLowConfidence": []
   }
 ]
