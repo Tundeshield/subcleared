@@ -4,10 +4,7 @@ import { formatDate } from '../../domain/dates';
 import { useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
-import {
-  Drawer, Empty, ErrorState, Field, Icon, FilterSelect, FormError, humanize, PageHeader, Pagination, ReadinessBar, SampleTag, SearchInput, Skeleton, SortHeader,
-  sortRows, Spinner, Toolbar, usePaged, useToast,
-} from '../../ui';
+import { Drawer, Empty, ErrorState, Field, Icon, FilterSelect, FormError, humanize, PageHeader, Pagination, ReadinessBar, SampleTag, SearchInput, Skeleton, SortHeader, sortRows, Spinner, Toolbar, usePaged, useToast, RowLink, rowClick } from '../../ui';
 
 const STATUSES = ['planning', 'active', 'on_hold', 'completed', 'archived'];
 
@@ -57,8 +54,8 @@ export default function Projects() {
                 <SortHeader label="Status" k="status" sort={sort} setSort={setSort} /><SortHeader label="Last activity" k="lastActivityAt" sort={sort} setSort={setSort} />
               </tr></thead>
               <tbody>{paged.slice.map((p: any) => (
-                <tr key={p.id} className="tr-link" onClick={() => nav(`/app/projects/${p.id}`)}>
-                  <td className="td"><div className="font-medium">{p.name} {p.sample && <SampleTag />}</div><div className="text-sm text-faint">{p.code || '—'}</div></td>
+                <tr key={p.id} className="tr-link" onClick={rowClick(() => nav(`/app/projects/${p.id}`))}>
+                  <td className="td"><div><RowLink to={`/app/projects/${p.id}`}>{p.name}</RowLink> {p.sample && <SampleTag />}</div><div className="text-sm text-faint">{p.code || '—'}</div></td>
                   <td className="td text-muted">{p.location || '—'}</td>
                   <td className="td text-muted">{p.manager ?? <span className="text-faint">Unassigned</span>}</td>
                   <td className="td">

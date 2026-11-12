@@ -6,6 +6,7 @@ import type { Db } from '../db';
 import { replyToFor, sendEmail } from '../email';
 import type { Services } from '../services';
 import { loadSub, visibleSubIds } from './subs';
+import { renewalFollowUp, sentReminderKeys } from '../followup';
 
 interface Base { db: Db; svc: Services; org: Organisation; member?: { uid: string; name: string } }
 
@@ -169,6 +170,7 @@ export async function listRenewals(ctx: Ctx, input: any) {
   const subs = new Map(data.subs.map((s) => [s.id, s]));
   const defs = new Map(data.requirements.map((r) => [r.id, r]));
   const versions = new Map(data.versions.map((v) => [v.id, v]));
+  const sent = await sentReminderKeys(ctx.db, ctx.org.id);
   const items = data.documents.filter((d) => !d.archived && d.approvedVersionId && (!visible || visible.has(d.subcontractorId))).map((d) => {
     const v = versions.get(d.approvedVersionId!)!;
     if (!v?.metadata.expiryDate) return null;
@@ -187,7 +189,9 @@ export async function listRenewals(ctx: Ctx, input: any) {
       documentId: d.id, versionId: v.id, title: d.title, requirement: d.requirementId ? defs.get(d.requirementId)?.name : undefined, requirementId: d.requirementId,
       subcontractorId: d.subcontractorId, subcontractor: sub.legalName, expiryDate: v.metadata.expiryDate, days, stage,
       request: renewal && { id: renewal.id, status: renewal.status, createdAt: renewal.createdAt, contactEmail: renewal.contactEmail, acknowledgedAt: renewal.acknowledgedAt },
-      replacementVersionId: replacement?.id, contacts: sub.contacts.map((c) => ({ id: c.id, name: c.name, email: c.email, primary: c.primary })),
+      replacementVersionId: replacement?.id,
+      followUp: replacement ? null : renewalFollowUp(ctx.org, data, sent, { subcontractorId: d.subcontractorId, versionId: v.id, expiryDate: v.metadata.expiryDate }, today),
+      contacts: sub.contacts.map((c) => ({ id: c.id, name: c.name, email: c.email, primary: c.primary })),
     };
   }).filter(Boolean).sort((a: any, b: any) => a.days - b.days);
   const reminders = (await ctx.db.list<any>(C.col(ctx.org.id, 'reminders'))).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 50);

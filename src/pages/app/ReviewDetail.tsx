@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { insuranceEyeChecks, TRUST } from '../../domain/assessment';
+import { reviewChecklist, TRUST, type ChecklistItem } from '../../domain/assessment';
 import { checkCriteria } from '../../domain/compliance';
 import { fieldLabel } from '../../domain/extraction';
 import { formatDate, formatDateTime } from '../../domain/dates';
@@ -74,7 +74,7 @@ export default function ReviewDetail() {
   const expired = meta.expiryDate && meta.expiryDate < new Date().toISOString().slice(0, 10);
   const isInsurance = /insur|endorse|indemnity/i.test(`${data.requirement?.category ?? ''} ${data.requirement?.name ?? ''}`);
   const market = me?.org?.settings.market;
-  const submit = async () => {
+  const submit = async (decision: Decision) => {
     setBusy(true); setErr(null);
     try {
       const values = Object.fromEntries(Object.entries(meta.values ?? {}).filter(([, x]) => x !== '' && x !== undefined && x !== null));
@@ -82,8 +82,10 @@ export default function ReviewDetail() {
         versionId: v.id, decision, reason: reason || undefined, internalComment: comment || undefined, revision: rev ?? v.revision,
         metadata: { ...meta, values }, checklist: [
           ...checks.map((c) => ({ key: c.criterion.key, label: c.criterion.label, passed: c.passed })),
-          ...(data.assessment?.checks ?? []).map((c: any) => ({ key: `auto:${c.key}`, label: `${c.label} (automatic)`, passed: c.outcome === 'pass' ? true : c.outcome === 'fail' ? false : null })),
-          ...Object.entries(manual).map(([k, p]) => ({ key: k, label: `${k} (by reviewer)`, passed: p })),
+          // What was established automatically, and what the reviewer confirmed by looking, recorded separately.
+          ...checklist.map((c) => c.state === 'check'
+            ? { key: c.key, label: `${c.label} (by reviewer)`, passed: manual[c.key] === true ? true : null }
+            : { key: c.key, label: `${c.label} (automatic)`, passed: c.state === 'done' ? true : c.state === 'problem' ? false : null }),
         ],
       });
       dataChanged();
@@ -94,21 +96,96 @@ export default function ReviewDetail() {
       nav(nextItem ? `/app/reviews/${nextItem.versionId}` : '/app/reviews');
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
-  const blockedApprove = decision === 'approve' && (failed.length > 0 || missingExpiry);
+  const autoChecks = data.assessment?.triage && data.assessment.triage !== 'not_read' ? data.assessment.checks ?? [] : [];
+  // Not read automatically: the list is built from the requirement and the details the reviewer enters.
+  const fallback: ChecklistItem[] = autoChecks.length || !data.requirement ? [] : [
+    ...(data.requirement.expiryRequired ? [{ key: 'entered:expiry', label: 'Expiry date recorded', state: (missingExpiry ? 'check' : expired ? 'note' : 'done') as ChecklistItem['state'], detail: missingExpiry ? 'Enter it from the document below.' : expired ? 'Already expired.' : undefined }] : []),
+    ...checks.map((c) => ({ key: `entered:${c.criterion.key}`, label: data.criteria.find((x: any) => x.key === c.criterion.key)?.description ?? c.criterion.label, detail: c.detail, state: (c.passed === true ? 'done' : c.passed === false ? 'problem' : 'check') as ChecklistItem['state'] })),
+  ];
+  const checklist = [...fallback, ...reviewChecklist(autoChecks, fields, { insurance: isInsurance, market })];
+  const blockedApprove = failed.length > 0 || missingExpiry;
+  const blockReason = blockedApprove ? `${missingExpiry ? 'Record the expiry date to approve.' : ''}${failed.length ? `${missingExpiry ? ' ' : ''}Doesn't meet: ${failed.map((f) => f.criterion.label).join(', ')}.` : ''}` : null;
+  const toCheck = checklist.filter((c) => c.state === 'check' && manual[c.key] !== true).length;
+  const problems = checklist.filter((c) => c.state === 'problem').length;
+
+  // One list: what was established automatically, what fails, and what a person still needs to look at.
+  const checklistSection = data.requirement || isInsurance ? (
+    <section aria-labelledby="checks-h">
+      <h2 id="checks-h" className="text-lg font-semibold pb-3 border-b border-line-strong">What you need to check</h2>
+      {data.requirement && <p className="text-sm text-muted mt-3">Against <span className="text-ink">{data.requirement.name}</span>{data.requirement.description ? ` — ${data.requirement.description}` : ''}</p>}
+      <ul className="mt-4 space-y-3">
+        {checklist.map((c) => (
+          <li key={c.key} className="flex gap-2.5 items-start">
+            {c.state === 'check' && pending ? (
+              <Checkbox checked={manual[c.key] === true} onChange={(x) => setManual({ ...manual, [c.key]: x ? true : null })} label={<span><span className="font-medium">{c.label}</span>{c.detail && <span className="block text-sm text-muted font-normal">{c.detail}</span>}</span>} />
+            ) : (
+              <>
+                <Glyph tone={c.state === 'done' ? 'ok' : c.state === 'problem' ? 'blocked' : c.state === 'note' ? 'attention' : 'none'} className="w-4 h-4 mt-0.5 shrink-0" />
+                <span className="min-w-0">
+                  <span className="font-medium">{c.label}</span>
+                  <span className="text-xs text-faint ml-2">{c.state === 'done' ? (c.key.startsWith('entered:') ? 'from the details entered' : 'checked automatically') : c.state === 'problem' ? 'doesn’t meet it' : c.state === 'note' ? 'worth noting' : 'to check'}</span>
+                  {c.detail && <span className="block text-sm text-muted">{c.detail}</span>}
+                </span>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-faint leading-relaxed mt-4">Automatic checks compare what was read with your requirement. They aren’t a decision{isInsurance ? `, and ${/^[aeiou]/i.test(term(market, 'coi')) ? 'an' : 'a'} ${term(market, 'coi')} is evidence of cover, not proof of it` : ''}.</p>
+    </section>
+  ) : null;
+
+  // The decision stays in reach: compact, beside the evidence on wide screens and at the foot of the screen on phones.
+  const decisionBar = (
+    <section aria-labelledby="decide-h" data-avoid-toasts className="sticky bottom-0 xl:bottom-4 z-20 -mx-4 sm:mx-0 border-t sm:border border-line-strong sm:rounded-md bg-paper px-4 py-4 shadow-pop">
+      <h2 id="decide-h" className="sr-only">Your decision</h2>
+      <p className={cx('text-sm mb-3 flex items-start gap-2', blockReason || problems ? 'text-ink' : 'text-muted')}>
+        <Glyph tone={blockReason ? 'blocked' : problems ? 'blocked' : toCheck ? 'attention' : 'ok'} className="w-4 h-4 mt-0.5 shrink-0" />
+        <span>{blockReason ?? (problems ? `${problems} check${problems === 1 ? '' : 's'} not met — request a correction or reject.` : toCheck ? `${toCheck} thing${toCheck === 1 ? '' : 's'} still to check by eye.` : 'Everything checked. Ready to decide.')}</span>
+      </p>
+      {decision === 'approve' ? (
+        <div className="grid grid-cols-[1fr_auto_auto] gap-2">
+          <button className="btn-primary" disabled={busy || !!lockErr || blockedApprove} onClick={() => submit('approve')}>{busy && <Spinner />}Approve</button>
+          <button className="btn-secondary" disabled={busy || !!lockErr} onClick={() => setDecision('request_info')}><span className="sm:hidden">Correction</span><span className="hidden sm:inline">Request correction</span></button>
+          <button className="btn-secondary" disabled={busy || !!lockErr} onClick={() => setDecision('reject')}>Reject</button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <Field label={decision === 'reject' ? 'Why it’s rejected' : 'What needs correcting'} required hint="Sent to the subcontractor with a link to upload a replacement.">
+            <textarea className="input" rows={3} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={decision === 'reject' ? 'e.g. The named insured is a different company' : 'e.g. Please also send the additional insured endorsement page'} />
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-primary flex-1 min-w-[9rem]" disabled={busy || !!lockErr || !reason.trim()} onClick={() => submit(decision)}>{busy && <Spinner />}{decision === 'reject' ? 'Reject and tell them' : 'Send correction request'}</button>
+            <button className="btn-ghost" disabled={busy} onClick={() => setDecision('approve')}>Back</button>
+          </div>
+        </div>
+      )}
+      {expired && decision === 'approve' && !blockedApprove && <p className="text-xs text-muted mt-2">Already expired: you can record it, but they stay not ready for this until a current one arrives.</p>}
+      <details className="mt-2 group">
+        <summary className="text-xs text-muted cursor-pointer select-none hover:text-ink list-none">{comment ? 'Internal note added' : 'Add an internal note'}</summary>
+        <textarea aria-label="Internal note, only visible to your team" className="input mt-2" rows={2} value={comment} onChange={(e) => setComment(e.target.value)} />
+      </details>
+      <FormError error={err} />
+    </section>
+  );
   return (
     <div>
       <PageHeader crumbs={[{ label: 'Documents to review', to: '/app/reviews' }, { label: data.subcontractor.legalName, to: `/app/subcontractors/${data.subcontractor.id}` }, { label: data.requirement?.name ?? data.document.title }]}
         title={data.requirement?.name ?? data.document.title}
-        meta={<><span>{data.subcontractor.legalName}</span><span>Version {v.versionNumber} · {v.fileName}</span><span>Submitted {formatDateTime(v.uploadedAt)} by {v.uploadedBy.name.replace(/ \(.+\)$/, '')}</span></>}
+        meta={<><span>{data.subcontractor.legalName}</span><span>Version {v.versionNumber} · {v.fileName}</span><span>Submitted {formatDateTime(v.uploadedAt)} by {v.uploadedBy.name.replace(/ \(.+\)$/, '')}</span><span className="xl:hidden"><OpenFullSize versionId={v.id} /></span></>}
         actions={<DocStatus value={v.reviewStatus} />} />
       {lockErr && <div className="mb-6"><Callout tone="warn" title="Someone else is reviewing this">{lockErr}. You can look, but only they can decide until their claim lapses after 30 minutes of inactivity.</Callout></div>}
       <div className="grid xl:grid-cols-[1.3fr_1fr] gap-x-10 gap-y-8 items-start">
-        <div className="min-w-0 xl:sticky xl:top-24 border border-line rounded-md overflow-hidden bg-paper"><FilePreview versionId={v.id} mimeType={v.mimeType} className="h-[78vh]" /></div>
-        <div className="space-y-10 min-w-0">
-          <AssessmentBanner a={data.assessment} readingOn={data.readingOn} extraction={v.extraction} />
+        <div className="min-w-0 order-2 xl:order-1 xl:sticky xl:top-24">
+          <div className="border border-line rounded-md overflow-hidden bg-paper"><FilePreview versionId={v.id} mimeType={v.mimeType} className="h-[60vh] xl:h-[78vh]" /></div>
+          <div className="hidden xl:flex justify-end mt-2"><OpenFullSize versionId={v.id} /></div>
+        </div>
+        <div className="space-y-10 min-w-0 order-1 xl:order-2">
+          {(!data.assessment || data.assessment.triage === 'not_read') && <AssessmentBanner a={data.assessment} readingOn={data.readingOn} extraction={v.extraction} />}
+          {checklistSection}
 
           <section>
-            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong"><span className="text-faint tnum mr-2">1</span>What the document says</h2>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">What the document says</h2>
             <ReadingSummary v={v} kindLabels={data.kindLabels} readingOn={data.readingOn} onReload={reload} unsure={proposed.filter(([, f]: any) => f.confidence < TRUST).length} />
             {(proposed.length > 0 || readingNotes(v).length > 0) && (
               <div className="mt-4 border-t border-line">
@@ -146,46 +223,9 @@ export default function ReviewDetail() {
             {v.extraction.status === 'completed' && proposed.length === 0 && <p className="text-muted mt-3">Nothing could be read confidently. Enter the details below from the document.</p>}
           </section>
 
-          {data.requirement && (
-            <section>
-              <h2 className="text-lg font-semibold pb-3 border-b border-line-strong"><span className="text-faint tnum mr-2">2</span>Compared with what you asked for</h2>
-              <p className="text-sm text-muted mt-3">{data.requirement.name}{data.requirement.description ? ` — ${data.requirement.description}` : ''}</p>
-              {data.assessment?.checks?.length ? (
-                <ul className="mt-4 space-y-3">
-                  {data.assessment.checks.map((c: any) => (
-                    <li key={c.key} className="flex gap-2.5 items-start">
-                      <Glyph tone={c.outcome === 'pass' ? 'ok' : c.outcome === 'fail' ? 'blocked' : c.outcome === 'warn' ? 'attention' : 'none'} className="w-4 h-4 mt-0.5 shrink-0" />
-                      <span className="min-w-0"><span className="font-medium">{c.label}</span><span className="sr-only"> — {OUTCOME[c.outcome]}</span><span className="block text-sm text-muted">{c.detail}</span></span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <ul className="mt-4 space-y-2.5">
-                  {data.requirement.expiryRequired && <li className="flex gap-2.5 items-start"><Glyph tone={missingExpiry ? 'blocked' : expired ? 'attention' : 'ok'} className="w-4 h-4 mt-0.5" /><span>Expiry date recorded{expired ? ' — already expired' : ''}</span></li>}
-                  {checks.map((c) => <li key={c.criterion.key} className="flex gap-2.5 items-start"><Glyph tone={c.passed === true ? 'ok' : c.passed === false ? 'blocked' : 'none'} className="w-4 h-4 mt-0.5" /><span>{data.criteria.find((x: any) => x.key === c.criterion.key)?.description} <span className="text-faint">({c.detail})</span></span></li>)}
-                  {!data.requirement.expiryRequired && checks.length === 0 && <li className="text-muted">No structured conditions. Compare the document with the description above.</li>}
-                </ul>
-              )}
-              {isInsurance && pending && (() => {
-                // Ask a person only for what the automatic comparison couldn't establish. A passed check is
-                // shown as done (and recorded as automatic); anything unclear or unread becomes a box to tick.
-                const items = insuranceEyeChecks(data.assessment?.checks ?? [], fields, market).map((x) => ({ k: x.label, auto: x.automatic }));
-                const done = items.filter((x) => x.auto);
-                const todo = items.filter((x) => !x.auto);
-                return (
-                  <div className="mt-6 space-y-2.5">
-                    {todo.length > 0 && <div className="text-sm font-medium">Check by eye</div>}
-                    {todo.map(({ k }) => <Checkbox key={k} checked={manual[k] === true} onChange={(x) => setManual({ ...manual, [k]: x ? true : null })} label={k} />)}
-                    {done.length > 0 && <p className="text-sm text-muted flex items-start gap-2 pt-1"><Glyph tone="ok" className="w-3.5 h-3.5 mt-1 shrink-0" /><span>Checked automatically: {done.map((x) => x.k.charAt(0).toLowerCase() + x.k.slice(1)).join('; ')}.</span></p>}
-                  </div>
-                );
-              })()}
-              <p className="text-xs text-faint leading-relaxed mt-4">This comparison uses what was read from the document and your requirement. It isn’t a review decision, and {isInsurance ? `${/^[aeiou]/i.test(term(market, 'coi')) ? 'an' : 'a'} ${term(market, 'coi')} is evidence of cover, not proof of it` : 'it doesn’t verify the document with the issuer'}.</p>
-            </section>
-          )}
 
           <section>
-            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong"><span className="text-faint tnum mr-2">3</span>Confirmed details</h2>
+            <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Confirmed details</h2>
             <p className="text-sm text-muted mt-3">{prefilled.length ? `${prefilled.length === 1 ? '1 detail was' : `${prefilled.length} details were`} filled in from the document. Check them against it — they become the official record when you decide.` : 'These become the official record when you decide.'}</p>
             {pending && unsureLeft > 0 && <button className="btn-quiet mt-2" onClick={applyProposed}>Also fill in the {unsureLeft} unsure value{unsureLeft === 1 ? '' : 's'}</button>}
             {(() => {
@@ -222,24 +262,9 @@ export default function ReviewDetail() {
             {data.previous && <p className="text-sm text-muted mt-5">Replaces version {data.previous.versionNumber}, approved {formatDate(data.previous.review?.at)}{data.previous.metadata.expiryDate ? `, which expires ${formatDate(data.previous.metadata.expiryDate)}` : ''}{data.previous.metadata.referenceNumber ? ` (reference ${data.previous.metadata.referenceNumber})` : ''}.</p>}
           </section>
 
-          {pending && data.canReview ? (
+          {pending && data.canReview ? decisionBar : (
             <section className="border-t border-line-strong pt-6">
-              <h2 className="text-lg font-semibold"><span className="text-faint tnum mr-2">4</span>Your decision</h2>
-              <div className="mt-4 space-y-5">
-                <Segmented label="Decision" value={decision} onChange={setDecision} options={[{ value: 'approve', label: 'Approve' }, { value: 'request_info', label: 'Request correction' }, { value: 'reject', label: 'Reject' }]} />
-                {blockedApprove && <Callout tone="bad">{missingExpiry ? 'Record the expiry date to approve. ' : ''}{failed.length ? `Doesn't meet: ${failed.map((f) => f.criterion.label).join(', ')}. Correct the values if they were entered wrongly, or reject.` : ''}</Callout>}
-                {decision === 'approve' && expired && <Callout tone="warn">This document has already expired. You can record it, but the subcontractor stays not ready for this requirement until a current one arrives.</Callout>}
-                {decision !== 'approve' && <Field label="What the subcontractor needs to do" required hint="Sent to them with a link to upload a replacement."><textarea className="input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={decision === 'reject' ? 'e.g. The named insured is a different company' : 'e.g. Please also send the additional insured endorsement page'} /></Field>}
-                <Field label="Internal note" optional hint="Only visible to your team."><textarea className="input" rows={2} value={comment} onChange={(e) => setComment(e.target.value)} /></Field>
-                <FormError error={err} />
-                <button className="btn-primary btn-lg w-full" disabled={busy || !!lockErr || (decision !== 'approve' && !reason.trim()) || blockedApprove} onClick={submit}>
-                  {busy && <Spinner />}{decision === 'approve' ? 'Approve document' : decision === 'reject' ? 'Reject and explain why' : 'Request a correction'}
-                </button>
-              </div>
-            </section>
-          ) : (
-            <section className="border-t border-line-strong pt-6">
-              <h2 className="text-lg font-semibold"><span className="text-faint tnum mr-2">4</span>Decision and verification</h2>
+              <h2 className="text-lg font-semibold">Decision and verification</h2>
               <div className="mt-3 space-y-2">
                 {v.review ? <p><span className="font-medium">{humanize(v.review.decision)}</span> by {v.review.reviewerName}, {formatDateTime(v.review.at)}</p> : <p className="text-muted">{humanize(v.reviewStatus)}</p>}
                 {v.review?.reason && <p className="text-muted">Reason: {v.review.reason}</p>}
@@ -255,6 +280,12 @@ export default function ReviewDetail() {
       {verify && <VerifyDialog versionId={v.id} market={market} onClose={() => { setVerify(false); reload(); }} />}
     </div>
   );
+}
+
+/** The document at full size in a new tab (signed link fetched on demand). */
+function OpenFullSize({ versionId }: { versionId: string }) {
+  const [busy, setBusy] = useState(false);
+  return <button className="btn-quiet" disabled={busy} onClick={async () => { setBusy(true); const w = window.open('', '_blank'); try { const r = await api('files.url', { versionId }); if (w) w.location.href = r.url; } catch { w?.close(); } finally { setBusy(false); } }}>Open full size</button>;
 }
 
 function VerifyDialog({ versionId, market, onClose }: { versionId: string; market?: any; onClose: () => void }) {

@@ -3,11 +3,12 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import { useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
+import { followUpText, localToday, MANUAL_WHY } from '../../lib/followup';
 import { useSession } from '../../lib/session';
-import { Checkbox, cx, Empty, ErrorState, FilterSelect, FormError, Glyph, toneText, humanize, PageHeader, Pagination, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
+import { Checkbox, cx, Empty, ErrorState, FilterSelect, FormError, Glyph, toneText, humanize, Menu, MoreButton, PageHeader, Pagination, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
 
 const STAGES: Record<string, [string, 'none' | 'progress' | 'attention' | 'blocked' | 'ok']> = {
-  not_requested: ['Not requested', 'none'], requested: ['Renewal requested', 'attention'], acknowledged: ['Opened by subcontractor', 'attention'],
+  not_requested: ['Automatic reminder', 'progress'], requested: ['Renewal requested', 'progress'], acknowledged: ['Opened by subcontractor', 'progress'],
   replacement_received: ['New version needs review', 'progress'], replacement_rejected: ['Replacement rejected', 'blocked'], renewed: ['Renewed', 'ok'],
 };
 const WINDOWS = [
@@ -42,15 +43,17 @@ export default function Renewals() {
   const sched: number[] = me?.org?.settings.reminderSchedule ?? [];
   const before = sched.filter((d) => d > 0), after = sched.filter((d) => d < 0).map((d) => -d);
   const schedule = [before.length ? `${before.join(', ')} days before expiry` : '', sched.includes(0) ? 'on the expiry date' : '', after.length ? `${after.join(', ')} day${after.length === 1 && after[0] === 1 ? '' : 's'} after` : ''].filter(Boolean).join(', ');
+  const today = localToday();
+  const ask = async (versionIds: string[]) => { const r = await request.run({ versionIds }); const failed = r.results.filter((x: any) => x.error); toast(`${r.results.length - failed.length} renewal request${r.results.length - failed.length === 1 ? '' : 's'} sent${failed.length ? `; ${failed.length} skipped (no contact)` : ''}`); setSel([]); };
   const projects = [...new Map(items.flatMap((i) => i.projects).map((p: any) => [p.id, p])).values()] as any[];
   const subs = [...new Map(items.map((i) => [i.subcontractorId, i.subcontractor])).entries()];
   const cats = [...new Set(items.map((i) => i.category).filter(Boolean))] as string[];
   return (
     <div>
-      <PageHeader title="Renewals" description={`Approved documents approaching or past expiry, and where each renewal stands. Reminders go to subcontractors automatically ${schedule} — once each.`}
+      <PageHeader title="Renewals" description={sched.length ? `Automatic reminders are active: subcontractors are emailed ${schedule}, once each. Each row shows what happens next.` : 'Automatic reminders are off, so renewals need requesting by hand.'}
         actions={<>
-          <button className="btn-secondary" disabled={!rows.length} onClick={() => exportCsv('Renewals', [{ key: 'subcontractor', label: 'Subcontractor' }, { key: 'title', label: 'Document' }, { key: 'category', label: 'Category' }, { key: 'projectsText', label: 'Projects' }, { key: 'expiryDate', label: 'Expiry' }, { key: 'days', label: 'Days' }, { key: 'stageText', label: 'Stage' }], rows.map((r) => ({ ...r, projectsText: r.projects.map((p: any) => p.name).join('; '), stageText: STAGES[r.stage]?.[0] })))}>Export CSV</button>
-          {can('requests.send') && <button className="btn-primary" disabled={!sel.length || request.busy} onClick={async () => { const r = await request.run({ versionIds: sel }); const failed = r.results.filter((x: any) => x.error); toast(`${r.results.length - failed.length} renewal request${r.results.length - failed.length === 1 ? '' : 's'} sent${failed.length ? `; ${failed.length} skipped (no contact)` : ''}`); setSel([]); }}>{request.busy && <Spinner />}Request renewal{sel.length ? ` (${sel.length})` : ''}</button>}
+          <button className="btn-secondary" disabled={!rows.length} onClick={() => exportCsv('Renewals', [{ key: 'subcontractor', label: 'Subcontractor' }, { key: 'title', label: 'Document' }, { key: 'category', label: 'Category' }, { key: 'projectsText', label: 'Projects' }, { key: 'expiryDate', label: 'Expiry' }, { key: 'days', label: 'Days' }, { key: 'stageText', label: 'Stage' }], rows.map((r) => ({ ...r, projectsText: r.projects.map((p: any) => p.name).join('; '), stageText: stageOf(r, today)[0] })))}>Export CSV</button>
+          {can('requests.send') && sel.length > 0 && <button className="btn-secondary" disabled={request.busy} onClick={() => ask(sel)}>{request.busy && <Spinner />}Request now ({sel.length})</button>}
         </>} />
       <div className="flex gap-6 border-b border-line overflow-x-auto mb-6" role="tablist" aria-label="Expiry window">
         {[{ value: 'open', label: 'All open' }, ...WINDOWS, { value: 'completed', label: 'Completed' }].map((w) => (
@@ -77,7 +80,7 @@ export default function Renewals() {
                 <th className="th">Document</th><th className="th">Subcontractor</th><th className="th">Projects</th><th className="th">Expiry</th><th className="th">Stage</th><th className="th"><span className="sr-only">Next step</span></th>
               </tr></thead>
               <tbody>{paged.slice.map((r) => {
-                const [label, tone] = STAGES[r.stage] ?? [humanize(r.stage), 'none'];
+                const [label, tone] = stageOf(r, today);
                 const canSelect = selectable.includes(r) && can('requests.send');
                 return (
                   <tr key={r.versionId}>
@@ -87,7 +90,13 @@ export default function Renewals() {
                     <td className="td text-sm text-muted">{r.projects.map((p: any) => p.name).join(', ') || '—'}</td>
                     <td className="td whitespace-nowrap tnum"><div className={cx(r.days <= 14 && 'font-medium')}>{formatDate(r.expiryDate)}</div><div className="text-sm text-muted">{r.days < 0 ? `${-r.days} days ago` : r.days === 0 ? 'Today' : `In ${r.days} days`}</div></td>
                     <td className="td"><span className={cx('inline-flex items-center gap-2 text-sm', toneText(tone))}><Glyph tone={tone} className="w-3.5 h-3.5" />{label}</span>{r.request && <div className="text-xs text-faint mt-1">{r.request.contactEmail} · {formatDateTime(r.request.createdAt)}</div>}</td>
-                    <td className="td text-right whitespace-nowrap">{r.replacementVersionId && r.stage === 'replacement_received' ? <Link className="btn-secondary btn-sm" to={`/app/reviews/${r.replacementVersionId}`}>Review replacement</Link> : canSelect ? <button className="btn-quiet" onClick={async () => { await request.run({ versionIds: [r.versionId] }); toast('Renewal requested'); }}>Request renewal</button> : null}</td>
+                    <td className="td text-right whitespace-nowrap">
+                      <span className="inline-flex items-center justify-end gap-2">
+                        {r.replacementVersionId && r.stage === 'replacement_received' ? <Link className="btn-secondary btn-sm" to={`/app/reviews/${r.replacementVersionId}`}>Review replacement</Link>
+                          : canSelect && (r.followUp?.kind === 'manual' || r.stage === 'replacement_rejected') ? <button className="btn-secondary btn-sm" disabled={request.busy} onClick={() => ask([r.versionId])}>Request renewal</button> : null}
+                        {canSelect && r.followUp?.kind !== 'manual' && r.stage !== 'replacement_rejected' && <Menu trigger={(t) => <MoreButton label={`Actions for ${r.title}`} {...t} />} items={[{ label: 'Request now', onClick: () => ask([r.versionId]) }]} />}
+                      </span>
+                    </td>
                   </tr>
                 );
               })}</tbody>
@@ -106,4 +115,15 @@ export default function Renewals() {
       )}
     </div>
   );
+}
+
+/** The stage, said as what happens next: "Reminder on 30 Nov", "Renewal requested today". */
+function stageOf(r: any, today: string): [string, 'none' | 'progress' | 'attention' | 'blocked' | 'ok'] {
+  if (r.stage === 'not_requested') {
+    const t = followUpText(r.followUp, today);
+    if (t) return [t, 'progress'];
+    return [r.followUp?.kind === 'manual' ? `Not requested — ${MANUAL_WHY[r.followUp.why]?.toLowerCase() ?? 'needs requesting'}` : 'Not requested', r.days < 0 ? 'blocked' : 'attention'];
+  }
+  if (r.stage === 'requested' && r.request) return [followUpText({ kind: 'renewal_requested', at: r.request.createdAt, acknowledged: false }, today)!, 'progress'];
+  return STAGES[r.stage] ?? [humanize(r.stage), 'none'];
 }

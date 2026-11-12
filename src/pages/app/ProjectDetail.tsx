@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { displayReadiness, readinessReason } from '../../domain/compliance';
 import { addDays, formatDate, formatDateTime } from '../../domain/dates';
+import { rowNext } from '../../lib/followup';
 import { api, dataChanged, useApi, useMutation } from '../../lib/api';
 import { exportCsv, exportPdf } from '../../lib/export';
 import { useSession } from '../../lib/session';
-import { Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Drawer, Empty, ErrorState, Field, FormError, Glyph, HelpTip, humanize, Icon, KeyValue, Menu, MoreButton, newRowKey, PageHeader, PageLoading, ReadinessBadge, ReadinessBar, SampleTag, SearchInput, Skeleton, Spinner, StatusText, Tabs, Toolbar, useToast } from '../../ui';
+import { Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Drawer, Empty, ErrorState, Field, FormError, Glyph, HelpTip, humanize, Icon, KeyValue, Menu, MoreButton, newRowKey, PageHeader, PageLoading, ReadinessBadge, ReadinessBar, SampleTag, SearchInput, Skeleton, Spinner, StatusText, Tabs, Toolbar, useToast, RowLink, rowClick } from '../../ui';
 import { ProjectDrawer } from './Projects';
 import { activityLine, RequestDialog } from './shared';
 
@@ -55,6 +56,7 @@ export default function ProjectDetail() {
   const reviewSubs = data.subcontractors.filter((s: any) => s.results.some((r: any) => REVIEW.includes(r.status))).length;
   const expiringSubs = data.subcontractors.filter((s: any) => s.results.some((r: any) => r.status === 'expiring_soon')).length;
   const notReadySubs = c.notReady + c.action;
+  const step = archived ? -1 : projectSteps(data).current;
   const report = async () => {
     setExporting(true);
     try {
@@ -78,10 +80,11 @@ export default function ProjectDetail() {
         title={<>{p.name} {p.sample && <SampleTag />}</>}
         meta={<>{p.code && <span>{p.code}</span>}{p.location && <span>{p.location}</span>}<span>{p.managerName ? `Managed by ${p.managerName}` : 'No project manager'}</span><span>{humanize(p.status)}</span>{p.startDate && <span>{formatDate(p.startDate)} – {formatDate(p.endDate)}</span>}</>}
         actions={<>
-          {!archived && can('requests.send') && c.total > 0 && <button className="btn-secondary" onClick={() => setRequesting({})}>Request paperwork</button>}
-          {!archived && can('projects.edit') && <button className="btn-secondary" onClick={() => setAssign(true)}>{Icon.plus()}Add subcontractors</button>}
+          {/* The next-step panel carries the main action; the header only offers what it doesn't. */}
+          {!archived && can('projects.edit') && step !== 1 && <button className="btn-secondary" onClick={() => setAssign(true)}>{Icon.plus()}Add subcontractors</button>}
           <Menu trigger={(t) => <MoreButton label="More project actions" {...t} />} items={[
             { label: exporting ? 'Preparing report…' : 'Export readiness report (PDF)', onClick: report },
+            !archived && can('requests.send') && c.total > 0 && step !== 2 && step !== 4 && { label: 'Request paperwork from everyone', onClick: () => setRequesting({}) },
             !archived && can('projects.edit') && { label: 'Edit project details', onClick: () => setEdit(true) },
             can('requirements.manage') && { label: 'Change required paperwork', onClick: () => setTab('requirements') },
             can('projects.archive') && { label: archived ? 'Restore project' : 'Archive project', onClick: () => setArchive(true), danger: !archived },
@@ -131,9 +134,7 @@ export default function ProjectDetail() {
 
 const NEEDS_REQUEST = ['missing', 'not_requested'];
 
-/** The project's workflow, made explicit: what's done and the one thing to do next. */
-function NextStep({ data, onAdd, onRequest, goTo }: { data: any; onAdd: () => void; onRequest: () => void; goTo: (t: Tab) => void }) {
-  const { can } = useSession();
+function projectSteps(data: any) {
   const subs = data.subcontractors;
   const docReq = new Set(data.requirements.filter((r: any) => r.definition?.kind === 'document').map((r: any) => r.requirementId));
   const toRequest = subs.filter((s: any) => s.results.some((r: any) => docReq.has(r.requirementId) && NEEDS_REQUEST.includes(r.status)));
@@ -147,7 +148,13 @@ function NextStep({ data, onAdd, onRequest, goTo }: { data: any; onAdd: () => vo
     { label: 'Review submissions', done: subs.length > 0 && toRequest.length === 0 && reviewItems.length === 0 },
     { label: 'Ready to work', done: allReady },
   ];
-  const current = steps.findIndex((x) => !x.done);
+  return { steps, current: steps.findIndex((x) => !x.done), toRequest, reviewItems, waiting };
+}
+
+/** The project's workflow, made explicit: what's done and the one thing to do next. */
+function NextStep({ data, onAdd, onRequest, goTo }: { data: any; onAdd: () => void; onRequest: () => void; goTo: (t: Tab) => void }) {
+  const { can } = useSession();
+  const { steps, current, toRequest, reviewItems, waiting } = projectSteps(data);
   let title: string; let body: string; let action: React.ReactNode = null;
   if (current === -1) return <p className="mb-6 flex items-center gap-2 text-success"><Glyph tone="ok" />Everyone on this project is ready to work.</p>;
   if (current === 0) { title = 'Choose the paperwork this project needs'; body = 'Start from a template for the type of work — you can add or remove items afterwards.'; action = can('requirements.manage') && <button className="btn-primary" onClick={() => goTo('requirements')}>Choose paperwork</button>; }
@@ -191,26 +198,23 @@ function ReadinessTab({ data, focus, setFocus, onAssign, goTo }: { data: any; fo
   const flat = rows.map((s: any) => ({ ...s, contactText: s.contact ? `${s.contact.name} <${s.contact.email}>` : '', issues: issueSummary(s.results).join('; '), readinessText: humanize(s.readiness), last: formatDate(s.lastActivityAt) }));
   const needs = rows.filter((s: any) => s.readiness !== 'ready');
   const ready = rows.filter((s: any) => s.readiness === 'ready');
-  const docReqIds = new Set(data.requirements.filter((r: any) => r.definition?.kind === 'document').map((r: any) => r.requirementId));
+  const docReqIds = new Set<string>(data.requirements.filter((r: any) => r.definition?.kind === 'document').map((r: any) => r.requirementId));
   const row = (s: any) => {
     const issues = issueSummary(s.results);
     const counted = s.results.filter((r: any) => r.mandatory && r.status !== 'not_applicable');
     const approved = counted.filter((r: any) => ['approved', 'expiring_soon'].includes(r.status)).length;
-    const toReview = s.results.find((r: any) => REVIEW.includes(r.status) && r.versionId);
-    const outstanding = s.results.filter((r: any) => r.mandatory && [...MISSING, ...REQUESTED, 'expired', 'rejected'].includes(r.status) || r.status === 'expiring_soon');
     const isOpen = !!open[s.id];
     // Documents the subcontractor must send vs checks your team makes: never ask them for a check.
-    const docsOut = outstanding.filter((r: any) => docReqIds.has(r.requirementId));
+    const nx = rowNext(s, docReqIds, { review: can('documents.review'), send: can('requests.send') });
     const checksOut = s.results.filter((r: any) => r.mandatory && !docReqIds.has(r.requirementId) && [...MISSING, ...REQUESTED, 'expired', 'expiring_soon'].includes(r.status));
-    const recordCheck = checksOut.length > 0 && can('documents.review')
-      ? <Link to={`/app/subcontractors/${s.id}?tab=requirements&project=${data.project.id}&check=${checksOut[0].requirementId}`} className={cx('btn-sm', docsOut.length || toReview ? 'btn-ghost' : 'btn-secondary')} title={checksOut.map((r: any) => r.requirementName).join(', ')}>Record check</Link>
-      : null;
-    const primary = toReview && can('documents.review') ? <Link to={`/app/reviews/${toReview.versionId}`} className="btn-secondary btn-sm">Review document</Link>
-      : docsOut.length && can('requests.send') ? <button className="btn-secondary btn-sm" onClick={() => setRequest({ sub: s.id, reqs: docsOut.map((r: any) => r.requirementId) })}>{docsOut.every((r: any) => REQUESTED.includes(r.status)) ? 'Resend request' : 'Request documents'}</button>
-      : null;
-    const next = primary || recordCheck
-      ? <span className="inline-flex flex-wrap justify-end gap-1.5">{primary}{recordCheck}</span>
-      : <button className="btn-ghost btn-sm" onClick={() => setOpen({ ...open, [s.id]: !isOpen })}>{isOpen ? 'Hide details' : 'View details'}</button>;
+    const docsOpen = s.results.filter((r: any) => docReqIds.has(r.requirementId) && [...MISSING, ...REQUESTED, 'expired', 'rejected', 'expiring_soon'].includes(r.status));
+    const checkLink = (rid: string) => `/app/subcontractors/${s.id}?tab=requirements&project=${data.project.id}&check=${rid}`;
+    // Exactly one next step per row; anything manual lives in the row menu.
+    const next = nx.kind === 'review' ? <Link to={`/app/reviews/${nx.versionId}`} className="btn-secondary btn-sm">Review document</Link>
+      : nx.kind === 'request' ? <button className="btn-secondary btn-sm" onClick={() => setRequest({ sub: s.id, reqs: nx.requirementIds })}>{nx.label}</button>
+      : nx.kind === 'check' ? <Link to={checkLink(nx.requirementId)} className="btn-secondary btn-sm" title={nx.names.join(', ')}>Record check</Link>
+      : nx.kind === 'ready' ? <span className="text-sm text-success inline-flex items-center gap-1.5"><Glyph tone="ok" className="w-3.5 h-3.5" />Ready</span>
+      : <span className="text-sm text-muted text-right" title={nx.detail}>{nx.text}</span>;
     return (
       <li key={s.id} className="border-b border-line">
         <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_9rem_13rem] items-center gap-x-4 gap-y-2 py-4">
@@ -223,11 +227,13 @@ function ReadinessTab({ data, focus, setFocus, onAssign, goTo }: { data: any; fo
           </div>
           <div className="col-start-2 md:col-start-auto text-sm min-w-0"><div className="tnum"><span className="font-medium">{approved} of {counted.length}</span> <span className="text-muted">approved</span></div><div className="text-faint truncate">{issues.length ? issues.join(' · ') : 'Nothing outstanding'}</div></div>
           <div className="col-start-2 md:col-start-auto"><ReadinessBadge value={s.readiness} results={s.results} size="sm" /></div>
-          {next && <div className="col-start-2 sm:hidden">{next}</div>}
+          <div className="col-start-2 sm:hidden">{next}</div>
           <div className="col-start-3 row-start-1 md:col-start-auto md:row-start-auto flex items-center justify-end gap-2">
             <span className="hidden sm:inline-flex">{next}</span>
             <Menu trigger={(t) => <MoreButton label={`Actions for ${s.legalName}`} {...t} />} items={[
-              can('requests.send') && { label: 'Request documents', onClick: () => setRequest({ sub: s.id }) },
+              can('requests.send') && docsOpen.length > 0 && { label: docsOpen.some((r: any) => REQUESTED.includes(r.status)) ? 'Send a reminder now' : docsOpen.every((r: any) => r.status === 'expiring_soon') ? 'Request renewal now' : 'Request documents', onClick: () => setRequest({ sub: s.id, reqs: docsOpen.map((r: any) => r.requirementId) }) },
+              can('documents.review') && checksOut.length > 0 && nx.kind !== 'check' && { label: 'Record check', onClick: () => nav(checkLink(checksOut[0].requirementId)) },
+              { label: isOpen ? 'Hide requirements' : 'Show requirements', onClick: () => setOpen({ ...open, [s.id]: !isOpen }) },
               { label: 'Open subcontractor profile', onClick: () => nav(`/app/subcontractors/${s.id}?project=${data.project.id}`) },
               editable && { label: 'Remove from project', onClick: () => setRemove(s), danger: true },
             ]} />
@@ -344,8 +350,8 @@ function DocumentsTab({ projectId }: { projectId: string }) {
       <table className="table min-w-[760px]">
         <thead><tr><th className="th">Document</th><th className="th">Subcontractor</th><th className="th">Expiry</th><th className="th">Status</th><th className="th">Version</th></tr></thead>
         <tbody>{data.items.map((d: any) => (
-          <tr key={d.id} className="tr-link" onClick={() => nav(`/app/documents/${d.id}`)}>
-            <td className="td"><div className="font-medium">{d.title}</div><div className="text-sm text-faint">{d.category}</div></td>
+          <tr key={d.id} className="tr-link" onClick={rowClick(() => nav(`/app/documents/${d.id}`))}>
+            <td className="td"><div><RowLink to={`/app/documents/${d.id}`}>{d.title}<span className="sr-only"> for {d.subcontractor}</span></RowLink></div><div className="text-sm text-faint">{d.category}</div></td>
             <td className="td">{d.subcontractor}</td><td className="td whitespace-nowrap tnum">{d.expiryDate ? formatDate(d.expiryDate) : <span className="text-faint">No expiry</span>}</td>
             <td className="td"><DocStatus value={d.status} /></td><td className="td tnum text-muted">v{d.versionNumber ?? 1}</td>
           </tr>

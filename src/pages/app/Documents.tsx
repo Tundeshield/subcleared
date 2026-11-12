@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { formatDate } from '../../domain/dates';
 import { useApi } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
-import { Checkbox, cx, DocStatus, Empty, ErrorState, FilterSelect, PageHeader, Pagination, SearchInput, Skeleton, SortHeader, sortRows, Toolbar, usePaged } from '../../ui';
+import { Checkbox, cx, DocStatus, Empty, ErrorState, FilterSelect, PageHeader, Pagination, SearchInput, Skeleton, SortHeader, sortRows, Toolbar, usePaged, RowLink, rowClick } from '../../ui';
 
 export default function Documents() {
   const [f, setF] = useState<any>({});
@@ -49,8 +49,8 @@ export default function Documents() {
             <table className="table min-w-[1080px]">
               <thead><tr><SortHeader label="Document" k="title" sort={sort} setSort={setSort} /><SortHeader label="Subcontractor" k="subcontractor" sort={sort} setSort={setSort} /><th className="th">Projects</th><SortHeader label="Issued" k="issueDate" sort={sort} setSort={setSort} /><SortHeader label="Expires" k="expiryDate" sort={sort} setSort={setSort} /><SortHeader label="Status" k="status" sort={sort} setSort={setSort} /><SortHeader label="Version" k="versionNumber" sort={sort} setSort={setSort} /></tr></thead>
               <tbody>{paged.slice.map((d: any) => (
-                <tr key={d.id} className={cx('tr-link', d.archived && 'opacity-60')} onClick={() => nav(`/app/documents/${d.id}`)}>
-                  <td className="td"><div className="font-medium">{d.title}</div><div className="text-sm text-faint">{d.category}{d.referenceNumber ? ` · ${d.referenceNumber}` : ''}</div></td>
+                <tr key={d.id} className={cx('tr-link', d.archived && 'opacity-60')} onClick={rowClick(() => nav(`/app/documents/${d.id}`))}>
+                  <td className="td"><div><RowLink to={`/app/documents/${d.id}`}>{d.title}<span className="sr-only"> for {d.subcontractor}</span></RowLink></div><div className="text-sm text-faint">{d.category}{d.referenceNumber ? ` · ${d.referenceNumber}` : ''}</div></td>
                   <td className="td">{d.subcontractor}</td>
                   <td className="td text-sm text-muted">{d.projectNames?.length ? d.projectNames.join(', ') : <span className="text-faint">—</span>}</td>
                   <td className="td whitespace-nowrap tnum text-muted">{formatDate(d.issueDate)}</td>

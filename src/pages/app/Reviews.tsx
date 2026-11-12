@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { formatDateTime } from '../../domain/dates';
 import { api, dataChanged, useApi } from '../../lib/api';
-import { Checkbox, Dialog, Empty, ErrorState, FilterSelect, Glyph, PageHeader, Pagination, SearchInput, Skeleton, Spinner, Toolbar, usePaged, useToast } from '../../ui';
+import { Checkbox, Dialog, Empty, ErrorState, FilterSelect, Glyph, PageHeader, Pagination, SearchInput, Skeleton, Spinner, Toolbar, usePaged, useToast, RowLink, rowClick } from '../../ui';
 import { formatDate } from '../../domain/dates';
 
 const AGE = [{ value: '1', label: 'Last 24 hours' }, { value: '7', label: 'Last 7 days' }, { value: 'old', label: 'Waiting over 3 days' }];
@@ -52,8 +52,8 @@ export default function Reviews() {
               <table className="table min-w-[900px]">
                 <thead><tr><th className="th">Document</th><th className="th">Subcontractor</th><th className="th">Project</th><th className="th">Submitted</th><th className="th">Automatic check</th><th className="th"><span className="sr-only">Action</span></th></tr></thead>
                 <tbody>{paged.slice.map((r: any) => (
-                  <tr key={r.versionId} className="tr-link" onClick={() => nav(`/app/reviews/${r.versionId}`)}>
-                    <td className="td"><div className="font-medium">{r.requirement ?? r.title}</div><div className="text-sm text-faint truncate max-w-[18rem]">{r.fileName}{r.versionNumber > 1 ? ` · version ${r.versionNumber}` : ''}{r.replacing ? ' · replaces the approved copy' : ''}</div></td>
+                  <tr key={r.versionId} className="tr-link" onClick={rowClick(() => nav(`/app/reviews/${r.versionId}`))}>
+                    <td className="td"><div><RowLink to={`/app/reviews/${r.versionId}`}>{r.requirement ?? r.title}<span className="sr-only"> from {r.subcontractor}</span></RowLink></div><div className="text-sm text-faint truncate max-w-[18rem]">{r.fileName}{r.versionNumber > 1 ? ` · version ${r.versionNumber}` : ''}{r.replacing ? ' · replaces the approved copy' : ''}</div></td>
                     <td className="td">{r.subcontractor}</td>
                     <td className="td text-sm">{r.projects.length === 0 ? <span className="text-faint">Not on a live project</span> : r.projects.length === 1 ? r.projects[0].name : <span title={r.projects.map((p: any) => p.name).join(', ')}>{r.projects[0].name} <span className="text-faint">+{r.projects.length - 1}</span></span>}</td>
                     <td className="td text-sm"><div>{formatDateTime(r.uploadedAt)}</div><div className={r.ageHours > 72 ? 'text-warning font-medium' : 'text-faint'}>{r.ageHours < 24 ? 'Today' : `Waiting ${Math.floor(r.ageHours / 24)} day${Math.floor(r.ageHours / 24) === 1 ? '' : 's'}`}</div></td>

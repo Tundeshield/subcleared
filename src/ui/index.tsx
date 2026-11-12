@@ -2,6 +2,7 @@
 // accent for actions and location, four status colours for meaning only.
 // Status never relies on colour: every state has a distinct mark *and* words.
 // Documented in docs/design-system.md and rendered live at /design.
+import type React from 'react';
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
@@ -209,6 +210,22 @@ export function Disclosure({ title, note, attention, defaultOpen = false, childr
       {open && <div id={id} className="pb-5 pl-7">{children}</div>}
     </div>
   );
+}
+
+/**
+ * The way into a record from a list: a real link (focusable, Enter opens it, announced as a link
+ * to the record). Rows stay clickable for the mouse via rowClick, which ignores clicks that land on
+ * any control inside the row so nested links, buttons and checkboxes keep their own behaviour.
+ */
+export function RowLink({ to, children, className }: { to: string; children: ReactNode; className?: string }) {
+  return <Link to={to} className={cx('font-medium text-ink hover:underline underline-offset-4 rounded-sm', className)}>{children}</Link>;
+}
+export function rowClick(go: () => void) {
+  return (e: React.MouseEvent) => {
+    if ((e.target as Element).closest('a,button,input,select,textarea,label,[role=button],[role=menu]')) return;
+    if (window.getSelection()?.toString()) return; // selecting text isn't a click
+    go();
+  };
 }
 
 /** The one loading indicator for a whole area: centred in the space it fills, with an optional short label. */
@@ -459,10 +476,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((t) => [...t, { id, message, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'bad' ? 8000 : 4500);
   }, []);
+  // Never cover the action area of an open dialog or drawer (or a sticky decision bar):
+  // while one is on screen, toasts move to the bottom-left on wide screens and the top-left (clear of the close button) on tablets and phones.
+  const [avoid, setAvoid] = useState(false);
+  useEffect(() => {
+    if (!toasts.length) return;
+    const check = () => setAvoid(!!document.querySelector('[aria-modal="true"],[data-avoid-toasts]'));
+    check();
+    const mo = new MutationObserver(check);
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, [toasts.length]);
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div className="fixed bottom-5 right-5 left-5 sm:left-auto z-[60] flex flex-col gap-2 sm:w-96" aria-live="polite">
+      <div className={cx('fixed z-[60] flex flex-col gap-2 sm:w-96', avoid ? 'top-3 left-3 right-16 sm:right-auto lg:top-auto lg:bottom-5 lg:left-5' : 'bottom-5 right-5 left-5 sm:left-auto')} aria-live="polite" data-toasts={avoid ? 'moved' : 'default'}>
         {toasts.map((t) => (
           <div key={t.id} className="fade-in rounded-md bg-ink text-canvas px-4 py-3 text-sm flex gap-3 items-start shadow-pop">
             <span className="mt-0.5 shrink-0">{t.tone === 'ok' ? Icon.check() : t.tone === 'bad' ? Icon.alert() : Icon.bell('w-4 h-4')}</span>

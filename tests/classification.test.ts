@@ -82,3 +82,43 @@ describe('by-eye checks on insurance reviews', () => {
     expect(unsure.filter((x) => !x.automatic).map((x) => x.label)).toEqual(['Named insured matches the subcontractor', 'Carrier and policy number are legible', 'Policy dates cover the work period', 'Endorsements are present where required']);
   });
 });
+
+describe('one review checklist', () => {
+  it('shows passed comparisons as done, asks only for what is unclear, and always asks about endorsements', async () => {
+    const { reviewChecklist } = await import('../src/domain/assessment');
+    const checks: any[] = [
+      { key: 'kind', label: 'Right kind of document', outcome: 'pass', detail: '' },
+      { key: 'name', label: 'Names this subcontractor', outcome: 'pass', detail: '' },
+      { key: 'expiry', label: 'In date', outcome: 'unclear', detail: 'No expiry date could be read.' },
+      { key: 'limit', label: 'Limit at least 10m', outcome: 'fail', detail: 'Shows 5m' },
+    ];
+    const items = reviewChecklist(checks, { issuer: { value: 'Hartwell', confidence: 0.95 } as any }, { insurance: true });
+    const by = (k: string) => items.find((i) => i.key === k)!;
+    expect(items[0].state).toBe('problem'); // problems first
+    expect(by('auto:kind').state).toBe('done');
+    expect(by('auto:expiry').state).toBe('check');
+    expect(items.some((i) => i.key === 'eye:name')).toBe(false); // the comparison already covers it
+    expect(items.some((i) => i.key === 'eye:dates')).toBe(false);
+    expect(by('eye:legible').state).toBe('check'); // policy number wasn't read
+    expect(by('eye:endorsements').state).toBe('check');
+    // Nothing read at all: a person checks everything that matters, nothing is shown as done.
+    const none = reviewChecklist([], {}, { insurance: true });
+    expect(none.every((i) => i.state === 'check')).toBe(true);
+    expect(none.map((i) => i.key)).toEqual(['eye:name', 'eye:dates', 'eye:legible', 'eye:endorsements']);
+  });
+});
+
+import { renewalPlan } from '../src/domain/compliance';
+describe('renewal plan (read-only mirror of the reminder job)', () => {
+  const sched = [90, 60, 30, 14, 7, 0, -7];
+  it('schedules the next reminder before any is due', () => {
+    expect(renewalPlan(45, '2026-12-27', sched, [])).toMatchObject({ dueNow: true }); // 60 crossed, not sent
+    expect(renewalPlan(45, '2026-12-27', sched, [60])).toEqual({ dueNow: false, nextDate: '2026-11-27', lastSentOffset: 60 });
+  });
+  it('reports nothing further once the schedule is used up', () => {
+    expect(renewalPlan(-10, '2026-11-02', sched, sched).nextDate).toBeUndefined();
+  });
+  it('treats a skipped (superseded) earlier reminder as done', () => {
+    expect(renewalPlan(20, '2026-12-02', sched, [90, 60, 30])).toEqual({ dueNow: false, nextDate: '2026-11-18', lastSentOffset: 30 });
+  });
+});

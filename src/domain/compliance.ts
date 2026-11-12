@@ -349,3 +349,20 @@ export function dueReminder(daysToExpiry: number, schedule: number[], alreadySen
 export function readinessRank(r: Readiness): number {
   return { not_ready: 0, action_required: 1, not_evaluated: 2, ready: 3 }[r];
 }
+
+/**
+ * When the next automatic renewal reminder goes out for a document in force,
+ * using the same rule as the reminder job (dueReminder). Read-only: it
+ * schedules nothing. dueNow = a reminder is due and goes at the next run in
+ * working hours; nextDate = the date of the next one after that.
+ */
+export function renewalPlan(daysToExpiry: number, expiryDate: string, schedule: number[], alreadySent: Iterable<number>): { dueNow: boolean; nextDate?: string; lastSentOffset?: number } {
+  const sent = new Set(alreadySent);
+  const offsets = [...new Set(schedule)].sort((a, b) => b - a);
+  const due = dueReminder(daysToExpiry, offsets, sent);
+  const upcoming = offsets.filter((o) => daysToExpiry > o);
+  const next = upcoming[0];
+  const lastSentOffset = offsets.filter((o) => sent.has(o) && daysToExpiry <= o).pop();
+  const shift = (d: string, n: number) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() - n); return t.toISOString().slice(0, 10); };
+  return { dueNow: !!due, nextDate: next === undefined ? undefined : shift(expiryDate, next), lastSentOffset };
+}

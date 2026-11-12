@@ -68,3 +68,19 @@ export function relativeDays(days: number): string {
   if (days === -1) return 'yesterday';
   return days > 0 ? `in ${days} days` : `${-days} days ago`;
 }
+
+/** "30 Nov" — the year only when it isn't this year. */
+export function formatShortDate(d?: string | null, today: string = new Date().toISOString().slice(0, 10)): string {
+  if (!d) return '—';
+  const iso = d.slice(0, 10);
+  if (!isISODate(iso)) return d;
+  const [y, m, day] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, day)).toLocaleDateString(getLocale(), { day: 'numeric', month: 'short', ...(iso.slice(0, 4) !== today.slice(0, 4) ? { year: 'numeric' } : {}), timeZone: 'UTC' });
+}
+
+/** "today", "yesterday" or "on 3 Nov" for a past timestamp or date. */
+export function whenPast(ts: string, today: string): string {
+  const day = ts.length > 10 ? todayIn(Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(ts)) : ts;
+  const n = daysBetween(day, today);
+  return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `on ${formatShortDate(day, today)}`;
+}

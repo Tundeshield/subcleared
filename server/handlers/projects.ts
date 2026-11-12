@@ -4,6 +4,8 @@ import type { Assignment, Member, Project, ProjectRequirement, ProjectStatus, Re
 import { audit, bad, C, type Ctx, diff, id, ids, need, notFound, oneOf, reqStr, requireProjectAccess, str } from '../core';
 import { loadOrgData, recompute } from '../data';
 import { enforceLimit } from './billing';
+import { openRequestFor, renewalFollowUp, sentReminderKeys, type FollowUp } from '../followup';
+import { todayIn } from '../../src/domain/dates';
 
 const STATUSES: ProjectStatus[] = ['planning', 'active', 'on_hold', 'completed', 'archived'];
 
@@ -77,6 +79,9 @@ export async function getProjectDetail(ctx: Ctx, input: any) {
   const data = await loadOrgData(ctx.db, ctx.org.id);
   const assigned = data.assignments.filter((a) => a.active && a.projectId === p.id);
   const defs = new Map(data.requirements.map((r) => [r.id, r]));
+  const sent = await sentReminderKeys(ctx.db, ctx.org.id);
+  const today = todayIn(ctx.org.settings.timezone, ctx.svc.now());
+  const chasing = ctx.org.settings.chasing?.enabled !== false;
   const subs = assigned.map((a) => {
     const s = data.subs.find((x) => x.id === a.subcontractorId);
     const r = data.readiness.find((x) => x.id === `${p.id}__${a.subcontractorId}`);
@@ -93,6 +98,10 @@ export async function getProjectDetail(ctx: Ctx, input: any) {
       pending: applicable.filter((x) => x.status === 'awaiting_review').length,
       readiness: r?.readiness ?? 'not_evaluated', summary: r?.summary ?? 'Not evaluated yet', reasons: r?.reasons ?? [],
       results: r?.results ?? [],
+      // What happens next on its own, so the page never asks a person to do what's already automatic.
+      followUps: Object.fromEntries((r?.results ?? []).map((x): [string, FollowUp | null] => [x.requirementId,
+        x.status === 'expiring_soon' && x.versionId && x.expiryDate ? renewalFollowUp(ctx.org, data, sent, { subcontractorId: s.id, versionId: x.versionId, expiryDate: x.expiryDate }, today)
+        : ['requested', 'overdue'].includes(x.status) ? openRequestFor(data, s.id, x.requirementId, chasing) : null]).filter(([, f]) => f)),
       lastActivityAt: s.lastActivityAt ?? s.updatedAt, assignedAt: a.assignedAt,
     };
   }).filter(Boolean);

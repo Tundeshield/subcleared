@@ -219,3 +219,34 @@ export function insuranceEyeChecks(checks: AssessmentCheck[], fields: Record<str
     { label: 'Endorsements are present where required', automatic: false },
   ];
 }
+
+export interface ChecklistItem {
+  key: string; label: string; detail?: string;
+  /** done: established automatically · problem: fails the requirement · note: worth knowing · check: a person must look */
+  state: 'done' | 'problem' | 'note' | 'check';
+}
+
+/**
+ * The one list a reviewer works from. Every automatic comparison appears once (passed ones as done, not
+ * as work to repeat); anything the comparison couldn't establish becomes a check for a person; and for
+ * insurance, the things only a person can confirm (legibility when the reading was unsure, endorsements)
+ * are added only where the comparison doesn't already cover them. Display only: it never changes the assessment.
+ */
+export function reviewChecklist(checks: AssessmentCheck[], fields: Record<string, ExtractedField>, opts: { insurance: boolean; market?: string }): ChecklistItem[] {
+  const items: ChecklistItem[] = checks.map((c) => ({
+    key: `auto:${c.key}`, label: c.label, detail: c.detail,
+    state: c.outcome === 'pass' ? 'done' : c.outcome === 'fail' ? 'problem' : c.outcome === 'warn' ? 'note' : 'check',
+  }));
+  if (opts.insurance) {
+    const has = (pred: (k: string) => boolean) => checks.some((c) => pred(c.key));
+    const trusted = (k: string) => { const f = fields[k]; return !!f && f.value !== null && f.value !== undefined && f.value !== '' && f.confidence >= TRUST; };
+    if (!has((k) => k === 'name')) items.push({ key: 'eye:name', label: 'Named insured matches the subcontractor', state: 'check' });
+    if (!has((k) => k === 'expiry' || k.startsWith('covers:'))) items.push({ key: 'eye:dates', label: 'Policy dates cover the work period', state: 'check' });
+    items.push(trusted('issuer') && trusted('referenceNumber')
+      ? { key: 'eye:legible', label: `${opts.market === 'US' ? 'Carrier' : 'Insurer'} and policy number read`, detail: 'Read clearly from the document.', state: 'done' }
+      : { key: 'eye:legible', label: `${opts.market === 'US' ? 'Carrier' : 'Insurer'} and policy number are legible`, state: 'check' });
+    items.push({ key: 'eye:endorsements', label: 'Endorsements are present where required', detail: 'Only a person can confirm this.', state: 'check' });
+  }
+  const rank = { problem: 0, check: 1, note: 2, done: 3 } as const;
+  return items.sort((a, b) => rank[a.state] - rank[b.state]);
+}

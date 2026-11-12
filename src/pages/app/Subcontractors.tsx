@@ -6,9 +6,7 @@ import { SUB_TYPES } from '../../domain/library';
 import { api, dataChanged, useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
-import {
-  Callout, Checkbox, cx, Dialog, Drawer, Empty, ErrorState, Field, FilterSelect, FormError, Glyph, humanize, PageHeader, Pagination, ReadinessBadge, SampleTag,
-  SearchInput, Skeleton, SortHeader, sortRows, Spinner, toneText, Toolbar, usePaged, useToast, newRowKey, withoutRowKey } from '../../ui';
+import { Callout, Checkbox, cx, Dialog, Drawer, Empty, ErrorState, Field, FilterSelect, FormError, Glyph, humanize, PageHeader, Pagination, ReadinessBadge, SampleTag, SearchInput, Skeleton, SortHeader, sortRows, Spinner, toneText, Toolbar, usePaged, useToast, newRowKey, withoutRowKey, RowLink, rowClick } from '../../ui';
 
 const READINESS_FILTERS = [{ value: 'attention', label: 'Requiring attention' }, { value: 'not_ready', label: 'Not ready' }, { value: 'action_required', label: 'Action required' }, { value: 'ready', label: 'Ready' }, { value: 'not_evaluated', label: 'Not assessed yet' }];
 
@@ -76,9 +74,9 @@ export default function Subcontractors() {
                 <SortHeader label="Last activity" k="lastActivityAt" sort={sort} setSort={setSort} />
               </tr></thead>
               <tbody>{paged.slice.map((s: any) => (
-                <tr key={s.id} className={cx('tr-link', sel.includes(s.id) && 'bg-raised/60')} onClick={() => nav(`/app/subcontractors/${s.id}`)}>
+                <tr key={s.id} className={cx('tr-link', sel.includes(s.id) && 'bg-raised/60')} onClick={rowClick(() => nav(`/app/subcontractors/${s.id}`))}>
                   <td className="td" onClick={(e) => e.stopPropagation()}><Checkbox checked={sel.includes(s.id)} onChange={(v) => setSel(v ? [...sel, s.id] : sel.filter((x) => x !== s.id))} label={<span className="sr-only">Select {s.legalName}</span>} /></td>
-                  <td className="td"><div className="font-medium">{s.legalName}</div><div className="text-sm text-faint">{[s.trade, s.tradingName && `t/a ${s.tradingName}`].filter(Boolean).join(' · ')}{s.tags.includes('Sample') && <> <SampleTag /></>}</div></td>
+                  <td className="td"><div><RowLink to={`/app/subcontractors/${s.id}`}>{s.legalName}</RowLink></div><div className="text-sm text-faint">{[s.trade, s.tradingName && `t/a ${s.tradingName}`].filter(Boolean).join(' · ')}{s.tags.includes('Sample') && <> <SampleTag /></>}</div></td>
                   <td className="td">{s.contact ? <><div>{s.contact.name}</div><div className="text-sm text-faint truncate max-w-[15rem]" title={s.contact.email}>{s.contact.email}</div></> : <span className="text-faint">No contact</span>}</td>
                   <td className="td"><ProjectReadiness s={s} /></td>
                   <td className="td text-sm">{s.projects === 0 ? <span className="text-faint">—</span> : subIssues(s).length ? subIssues(s).join(' · ') : <span className="text-success">All approved</span>}</td>
