@@ -5,27 +5,29 @@
 @tailwind components;
 @tailwind utilities;
 
-/* SubCleared design tokens — "Graphite & Deep Cyan".
-   Neutrals carry the interface; one accent marks actions and location; four
-   status colours carry meaning and always appear with an icon and words.
+/* SubCleared design tokens — "Ink, White & Deep Teal".
+   Soft grey carries the page, white carries the work, ink carries the words.
+   Teal is used sparingly: primary actions, where you are, links and focus.
+   Status colours carry meaning and always appear with an icon and words.
    Full rationale and usage: docs/design-system.md and /design. */
 :root {
   /* Neutrals */
-  --canvas: 247 248 248;      /* #F7F8F8 app background */
-  --paper: 255 255 255;       /* #FFFFFF inputs, drawers, dialogs, raised surfaces */
-  --raised: 238 241 242;      /* #EEF1F2 hover, selected rows, subtle fills */
-  --line: 226 230 232;        /* #E2E6E8 dividers */
-  --line-strong: 199 205 209; /* #C7CDD1 input borders, section rules */
-  --ink: 22 27 31;            /* #161B1F primary text */
-  --muted: 75 85 94;          /* #4B555E secondary text (8.0:1 on canvas) */
-  --faint: 98 108 118;        /* #626C76 metadata (5.4:1 on canvas) */
-  /* Accent — actions, active navigation, focus, links */
-  --accent: 21 94 117;        /* #155E75 (7.0:1 on white) */
-  --accent-hover: 14 76 95;   /* #0E4C5F */
-  --accent-tint: 231 240 243; /* #E7F0F3 */
-  --accent-bright: 103 199 217; /* #67C7D9 accent on dark surfaces (marketing) */
-  --night: 13 18 21;          /* #0D1215 dark marketing surface */
-  /* Status — meaning only */
+  --canvas: 244 246 245;      /* #F4F6F5 page background */
+  --paper: 255 255 255;       /* #FFFFFF content surfaces, forms, panels, dialogs */
+  --raised: 237 241 239;      /* #EDF1EF muted surfaces: hover, selected rows, fills */
+  --line: 226 231 229;        /* #E2E7E5 borders and dividers */
+  --line-strong: 197 206 203; /* #C5CECB input borders, section rules */
+  --ink: 23 28 32;            /* #171C20 headings, body text (15.8:1 on canvas) */
+  --muted: 85 96 104;         /* #556068 secondary text (5.9:1 on canvas, 5.6:1 on raised) */
+  --faint: 102 112 120;       /* #667078 metadata and labels (4.7:1 on canvas, 5.1:1 on white) */
+  /* Deep teal */
+  --accent: 8 126 128;        /* #087E80 primary buttons, indicators, focus (white text 4.9:1) */
+  --accent-hover: 6 107 109;  /* #066B6D */
+  --accent-ink: 6 107 109;    /* #066B6D teal text and links (5.8:1 on canvas) */
+  --accent-tint: 230 242 241; /* #E6F2F1 */
+  --accent-bright: 92 201 199; /* #5CC9C7 teal on dark surfaces (marketing) */
+  --night: 17 22 25;          /* #111619 dark marketing surface */
+  /* Status — never replaced by teal */
   --success: 30 120 74;       /* #1E784A ready, approved, in date */
   --warning: 155 88 0;        /* #9B5800 expiring, attention */
   --danger: 178 34 24;        /* #B22218 not ready, expired, rejected */
@@ -47,17 +49,17 @@
 @layer components {
   /* Buttons: one filled (primary), one outlined (secondary), one text (ghost). */
   .btn { @apply inline-flex items-center justify-center gap-2 rounded h-10 px-4 text-sm font-medium transition-colors whitespace-nowrap select-none disabled:opacity-45 disabled:pointer-events-none; }
-  .btn-primary { @apply btn bg-accent text-white hover:bg-accent-hover; }
-  .btn-secondary { @apply btn bg-transparent text-ink border border-line-strong hover:border-ink/50 hover:bg-ink/[0.03]; }
+  .btn-primary { @apply btn bg-accent text-white hover:bg-accent-hover disabled:bg-raised disabled:text-faint disabled:opacity-100; }
+  .btn-secondary { @apply btn bg-paper text-ink border border-line-strong hover:border-ink/40 hover:bg-raised/60; }
   .btn-ghost { @apply btn text-muted hover:text-ink hover:bg-ink/[0.05] px-3; }
-  .btn-quiet { @apply inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline underline-offset-4 disabled:opacity-45; }
+  .btn-quiet { @apply inline-flex items-center gap-1 text-sm font-medium text-accent-ink hover:underline underline-offset-4 disabled:opacity-45; }
   .btn-danger { @apply btn bg-danger text-white hover:bg-danger/90; }
   .btn-sm { @apply h-8 px-3 text-xs; }
   .btn-lg { @apply h-12 px-6 text-md; }
 
   .input { @apply w-full h-10 rounded border border-line-strong bg-paper px-3 text-base text-ink placeholder:text-faint transition-colors hover:border-ink/40 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:opacity-60 disabled:bg-raised; }
   textarea.input { @apply h-auto py-2.5 min-h-[5rem] leading-relaxed; }
-  select.input { @apply pr-9 appearance-none bg-no-repeat cursor-pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%234B555E' stroke-width='1.5'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E"); background-position: right 0.8rem center; }
+  select.input { @apply pr-9 appearance-none bg-no-repeat cursor-pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23556068' stroke-width='1.5'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E"); background-position: right 0.8rem center; }
   .label { @apply block text-sm font-medium text-ink mb-1.5; }
   .hint { @apply text-xs text-faint mt-1.5 leading-relaxed; }
 
@@ -68,7 +70,7 @@
   .tr-link { @apply cursor-pointer transition-colors hover:bg-raised/60; }
 
   .eyebrow { @apply text-2xs font-medium uppercase tracking-[0.12em] text-faint; }
-  .link { @apply text-accent underline-offset-4 hover:underline; }
+  .link { @apply text-accent-ink underline-offset-4 hover:underline; }
   .kbd { @apply font-mono text-[0.7rem] px-1.5 py-px rounded border border-line text-faint; }
   .rule { @apply border-t border-line; }
   .panel { @apply bg-paper border border-line rounded-md; }

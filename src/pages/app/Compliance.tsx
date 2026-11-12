@@ -35,7 +35,7 @@ export default function Compliance() {
                   {data.projects.map((p: any) => {
                     const k = `${p.id}__${s.id}`; const c = data.cells[k];
                     return <td key={p.id} className="td py-2.5 px-2">{c ? (
-                      <button onClick={() => setFocus(k)} aria-pressed={focus === k} className={cx('w-full rounded px-2.5 py-2 text-sm text-left flex items-center gap-2 hover:bg-raised', focus === k && 'bg-raised ring-1 ring-ink/40', c.readiness === 'ready' && 'text-accent')}>
+                      <button onClick={() => setFocus(k)} aria-pressed={focus === k} className={cx('w-full rounded px-2.5 py-2 text-sm text-left flex items-center gap-2 hover:bg-raised', focus === k && 'bg-raised ring-1 ring-ink/40', c.readiness === 'ready' && 'text-accent-ink')}>
                         <Glyph tone={TONE[c.readiness]} className="w-3.5 h-3.5" /><span>{(READINESS_LABELS as any)[c.readiness]}{c.blocking.length ? <span className="text-faint"> · {c.blocking.length}</span> : ''}</span>
                       </button>
                     ) : <span className="block text-center text-line-strong text-sm" aria-label="Not assigned">—</span>}</td>;

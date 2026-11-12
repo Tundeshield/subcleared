@@ -74,7 +74,7 @@ export default function Portal() {
       <div className="py-6">
         {tab === 'todo' && <>
           {todo.length === 0 && <div className="flex gap-3 py-2"><Glyph tone="ok" className="w-5 h-5 mt-0.5" /><div><div className="font-medium">Nothing needed right now</div><p className="text-muted mt-1">Everything requested has been sent. We'll email you if anything changes or a document is due for renewal.</p></div></div>}
-          <div className="space-y-4">{todo.map((r: any) => <RequirementCard key={r.id} r={r} session={session!} onDone={onDone(r.name)} />)}</div>
+          <div className="space-y-4">{todo.map((r: any, i: number) => <RequirementCard key={r.id} r={r} first={i === 0} session={session!} onDone={onDone(r.name)} />)}</div>
           {others.length > 0 && <><h2 className="eyebrow mt-10 mb-3">Already sent</h2><div className="border-t border-line">{others.map((r: any) => <RequirementCard key={r.id} r={r} session={session!} onDone={onDone(r.name)} compact />)}</div></>}
         </>}
         {tab === 'library' && (s.library.length === 0 ? <p className="text-muted">Nothing has been accepted yet.</p> : <ul className="border-t border-line">{s.library.map((d: any) => (
@@ -125,7 +125,8 @@ function CodeStep({ phase, onSubmit, onResend }: { phase: { hint: string; org: s
   );
 }
 
-function RequirementCard({ r, session, onDone, compact }: { r: any; session: string; onDone: (fileName: string) => void; compact?: boolean }) {
+/** Only the first outstanding item gets the filled button, so there is one obvious next step. */
+function RequirementCard({ r, session, onDone, compact, first }: { r: any; session: string; onDone: (fileName: string) => void; compact?: boolean; first?: boolean }) {
   const [file, setFile] = useState<File | null>(null);
   const [stage, setStage] = useState<null | 'preparing' | 'uploading' | 'verifying'>(null);
   const [progress, setProgress] = useState(0);
@@ -160,11 +161,11 @@ function RequirementCard({ r, session, onDone, compact }: { r: any; session: str
       {canUpload && (
         <div className="mt-5">
           <input ref={input} type="file" accept={ACCEPT} className="sr-only" onChange={(e) => { pick(e.target.files?.[0] ?? null); e.target.value = ''; }} aria-label={`Choose a file for ${r.name}`} />
-          {file && !stage && <div className="flex items-center gap-2.5 mb-3 py-2.5 border-y border-line"><span className="text-accent">{Icon.file()}</span><span className="truncate flex-1">{file.name}</span><span className="text-sm text-faint tnum">{(file.size / 1024 / 1024).toFixed(1)} MB</span></div>}
+          {file && !stage && <div className="flex items-center gap-2.5 mb-3 py-2.5 border-y border-line"><span className="text-accent-ink">{Icon.file()}</span><span className="truncate flex-1">{file.name}</span><span className="text-sm text-faint tnum">{(file.size / 1024 / 1024).toFixed(1)} MB</span></div>}
           {stage && <div className="mb-4"><div className="text-sm text-muted mb-1.5">{stage === 'preparing' ? 'Getting ready…' : stage === 'uploading' ? `Uploading… ${Math.round(progress * 100)}%` : 'Checking the file and saving…'}</div><Progress value={stage === 'verifying' ? 1 : progress} /></div>}
           <FormError error={err} />
           <div className="flex gap-2 mt-2">
-            {!file ? <button className={cx('flex-1 btn-lg', r.needsAction ? 'btn-primary' : 'btn-secondary')} onClick={() => input.current?.click()} disabled={!!stage}>{Icon.upload()}{r.needsAction ? 'Choose a file or take a photo' : 'Choose a file'}</button>
+            {!file ? <button className={cx('flex-1 btn-lg', r.needsAction && first ? 'btn-primary' : 'btn-secondary')} onClick={() => input.current?.click()} disabled={!!stage}>{Icon.upload()}{r.needsAction ? 'Choose a file or take a photo' : 'Choose a file'}</button>
               : <><button className="btn-primary btn-lg flex-1" onClick={send} disabled={!!stage}>{stage && <Spinner />}Send</button>{stage ? <button className="btn-secondary btn-lg" onClick={() => abort.current?.abort()}>Cancel</button> : <button className="btn-secondary btn-lg" onClick={() => setFile(null)}>Change</button>}</>}
           </div>
           <p className="text-xs text-faint mt-2.5">PDF, JPEG or PNG · up to 15 MB</p>

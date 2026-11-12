@@ -69,7 +69,7 @@ export default function ProjectDetail() {
   };
   const chip = (f: Focus, label: string, n: number) => (
     <button type="button" onClick={() => setParams(f === 'all' || (focus === f && tab === 'readiness') ? {} : { show: f })} aria-pressed={focus === f}
-      className={cx('inline-flex items-baseline gap-1.5 rounded px-2.5 py-1.5 text-sm transition-colors', focus === f ? 'bg-accent-tint text-accent font-medium' : 'text-muted hover:bg-raised hover:text-ink', n === 0 && focus !== f && 'opacity-60')}>
+      className={cx('inline-flex items-baseline gap-1.5 rounded px-2.5 py-1.5 text-sm transition-colors', focus === f ? 'bg-accent-tint text-accent-ink font-medium' : 'text-muted hover:bg-raised hover:text-ink', n === 0 && focus !== f && 'opacity-60')}>
       <span className="tnum font-medium text-ink">{n}</span>{label}
     </button>
   );
@@ -80,7 +80,7 @@ export default function ProjectDetail() {
         meta={<>{p.code && <span>{p.code}</span>}{p.location && <span>{p.location}</span>}<span>{p.managerName ? `Managed by ${p.managerName}` : 'No project manager'}</span><span>{humanize(p.status)}</span>{p.startDate && <span>{formatDate(p.startDate)} – {formatDate(p.endDate)}</span>}</>}
         actions={<>
           {!archived && can('requests.send') && c.total > 0 && <button className="btn-secondary" onClick={() => setRequesting({})}>Request paperwork</button>}
-          {!archived && can('projects.edit') && <button className="btn-primary" onClick={() => setAssign(true)}>{Icon.plus()}Add subcontractors</button>}
+          {!archived && can('projects.edit') && <button className="btn-secondary" onClick={() => setAssign(true)}>{Icon.plus()}Add subcontractors</button>}
           <Menu trigger={(t) => <MoreButton label="More project actions" {...t} />} items={[
             { label: exporting ? 'Preparing report…' : 'Export readiness report (PDF)', onClick: report },
             !archived && can('projects.edit') && { label: 'Edit project details', onClick: () => setEdit(true) },
@@ -158,9 +158,9 @@ function NextStep({ data, onAdd, onRequest, goTo }: { data: any; onAdd: () => vo
   else if (current === 3) { title = `${reviewItems.length} document${reviewItems.length === 1 ? ' needs' : 's need'} your review`; body = 'Approve them, or explain what needs changing — the subcontractor is told either way.'; action = can('documents.review') && <Link className="btn-primary" to={`/app/reviews/${reviewItems[0].versionId}`}>Review documents</Link>; }
   else { title = waiting.length ? `Waiting for ${waiting.length} subcontractor${waiting.length === 1 ? '' : 's'} to send documents` : 'Some subcontractors still have items to resolve'; body = waiting.length ? 'Reminders go out automatically. You can also send one now.' : 'Open a subcontractor below to see what is outstanding.'; action = waiting.length > 0 && can('requests.send') && <button className="btn-secondary" onClick={onRequest}>Send a reminder</button>; }
   return (
-    <section aria-label="Next step" className="mb-6 rounded-md border border-accent/25 bg-accent-tint/60 px-5 py-4">
+    <section aria-label="Next step" className="mb-6 rounded-md border border-line bg-paper px-5 py-4">
       <ol className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs">{steps.map((x, i) => (
-        <li key={x.label} className={cx('flex items-center gap-1.5', i === current ? 'text-accent font-medium' : x.done ? 'text-muted' : 'text-faint')} aria-current={i === current ? 'step' : undefined}>
+        <li key={x.label} className={cx('flex items-center gap-1.5', i === current ? 'text-accent-ink font-medium' : x.done ? 'text-muted' : 'text-faint')} aria-current={i === current ? 'step' : undefined}>
           {x.done ? <Glyph tone="ok" className="w-3.5 h-3.5" /> : <span className={cx('inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border text-[0.55rem]', i === current ? 'border-accent' : 'border-line-strong')}>{i + 1}</span>}{x.label}
         </li>
       ))}</ol>
@@ -201,7 +201,7 @@ function ReadinessTab({ data, focus, setFocus, onAssign, goTo }: { data: any; fo
     const outstanding = s.results.filter((r: any) => r.mandatory && [...MISSING, ...REQUESTED, 'expired', 'rejected'].includes(r.status) || r.status === 'expiring_soon');
     const onlyWaiting = outstanding.length > 0 && outstanding.every((r: any) => REQUESTED.includes(r.status));
     const isOpen = !!open[s.id];
-    const next = toReview && can('documents.review') ? <Link to={`/app/reviews/${toReview.versionId}`} className="btn-primary btn-sm">Review document</Link>
+    const next = toReview && can('documents.review') ? <Link to={`/app/reviews/${toReview.versionId}`} className="btn-secondary btn-sm">Review document</Link>
       : outstanding.length && can('requests.send') ? <button className="btn-secondary btn-sm" onClick={() => setRequest({ sub: s.id, reqs: outstanding.map((r: any) => r.requirementId) })}>{onlyWaiting ? 'Resend request' : 'Request documents'}</button>
       : <button className="btn-ghost btn-sm" onClick={() => setOpen({ ...open, [s.id]: !isOpen })}>{isOpen ? 'Hide details' : 'View details'}</button>;
     return (
@@ -292,7 +292,7 @@ function RequirementsTab({ data }: { data: any }) {
               <div>
                 <div className="font-medium">{r.definition?.name}</div>
                 <div className="text-sm text-muted mt-0.5">{[r.definition?.category, r.definition?.kind === 'document' ? r.definition?.documentType : humanize(r.definition?.kind ?? ''), r.definition?.expiryRequired ? 'Expires' : 'No expiry', r.definition?.criteria?.length ? `${r.definition.criteria.length} check${r.definition.criteria.length === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')}</div>
-                <div className={cx('text-xs mt-1', r.source.type === 'template' ? 'text-faint' : 'text-accent')}>{source(r)}</div>
+                <div className={cx('text-xs mt-1', r.source.type === 'template' ? 'text-faint' : 'text-accent-ink')}>{source(r)}</div>
               </div>
               <div className="flex items-center gap-4">
                 <Checkbox checked={r.mandatory} disabled={!editable || setReq.busy} onChange={(v) => setReq.run({ projectId: data.project.id, requirementId: r.requirementId, mandatory: v }).then(() => toast(v ? 'Now mandatory' : 'Now optional'))} label="Mandatory" />

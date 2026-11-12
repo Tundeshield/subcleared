@@ -29,13 +29,13 @@ export default function Pricing() {
         <section className="max-w-6xl mx-auto px-5 sm:px-8 grid md:grid-cols-3 gap-x-12 border-t border-ink">
           {plans.map((p, i) => (
             <div key={p.id} className="py-8 flex flex-col border-b border-line md:border-b-0">
-              <div className="flex items-baseline justify-between"><h2 className="text-lg font-semibold">{p.name}</h2>{i === 1 && <span className="text-xs text-accent font-medium uppercase tracking-[0.1em]">Most chosen</span>}</div>
+              <div className="flex items-baseline justify-between"><h2 className="text-lg font-semibold">{p.name}</h2>{i === 1 && <span className="text-xs text-accent-ink font-medium uppercase tracking-[0.1em]">Most chosen</span>}</div>
               <p className="text-muted mt-1 min-h-[3rem]">{p.description}</p>
               <div className="mt-6"><span className="text-4xl tnum tracking-[-0.02em]">{money(planPrice(p, interval, currency), currency)}</span><span className="text-muted"> / month</span></div>
               <div className="text-sm text-faint mt-1">{interval === 'year' ? `Billed annually, ${money(planPrice(p, interval, currency) * 12, currency)} a year` : 'Billed monthly'}</div>
               <ul className="mt-8 space-y-2.5">
                 {[lim(p.limits.activeSubcontractors, 'active subcontractors'), lim(p.limits.activeProjects, 'active projects'), lim(p.limits.users, 'team members'), p.limits.storageGb ? `${p.limits.storageGb} GB document storage` : 'Unlimited storage', ...p.features].map((f) => (
-                  <li key={f} className="flex gap-2.5"><span className="text-accent mt-0.5">{Icon.check()}</span><span>{f}</span></li>
+                  <li key={f} className="flex gap-2.5"><span className="text-accent-ink mt-0.5">{Icon.check()}</span><span>{f}</span></li>
                 ))}
               </ul>
               <div className="flex-1" />

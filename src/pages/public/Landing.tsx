@@ -126,7 +126,7 @@ function HeroProduct() {
         <CheckCard />
       </div>
       <div className="hidden md:flex absolute right-24 -bottom-6 items-center gap-2.5 rounded-full bg-paper text-ink pl-3 pr-4 py-2 text-sm shadow-[0_12px_30px_-10px_rgba(0,0,0,.5)]" aria-hidden>
-        <span className="grid place-items-center w-6 h-6 rounded-full bg-accent-tint text-accent">{mailIcon}</span>
+        <span className="grid place-items-center w-6 h-6 rounded-full bg-accent-tint text-accent-ink">{mailIcon}</span>
         Reminder sent to Harbour Scaffolding · automatically
       </div>
     </figure>
@@ -195,7 +195,7 @@ function HowItWorks() {
       <ol className="mt-12 grid lg:grid-cols-3 gap-6">
         {steps.map((s, i) => (
           <li key={s.n} className="reveal min-w-0 rounded-2xl bg-paper border border-line p-6 sm:p-7 flex flex-col" style={{ transitionDelay: `${i * 90}ms` }}>
-            <div className="font-mono text-sm text-accent">{s.n}</div>
+            <div className="font-mono text-sm text-accent-ink">{s.n}</div>
             <h3 className="mt-3 text-xl font-semibold tracking-[-0.015em]">{s.t}</h3>
             <p className="mt-2 text-muted leading-relaxed">{s.d}</p>
             <div className="mt-7 flex-1 rounded-xl bg-canvas p-4 sm:p-5 flex items-center" aria-hidden>
@@ -279,7 +279,7 @@ function Capabilities() {
       <ul className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-6 sm:gap-6">
         {MORE.map((m, i) => (
           <li key={m.t} className="reveal py-2" style={{ transitionDelay: `${i * 70}ms` }}>
-            <span className="grid place-items-center w-10 h-10 rounded-lg bg-accent-tint text-accent">
+            <span className="grid place-items-center w-10 h-10 rounded-lg bg-accent-tint text-accent-ink">
               <svg viewBox="0 0 20 20" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{m.icon}</svg>
             </span>
             <h3 className="mt-4 text-md sm:text-lg font-semibold flex flex-wrap items-center gap-x-2">{m.t}{m.tag && <span className="text-[0.6875rem] font-medium uppercase tracking-[0.1em] text-faint">{m.tag}</span>}</h3>

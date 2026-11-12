@@ -75,7 +75,7 @@ export default function SubDetail() {
               {s.contacts.length === 0 ? <p className="text-muted">No contacts yet. Add one to send document requests.</p> : (
                 <ul className="border-t border-line-strong">{s.contacts.map((c: any) => (
                   <li key={c.id} className="py-4 border-b border-line">
-                    <div className="flex items-center gap-2"><span className="font-medium">{c.name}</span>{c.id === primary?.id && <span className="text-xs text-accent">Primary</span>}{c.portalAccess && <span className="text-xs text-faint">· Portal access</span>}</div>
+                    <div className="flex items-center gap-2"><span className="font-medium">{c.name}</span>{c.id === primary?.id && <span className="text-xs text-accent-ink">Primary</span>}{c.portalAccess && <span className="text-xs text-faint">· Portal access</span>}</div>
                     <div className="text-muted mt-0.5 break-all">{c.email}</div>{c.phone && <div className="text-muted">{c.phone}</div>}
                     <div className="text-xs text-faint mt-1">{c.roles.map(humanize).join(', ')}</div>
                   </li>

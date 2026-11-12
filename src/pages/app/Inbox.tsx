@@ -67,7 +67,7 @@ function IntakeAddress({ data, onChange }: { data: any; onChange: () => void }) 
   if (!data.configured) return <div className="mt-6"><Callout tone="info" title="Email intake isn’t connected yet">Emailed documents arrive through Resend. Receiving needs to be switched on for this deployment before documents can be emailed in. Until then, subcontractors upload through their secure links.</Callout></div>;
   if (!data.address) {
     return (
-      <div className="mt-6 rounded-lg border border-line p-5">
+      <div className="mt-6 rounded-lg border border-line bg-paper p-5">
         <div className="font-medium">Get an address for emailed documents</div>
         <p className="text-muted mt-1">Subcontractors and brokers can email certificates to it, or you can forward them. Attachments are scanned, read and filed against the right subcontractor.</p>
         {can('settings.manage') ? <button className="btn-primary mt-4" disabled={busy} onClick={async () => { setBusy(true); try { await api('intake.setup', {}); onChange(); } catch (e: any) { toast(e.message, 'bad'); } finally { setBusy(false); } }}>{busy && <Spinner />}Create address</button> : <p className="text-sm text-faint mt-3">Ask an administrator to set this up.</p>}
@@ -75,7 +75,7 @@ function IntakeAddress({ data, onChange }: { data: any; onChange: () => void }) 
     );
   }
   return (
-    <div className="mt-6 rounded-lg border border-line p-5">
+    <div className="mt-6 rounded-lg border border-line bg-paper p-5">
       <div className="text-sm text-muted">Your intake address</div>
       <div className="mt-1 flex flex-wrap items-center gap-3">
         <code className="font-mono text-[0.9375rem] break-all">{data.address}</code>

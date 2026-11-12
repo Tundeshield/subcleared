@@ -70,8 +70,8 @@ export default function AppLayout() {
     return (
       <li key={n.to}>
         <NavLink to={`/app/${n.to}`} className={({ isActive }) => cx('relative flex items-center gap-2.5 rounded px-3 h-9 text-[0.9375rem] transition-colors',
-          isActive ? 'text-accent font-medium bg-accent-tint before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-accent before:rounded-full' : 'text-muted hover:text-ink hover:bg-raised/70')}>
-          <svg viewBox="0 0 16 16" className="w-4 h-4 shrink-0 opacity-80" aria-hidden>{NAV_ICON[n.icon]}</svg>
+          isActive ? 'group/nav is-active text-ink font-medium bg-raised before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:bg-accent before:rounded-full' : 'text-muted hover:text-ink hover:bg-raised/70')}>
+          <svg viewBox="0 0 16 16" className="w-4 h-4 shrink-0 opacity-80 [.is-active_&]:text-accent-ink [.is-active_&]:opacity-100" aria-hidden>{NAV_ICON[n.icon]}</svg>
           <span className="flex-1 truncate">{n.label}</span>
           {c > 0 && <span className="min-w-[1.25rem] h-5 px-1.5 rounded-full bg-raised text-[0.75rem] tnum text-ink grid place-items-center" aria-label={`${c} ${n.count === 'reviews' ? 'waiting for review' : n.count === 'inbox' ? 'to match' : 'needing renewal'}`}>{c}</span>}
         </NavLink>
@@ -117,10 +117,10 @@ export default function AppLayout() {
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[16.5rem_minmax(0,1fr)]">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[70] btn-primary">Skip to content</a>
-      <aside className="hidden lg:block border-r border-line h-screen sticky top-0">{sidebar}</aside>
-      {navOpen && <div className="lg:hidden fixed inset-0 z-40"><div className="absolute inset-0 bg-ink/30" onClick={() => setNavOpen(false)} /><aside className="absolute left-0 top-0 bottom-0 w-72 bg-canvas border-r border-line slide-in" onKeyDown={(e) => e.key === 'Escape' && setNavOpen(false)}><button type="button" className="absolute right-2 top-3.5 btn-ghost px-2" onClick={() => setNavOpen(false)} aria-label="Close navigation" autoFocus>{Icon.x()}</button>{sidebar}</aside></div>}
+      <aside className="hidden lg:block bg-paper border-r border-line h-screen sticky top-0">{sidebar}</aside>
+      {navOpen && <div className="lg:hidden fixed inset-0 z-40"><div className="absolute inset-0 bg-ink/30" onClick={() => setNavOpen(false)} /><aside className="absolute left-0 top-0 bottom-0 w-72 bg-paper border-r border-line slide-in" onKeyDown={(e) => e.key === 'Escape' && setNavOpen(false)}><button type="button" className="absolute right-2 top-3.5 btn-ghost px-2" onClick={() => setNavOpen(false)} aria-label="Close navigation" autoFocus>{Icon.x()}</button>{sidebar}</aside></div>}
       <div className="min-w-0 flex flex-col">
-        <header className="h-16 bg-canvas/95 backdrop-blur sticky top-0 z-30 flex items-center gap-1.5 sm:gap-3 px-4 sm:px-6 lg:px-10 border-b border-line">
+        <header className="h-16 bg-paper/95 backdrop-blur sticky top-0 z-30 flex items-center gap-1.5 sm:gap-3 px-4 sm:px-6 lg:px-10 border-b border-line">
           <button className="lg:hidden btn-ghost -ml-2 px-2" onClick={() => setNavOpen(true)} aria-label="Open navigation">{Icon.menu()}</button>
           <Link to="/app/overview" className="lg:hidden" aria-label="Overview"><Logo /></Link>
           <button onClick={() => setSearchOpen(true)} className="hidden sm:flex flex-1 max-w-md h-10 rounded border border-line bg-paper px-3 items-center gap-2.5 text-sm text-faint hover:border-line-strong transition-colors" aria-label="Search">

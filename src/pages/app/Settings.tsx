@@ -159,7 +159,7 @@ function Audit() {
         <><ol className="border-t border-line">{paged.slice.map((e: any) => (
           <li key={e.id} className="border-b border-line">
             <button className="w-full text-left py-3 grid sm:grid-cols-[11rem_14rem_1fr] gap-x-4 gap-y-0.5 text-sm" onClick={() => setOpen(open === e.id ? null : e.id)} aria-expanded={open === e.id}>
-              <span className="text-faint tnum">{formatDateTime(e.at)}</span><span className="font-mono text-xs text-accent pt-0.5">{e.action}</span><span>{e.entity.label} <span className="text-muted">· {e.actor.name} ({e.source})</span></span>
+              <span className="text-faint tnum">{formatDateTime(e.at)}</span><span className="font-mono text-xs text-accent-ink pt-0.5">{e.action}</span><span>{e.entity.label} <span className="text-muted">· {e.actor.name} ({e.source})</span></span>
             </button>
             {open === e.id && <pre className="mb-3 text-xs bg-paper border border-line rounded p-3 overflow-x-auto">{JSON.stringify({ before: e.before, after: e.after, entity: e.entity, ip: e.ip }, null, 2)}</pre>}
           </li>

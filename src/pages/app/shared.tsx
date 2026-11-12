@@ -150,7 +150,7 @@ export function FileDrop({ file, onFile, disabled, large }: { file: File | null;
       className={cx('rounded-md border border-dashed transition-colors', large ? 'p-8' : 'p-6', drag ? 'border-accent bg-accent/[0.05]' : 'border-line-strong', disabled && 'opacity-60')}>
       <input ref={input} type="file" accept={ACCEPT} className="sr-only" onChange={(e) => onFile(e.target.files?.[0] ?? null)} disabled={disabled} aria-label="Choose file" />
       {file ? (
-        <div className="flex items-center gap-3"><span className="text-accent">{Icon.file('w-5 h-5')}</span><span className="truncate flex-1">{file.name}</span><span className="text-sm text-faint tnum">{(file.size / 1024 / 1024).toFixed(2)} MB</span>{!disabled && <button className="btn-quiet" onClick={() => onFile(null)}>Change</button>}</div>
+        <div className="flex items-center gap-3"><span className="text-accent-ink">{Icon.file('w-5 h-5')}</span><span className="truncate flex-1">{file.name}</span><span className="text-sm text-faint tnum">{(file.size / 1024 / 1024).toFixed(2)} MB</span>{!disabled && <button className="btn-quiet" onClick={() => onFile(null)}>Change</button>}</div>
       ) : (
         <div className="text-center">
           <button type="button" className="btn-secondary" onClick={() => input.current?.click()} disabled={disabled}>{Icon.upload()} Choose a file</button>

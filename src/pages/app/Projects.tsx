@@ -130,7 +130,7 @@ export function ProjectDrawer({ open, onClose, project }: { open: boolean; onClo
               <select className="input" value={f.templateId} onChange={(e) => set('templateId', e.target.value)}><option value="">None yet — I'll choose later</option>{reqs.data?.templates.filter((t: any) => t.active).map((t: any) => <option key={t.id} value={t.id}>{t.name} ({t.items.length} requirements)</option>)}</select>
             </Field>
         )}
-        <details className="group rounded-md border border-line" open={!!project}>
+        <details className="group rounded-md border border-line bg-paper" open={!!project}>
           <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-muted hover:text-ink list-none flex items-center gap-2"><span className="inline-block transition-transform group-open:rotate-90">{Icon.chevron()}</span>More details <span className="font-normal text-faint">(optional)</span></summary>
           <div className="px-4 pb-5 pt-1 space-y-5">
             <div className="grid sm:grid-cols-2 gap-5">

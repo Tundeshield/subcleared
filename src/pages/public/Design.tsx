@@ -15,8 +15,8 @@ const DIRECTIONS: { id: string; name: string; chosen?: boolean; verdict: string;
     status: [['Success', '#52745F', ''], ['Warning', '#252B27', 'shape only'], ['Error', '#252B27', 'shape only'], ['Info', '#525753', 'shape only']],
   },
   {
-    id: 'b', name: 'Graphite & Deep Cyan', chosen: true, verdict: 'Cool neutrals do the structural work; one deep cyan marks what you can act on and where you are. Because the accent is not green, "ready" can be green without confusion, and four restrained status colours make problems visible at a glance. Professional without looking like an insurer.',
-    tokens: [['Primary background', '#F7F8F8', 'App canvas'], ['Secondary background', '#FFFFFF', 'Inputs, drawers, dialogs, preview panes'], ['Subtle fill', '#EEF1F2', 'Hover, selected rows, skeletons'], ['Primary text', '#161B1F', 'Headings, body, values'], ['Secondary text', '#4B555E', 'Descriptions, supporting copy'], ['Metadata text', '#626C76', 'Timestamps, hints, table headings'], ['Brand accent / primary action', '#155E75', 'Primary buttons, links, active navigation, focus ring'], ['Accent hover', '#0E4C5F', 'Primary button hover'], ['Borders', '#E2E6E8', 'Dividers, table rows'], ['Strong borders', '#C7CDD1', 'Inputs, section rules']],
+    id: 'b', name: 'Ink, White & Deep Teal', chosen: true, verdict: 'Soft grey carries the page, white carries the work, ink carries the words. One deep teal marks what you can act on and where you are, used sparingly so it always stands out. Four restrained status colours stay separate from teal, so problems are visible at a glance.',
+    tokens: [['Page background', '#F4F6F5', 'App canvas'], ['Surfaces', '#FFFFFF', 'Sidebar, top bar, forms, panels, dialogs'], ['Muted surface', '#EDF1EF', 'Hover, selected rows and navigation, skeletons'], ['Primary ink', '#171C20', 'Headings, body, values'], ['Secondary text', '#556068', 'Descriptions, supporting copy'], ['Metadata text', '#667078', 'Timestamps, hints, labels'], ['Deep teal / primary action', '#087E80', 'Primary buttons, active navigation, focus ring'], ['Teal text', '#066B6D', 'Links and teal text (AA on every surface)'], ['Borders', '#E2E7E5', 'Dividers, table rows'], ['Strong borders', '#C5CECB', 'Inputs, section rules']],
     status: [['Success', '#1E784A', 'Ready, approved, in date'], ['Warning', '#9B5800', 'Expiring soon, needs attention'], ['Error', '#B22218', 'Not ready, expired, rejected, missing'], ['Info', '#295999', 'Awaiting review, in progress']],
   },
   {
@@ -56,7 +56,7 @@ const TOKENS: [string, string][] = [
   ['Control heights', 'Buttons 32 / 40 / 48 px · inputs 40 px (48 px in the subcontractor portal)'],
   ['Table density', 'Comfortable: 16 px vertical cell padding, 15 px text; never below 13 px'],
   ['Focus', '2 px accent outline, 2 px offset, on every interactive element'],
-  ['Hover', 'Subtle fill (#EEF1F2) on rows and quiet buttons; darker accent on primary'],
+  ['Hover', 'Muted surface (#EDF1EF) on rows and quiet buttons; darker accent on primary'],
   ['Disabled', '45% opacity, no pointer events, never the only way an action is explained'],
 ];
 
@@ -94,7 +94,7 @@ export default function Design() {
           <div className="grid lg:grid-cols-3 gap-8">
             {DIRECTIONS.map((d) => (
               <article key={d.id} className={d.chosen ? 'rounded-lg border-2 border-accent bg-paper p-5' : 'rounded-lg border border-line bg-paper p-5'}>
-                <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{d.name}</h3>{d.chosen && <span className="text-xs font-medium text-accent">Selected</span>}</div>
+                <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{d.name}</h3>{d.chosen && <span className="text-xs font-medium text-accent-ink">Selected</span>}</div>
                 <div className="flex mt-4 h-10 rounded overflow-hidden border border-line">{d.tokens.slice(0, 7).map(([n, h]) => <span key={n} title={`${n} ${h}`} className="flex-1" style={{ background: h }} />)}</div>
                 <div className="flex mt-2 h-3 rounded overflow-hidden">{d.status.map(([n, h]) => <span key={n} title={`${n} ${h}`} className="flex-1" style={{ background: h }} />)}</div>
                 <p className="text-sm text-muted mt-4 leading-relaxed">{d.verdict}</p>

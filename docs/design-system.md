@@ -11,30 +11,35 @@ The live reference is `/design` (rendered with the application's own components)
 5. Show the summary first; reveal detail on demand (expand rows, side panels).
 6. Side panels (drawers) for contextual editing; dialogs only for short decisions and confirmations.
 
-## Colour — "Graphite & Deep Cyan"
+## Colour — "Ink, White & Deep Teal"
+
+Soft grey carries the page, white carries the work, ink carries the words. Teal is used sparingly — primary actions, where you are, links and focus — so it always means "act here".
 
 | Token | HEX | Use |
 |---|---|---|
-| `canvas` | #F7F8F8 | App background |
-| `paper` | #FFFFFF | Inputs, drawers, dialogs, preview panes |
-| `raised` | #EEF1F2 | Hover, selected rows, skeletons |
-| `ink` | #161B1F | Headings, body text, values |
-| `muted` | #4B555E | Descriptions, supporting copy |
-| `faint` | #626C76 | Metadata, timestamps, hints |
-| `line` | #E2E6E8 | Dividers, table rows |
-| `line-strong` | #C7CDD1 | Input borders, section rules, table header rule |
-| `accent` | #155E75 | Primary buttons, links, active navigation, focus |
-| `accent-hover` | #0E4C5F | Primary hover |
-| `accent-tint` | #E7F0F3 | Selected navigation background |
+| `canvas` | #F4F6F5 | Page background |
+| `paper` | #FFFFFF | Sidebar, top bar, forms, panels, dialogs, preview panes |
+| `raised` | #EDF1EF | Muted surfaces: hover, selected rows and navigation, skeletons |
+| `ink` | #171C20 | Headings, body text, navigation labels, values |
+| `muted` | #556068 | Secondary copy (same hue as `faint`, darker for long reading) |
+| `faint` | #667078 | Metadata, timestamps, hints, labels |
+| `line` | #E2E7E5 | Borders and dividers |
+| `line-strong` | #C5CECB | Input borders, section rules, table header rule |
+| `accent` | #087E80 | Primary buttons, active navigation indicator, focus ring (fills only) |
+| `accent-hover` | #066B6D | Primary hover |
+| `accent-ink` | #066B6D | Teal text and links (#087E80 is 4.49:1 on the canvas, just under AA for text) |
+| `accent-tint` | #E6F2F1 | Rare quiet emphasis |
 | `success` | #1E784A | Ready, approved, in date |
 | `warning` | #9B5800 | Expiring soon, needs attention |
 | `danger` | #B22218 | Not ready, expired, rejected, missing; destructive buttons |
 | `info` | #295999 | Awaiting review, in progress |
 | tints | #E9F4ED · #FBF2E4 · #FCECEA · #EBF1FA | Callout backgrounds only |
 
+Selected navigation: ink label on the muted surface with a 3 px teal bar — clear without a coloured block. Borders separate; shadows are reserved for things that float (menus, dialogs, toasts).
+
 Text colours: success and danger colour the label (the two ends of the scale); warning and info colour only the icon, so screens never look like a traffic light. All text tokens pass WCAG AA on the canvas.
 
-Directions considered: *Site Ivory* (previous; green accent collided with "ready", no distinct status colours) and *Stone & Signal* (orange accent read as hi-vis cliché and competed with warnings). Details on `/design`.
+Previous direction: *Graphite & Deep Cyan* (accent #155E75). Directions considered before that: *Site Ivory* (previous; green accent collided with "ready", no distinct status colours) and *Stone & Signal* (orange accent read as hi-vis cliché and competed with warnings). Details on `/design`.
 
 ## Typography — Inter (+ IBM Plex Mono for codes)
 

@@ -137,7 +137,7 @@ export function VerifyNotice() {
         <button className="btn-primary" onClick={async () => { setError(null); const u = await auth.reload(); await refresh(); if (u?.emailVerified) nav(params.get('next') || '/onboarding'); else setError("We haven't seen the verification yet. Open the link in the email, then try again."); }}>I've verified my email</button>
         <button className="btn-secondary" onClick={async () => { setError(null); try { await auth.resendVerification(); setMsg('A new link is on its way.'); } catch (e: any) { setError(e.message); } }}>Resend link</button>
       </div>
-      {msg && <p className="text-sm text-accent mt-3">{msg}</p>}
+      {msg && <p className="text-sm text-accent-ink mt-3">{msg}</p>}
       <div className="mt-3"><FormError error={error} /></div>
       {auth.mode === 'dev' && <p className="text-xs text-faint mt-6">Local development: verification emails appear in the <a className="underline" href="/dev/mailbox">dev mailbox</a>.</p>}
     </AuthCard>

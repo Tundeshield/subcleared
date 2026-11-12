@@ -126,7 +126,7 @@ function Onboarding({ data, onSample, sampleBusy, market }: { data: any; onSampl
         <ol className="mt-6 border-t border-line-strong">
           {steps.map((s, i) => (
             <li key={i} className="flex gap-5 py-6 border-b border-line">
-              <span className={cx('w-7 h-7 rounded-full grid place-items-center text-sm shrink-0 tnum', s.done ? 'bg-success text-white' : i === next ? 'border-2 border-accent text-accent font-medium' : 'border border-line-strong text-faint')}>{s.done ? '✓' : i + 1}</span>
+              <span className={cx('w-7 h-7 rounded-full grid place-items-center text-sm shrink-0 tnum', s.done ? 'bg-success text-white' : i === next ? 'border-2 border-accent text-accent-ink font-medium' : 'border border-line-strong text-faint')}>{s.done ? '✓' : i + 1}</span>
               <div className="flex-1">
                 <div className={cx('font-medium', s.done && 'text-muted')}>{s.title}</div>
                 <p className="text-muted mt-1">{s.body}</p>

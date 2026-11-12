@@ -8,7 +8,7 @@ module.exports = {
       colors: {
         canvas: v('canvas'), paper: v('paper'), surface: v('paper'), raised: v('raised'), line: v('line'), 'line-strong': v('line-strong'),
         ink: v('ink'), muted: v('muted'), faint: v('faint'),
-        accent: v('accent'), 'accent-hover': v('accent-hover'), 'accent-tint': v('accent-tint'), 'accent-bright': v('accent-bright'), night: v('night'),
+        accent: v('accent'), 'accent-hover': v('accent-hover'), 'accent-ink': v('accent-ink'), 'accent-tint': v('accent-tint'), 'accent-bright': v('accent-bright'), night: v('night'),
         success: v('success'), warning: v('warning'), danger: v('danger'), info: v('info'),
         'success-tint': v('success-tint'), 'warning-tint': v('warning-tint'), 'danger-tint': v('danger-tint'), 'info-tint': v('info-tint'),
       },
@@ -21,7 +21,7 @@ module.exports = {
         lg: ['1.125rem', '1.6rem'], xl: ['1.375rem', '1.8rem'], '2xl': ['1.75rem', '2.15rem'], '3xl': ['2.25rem', '2.6rem'], '4xl': ['3rem', '3.3rem'], '5xl': ['3.75rem', '4rem'],
       },
       borderRadius: { DEFAULT: '4px', md: '6px', lg: '8px' },
-      boxShadow: { pop: '0 1px 2px rgb(22 27 31 / 0.06), 0 12px 32px -12px rgb(22 27 31 / 0.22)', drawer: '-16px 0 40px -16px rgb(22 27 31 / 0.25)' },
+      boxShadow: { pop: '0 1px 2px rgb(23 28 32 / 0.05), 0 10px 28px -14px rgb(23 28 32 / 0.18)', drawer: '-16px 0 40px -18px rgb(23 28 32 / 0.2)' },
       maxWidth: { content: '1320px' },
     },
   },

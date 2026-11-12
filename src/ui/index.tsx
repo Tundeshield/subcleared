@@ -1,4 +1,4 @@
-// SubCleared design system ("Graphite & Deep Cyan"): neutral surfaces, one
+// SubCleared design system ("Ink, White & Deep Teal"): neutral surfaces, one
 // accent for actions and location, four status colours for meaning only.
 // Status never relies on colour: every state has a distinct mark *and* words.
 // Documented in docs/design-system.md and rendered live at /design.
