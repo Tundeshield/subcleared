@@ -338,13 +338,18 @@ export async function reviewQueue(ctx: Ctx) {
 
 export async function getReview(ctx: Ctx, input: any) {
   const v = await visibleVersion(ctx, input.versionId);
-  const d = await ctx.db.get<DocumentRecord>(C.doc(ctx.org.id, 'documents', v.documentId));
-  const sub = await ctx.db.get<Subcontractor>(C.doc(ctx.org.id, 'subcontractors', v.subcontractorId));
-  const def = v.requirementId ? await ctx.db.get<RequirementDefinition>(C.doc(ctx.org.id, 'requirements', v.requirementId)) : null;
-  const all = await ctx.db.list<DocumentVersion>(C.col(ctx.org.id, 'versions'), [['documentId', '==', v.documentId]]);
+  // Everything below depends only on the version, so it's fetched together (it used to be one read after another).
+  const [d, sub, def, all, reviewList, verifications, assessment] = await Promise.all([
+    ctx.db.get<DocumentRecord>(C.doc(ctx.org.id, 'documents', v.documentId)),
+    ctx.db.get<Subcontractor>(C.doc(ctx.org.id, 'subcontractors', v.subcontractorId)),
+    v.requirementId ? ctx.db.get<RequirementDefinition>(C.doc(ctx.org.id, 'requirements', v.requirementId)) : Promise.resolve(null),
+    ctx.db.list<DocumentVersion>(C.col(ctx.org.id, 'versions'), [['documentId', '==', v.documentId]]),
+    ctx.db.list<ReviewRecord>(C.col(ctx.org.id, 'reviews'), [['versionId', '==', v.id]]),
+    ctx.db.list<VerificationRecord>(C.col(ctx.org.id, 'verifications'), [['versionId', '==', v.id]]),
+    assessVersion(ctx.svc, ctx.org, v),
+  ]);
   const previous = d?.approvedVersionId && d.approvedVersionId !== v.id ? all.find((x) => x.id === d.approvedVersionId) : undefined;
-  const reviews = (await ctx.db.list<ReviewRecord>(C.col(ctx.org.id, 'reviews'), [['versionId', '==', v.id]])).sort((a, b) => b.at.localeCompare(a.at));
-  const verifications = await ctx.db.list<VerificationRecord>(C.col(ctx.org.id, 'verifications'), [['versionId', '==', v.id]]);
+  const reviews = reviewList.sort((a, b) => b.at.localeCompare(a.at));
   const { storagePath, ...version } = v;
   return {
     version, document: d, subcontractor: sub && { id: sub.id, legalName: sub.legalName, tradingName: sub.tradingName, jurisdiction: sub.jurisdiction },
@@ -352,7 +357,7 @@ export async function getReview(ctx: Ctx, input: any) {
     previous: previous && { id: previous.id, versionNumber: previous.versionNumber, metadata: previous.metadata, fileName: previous.fileName, review: previous.review },
     reviews, verifications, metadataFields: METADATA_FIELDS, valueFields: VALUE_FIELDS,
     // Recomputed on every open so it always reflects the requirement and projects as they stand now.
-    assessment: await assessVersion(ctx.svc, ctx.org, v),
+    assessment,
     readingOn: !!ctx.svc.ai, kindLabels: KIND_LABELS, schema: v.extraction.kind ? SCHEMAS[v.extraction.kind as keyof typeof SCHEMAS] : undefined,
     canReview: permissionsFor(ctx.member).has('documents.review'), canVerify: permissionsFor(ctx.member).has('documents.verify'),
     me: ctx.member.uid,

@@ -188,12 +188,35 @@ export function Spinner({ className = 'w-4 h-4' }: { className?: string }) {
 export function Skeleton({ rows = 5 }: { rows?: number }) {
   return <div className="py-4 space-y-4" aria-busy="true" aria-label="Loading">{Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton h-4" style={{ width: `${88 - (i % 3) * 16}%` }} />)}</div>;
 }
+/**
+ * A section that opens and closes. The whole header is the button. `note` is a short
+ * count or status shown in the header; `attention` marks a section holding something
+ * the reader must look at, so it can't be missed while closed.
+ */
+export function Disclosure({ title, note, attention, defaultOpen = false, children, className }: {
+  title: ReactNode; note?: ReactNode; attention?: boolean; defaultOpen?: boolean; children: ReactNode; className?: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const id = useId();
+  return (
+    <div className={cx('border-b border-line', className)}>
+      <button type="button" className="w-full flex items-center gap-3 py-3.5 text-left hover:text-ink group" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
+        <span className={cx('shrink-0 text-faint group-hover:text-ink transition-transform', open && 'rotate-90')}>{Icon.chevron()}</span>
+        <span className="font-medium min-w-0 flex-1">{title}</span>
+        {attention && <span className="inline-flex items-center gap-1.5 text-sm font-medium shrink-0"><Glyph tone="attention" className="w-3.5 h-3.5" /><span className="sr-only">Needs attention</span></span>}
+        {note !== undefined && <span className="text-sm text-faint shrink-0 tnum">{note}</span>}
+      </button>
+      {open && <div id={id} className="pb-5 pl-7">{children}</div>}
+    </div>
+  );
+}
+
 /** The one loading indicator for a whole area: centred in the space it fills, with an optional short label. */
 export function LoadingBlock({ label, className = 'min-h-[50vh]' }: { label?: string; className?: string }) {
   return (
-    <div className={cx('w-full flex flex-col items-center justify-center gap-3 text-muted text-center', className)} aria-busy="true">
-      <Spinner className="w-6 h-6" />
-      {label && <p>{label}</p>}
+    <div className={cx('w-full flex items-center justify-center text-muted text-center', className)} aria-busy="true">
+      {/* The label hangs below the spinner, so the spinner sits at the same spot with or without it (no jump between loaders). */}
+      <div className="relative"><Spinner className="w-6 h-6" />{label && <p className="absolute top-full left-1/2 -translate-x-1/2 mt-3 w-max max-w-[80vw]">{label}</p>}</div>
     </div>
   );
 }

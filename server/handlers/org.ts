@@ -298,7 +298,9 @@ export async function markNotifications(ctx: Ctx, input: any) {
   const all = await ctx.db.list<InAppNotification>(C.col(ctx.org.id, 'notifications'), [['recipientUid', '==', ctx.member.uid]]);
   const want = input.all ? null : new Set(ids(input.ids, 'Notifications'));
   const now = ctx.svc.now().toISOString();
-  for (const n of all) if (!n.readAt && (!want || want.has(n.id))) await ctx.db.update(C.doc(ctx.org.id, 'notifications', n.id), { readAt: now });
+  // In parallel: marking many as read used to take a database round trip each, one after another.
+  const todo = all.filter((n) => !n.readAt && (!want || want.has(n.id)));
+  for (let i = 0; i < todo.length; i += 50) await Promise.all(todo.slice(i, i + 50).map((n) => ctx.db.update(C.doc(ctx.org.id, 'notifications', n.id), { readAt: now })));
   return { ok: true };
 }
 
@@ -367,7 +369,15 @@ export async function search(ctx: Ctx, input: any) {
 const MEANINGFUL = /^(document\.(uploaded|replaced|approved|rejected|info_requested|archived)|request\.(sent|portal_invited)|subcontractor\.(created|imported|suspended|archived|restored)|project\.(created|template_applied|subcontractor_assigned)|requirement\.(created|changed|marked_not_applicable)|template\.(created|changed)|member\.(joined|invited)|compliance\.status_changed|notification\.renewal_reminder)$/;
 
 export async function dashboard(ctx: Ctx, input: any) {
-  const data = await loadOrgData(ctx.db, ctx.org.id);
+  // All independent reads at once (they used to run one after another). Recent activity reads the
+  // newest audit entries only, not the whole history.
+  const [data, members, emailProblems, intakeWaiting, recentAudit] = await Promise.all([
+    loadOrgData(ctx.db, ctx.org.id),
+    ctx.db.list<Member>(C.col(ctx.org.id, 'members')),
+    ctx.db.list<any>(C.col(ctx.org.id, 'emailProblems')),
+    can(ctx, 'documents.upload') ? ctx.db.list<any>(C.col(ctx.org.id, 'intake'), [['status', '==', 'needs_match']]) : Promise.resolve([]),
+    ctx.db.list<AuditEvent>(C.col(ctx.org.id, 'audit'), [], { orderBy: ['at', 'desc'], limit: 300 }),
+  ]);
   const today = todayIn(ctx.org.settings.timezone, ctx.svc.now());
   const soon = ctx.org.settings.expiringSoonDays;
   let projects = data.projects.filter((p) => !['archived', 'completed'].includes(p.status) && canSeeProject(ctx.member, p));
@@ -419,7 +429,6 @@ export async function dashboard(ctx: Ctx, input: any) {
       issues: pr.reduce((n, r) => n + r.results.filter((x) => x.blocking).length, 0),
     };
   }).sort((a, b) => (a.readyPct ?? 101) - (b.readyPct ?? 101) || b.notReady - a.notReady);
-  const members = await ctx.db.list<Member>(C.col(ctx.org.id, 'members'));
   for (const p of projectSummary) p.manager = members.find((m) => m.uid === p.managerUid)?.name;
 
   const attention = [
@@ -445,12 +454,12 @@ export async function dashboard(ctx: Ctx, input: any) {
   const needs: Need[] = [];
   const pname = (id: string) => projects.find((p) => p.id === id)?.name;
   // Addresses that bounced or complained: chasing has stopped, so a person must act.
-  for (const p of await ctx.db.list<any>(C.col(ctx.org.id, 'emailProblems'))) {
+  for (const p of emailProblems) {
     const s = data.subs.find((x) => x.contacts.some((c) => c.email.toLowerCase() === p.email));
     needs.push({ tone: 'blocked', item: s?.legalName ?? p.email, itemLink: s ? `/app/subcontractors/${s.id}` : '/app/settings/delivery', context: p.email, issue: p.kind === 'bounced' ? 'Email to this address bounced — reminders have stopped' : 'This address marked our email as spam — reminders have stopped', action: 'Fix contact', link: s ? `/app/subcontractors/${s.id}` : '/app/settings/delivery', rank: 0 });
   }
   // Emailed documents that couldn't be matched with confidence.
-  const inbox = can(ctx, 'documents.upload') ? (await ctx.db.list<any>(C.col(ctx.org.id, 'intake'), [['status', '==', 'needs_match']])) : [];
+  const inbox = intakeWaiting;
   for (const i of inbox.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt))) {
     needs.push({ tone: 'attention', item: i.fileName, itemLink: '/app/inbox', context: `from ${i.from}`, issue: i.suggestion?.subcontractorId ? (i.suggestion?.requirementId ? 'Emailed in — confirm where it belongs' : 'Emailed in — choose which document it is') : 'Emailed in from an unknown sender — choose who it’s from', action: 'Match document', link: '/app/inbox', rank: 1 });
   }
@@ -500,7 +509,7 @@ export async function dashboard(ctx: Ctx, input: any) {
   for (const x of [...expiring30].sort((a, b) => a.days - b.days)) needs.push({ tone: 'attention', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expires ${x.days === 0 ? 'today' : `in ${x.days} day${x.days === 1 ? '' : 's'}`}`, action: 'Request renewal', link: '/app/renewals?window=30', rank: 7 });
   needs.sort((a, b) => a.rank - b.rank);
 
-  const recent = (await ctx.db.list<AuditEvent>(C.col(ctx.org.id, 'audit'))).filter((e) => MEANINGFUL.test(e.action)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10);
+  const recent = recentAudit.filter((e) => MEANINGFUL.test(e.action)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10);
   return {
     today, firstName: (ctx.member.name || '').split(' ')[0] || '',
     metrics: {
@@ -532,7 +541,12 @@ export { addDays };
 
 /** Small numbers for the sidebar's "Work to do" group: documents waiting for a decision and renewals needing action. */
 export async function navCounts(ctx: Ctx) {
-  const data = await loadOrgData(ctx.db, ctx.org.id, ['subs', 'projects', 'assignments', 'documents', 'versions']);
+  const canIntake = permissionsFor(ctx.member).has('documents.upload');
+  const [data, intake, notes] = await Promise.all([
+    loadOrgData(ctx.db, ctx.org.id, ['subs', 'projects', 'assignments', 'documents', 'versions']),
+    canIntake ? ctx.db.list<any>(C.col(ctx.org.id, 'intake'), [['status', '==', 'needs_match']]) : Promise.resolve([]),
+    ctx.db.list<InAppNotification>(C.col(ctx.org.id, 'notifications'), [['recipientUid', '==', ctx.member.uid]]),
+  ]);
   const { visibleSubIds } = await import('./subs');
   const visible = visibleSubIds(ctx, data);
   const docs = new Map(data.documents.map((d) => [d.id, d]));
@@ -546,6 +560,5 @@ export async function navCounts(ctx: Ctx) {
     if (!d || d.archived || d.approvedVersionId !== v.id || !v.metadata.expiryDate || !mine(v.subcontractorId)) return false;
     return daysBetween(today, v.metadata.expiryDate) <= ctx.org.settings.expiringSoonDays;
   }).length;
-  const inbox = permissionsFor(ctx.member).has('documents.upload') ? (await ctx.db.list<any>(C.col(ctx.org.id, 'intake'), [['status', '==', 'needs_match']])).length : 0;
-  return { reviews, renewals, inbox };
+  return { reviews, renewals, inbox: canIntake ? intake.length : 0, unread: notes.filter((n) => !n.readAt).length };
 }

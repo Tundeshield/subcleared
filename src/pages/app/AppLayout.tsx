@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { term } from '../../domain/locale';
 import { ROLE_LABELS } from '../../domain/permissions';
@@ -42,8 +42,11 @@ export default function AppLayout() {
   const [helpOpen, setHelpOpen] = useState(false);
   const loc = useLocation();
   const nav = useNavigate();
-  const notif = useApi<{ unread: number }>('notifications.list', { limit: 1, unreadOnly: true }, [loc.pathname]);
-  const counts = useApi<{ reviews: number; renewals: number; inbox?: number }>('nav.counts', {}, [loc.pathname]);
+  // Menu badges and the unread count come in one request, refreshed when you move between pages
+  // (at most every 30 seconds) and straight after any change you make.
+  const freshness = useMemo(() => Math.floor(Date.now() / 30_000), [loc.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  const counts = useApi<{ reviews: number; renewals: number; inbox?: number; unread?: number }>('nav.counts', {}, [freshness]);
+  const notif = { data: counts.data ? { unread: counts.data.unread ?? 0 } : null };
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
   const toggle = (id: string) => setCollapsed((c) => { const next = { ...c, [id]: !c[id] }; try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ } return next; });
   useEffect(() => setNavOpen(false), [loc.pathname]);

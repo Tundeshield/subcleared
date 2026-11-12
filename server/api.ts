@@ -3,7 +3,7 @@ import { applyOrgFormatting } from '../src/domain/locale';
 // dev server. Every organisation action resolves the caller's membership from
 // the verified ID token and the x-org-id header before any handler runs.
 import type { Member, Organisation } from '../src/domain/types';
-import { C, type Ctx, HttpError, rateLimit } from './core';
+import { C, checkRequestBudget, type Ctx, HttpError, rateLimit } from './core';
 import * as assistant from './handlers/assistant';
 import * as billing from './handlers/billing';
 import * as docs from './handlers/documents';
@@ -84,8 +84,23 @@ async function dispatch(svc: Services, req: ApiRequest) {
   let identity: Identity;
   try { identity = await svc.auth.verify(token); } catch (e: any) { throw new HttpError(401, 'Your session has expired. Please sign in again.', 'unauthenticated'); }
   req.mark?.('auth');
-  await rateLimit(svc.db, `user:${identity.uid}`, 1200, 300, svc.now());
-  req.mark?.('limit');
+  const confirmed = (identity.confirmed ?? Promise.resolve()).catch(() => { throw new HttpError(401, 'Your session has expired. Please sign in again.', 'unauthenticated'); });
+  const budget = checkRequestBudget(svc.db, `user:${identity.uid}`, 1200, 300, svc.now());
+  const spend = async () => { const bump = await budget; await bump(); };
+  const orgId = req.orgId;
+  const needsOrg = !['me', 'me.update', 'org.register', 'invitations.accept'].includes(action);
+  if (needsOrg && !ORG_ACTIONS[action]) { await Promise.allSettled([confirmed, budget]); throw new HttpError(404, 'Unknown action'); }
+  if (needsOrg && (!orgId || orgId.includes('/'))) { await Promise.allSettled([confirmed, budget]); throw new HttpError(400, 'No organisation selected', 'no_org'); }
+  // Revocation check, request budget and access lookup run together; nothing below runs unless all pass.
+  const [, , access] = await Promise.all([confirmed, budget, needsOrg ? svc.db.getMany<any>([C.org(orgId!), C.doc(orgId!, 'members', identity.uid)]) : Promise.resolve(null)]);
+  req.mark?.('access');
+  const counted = spend().catch(() => undefined);
+  const { confirmed: _c, ...who } = identity;
+  try { return await authed(svc, req, who, input, access as any); } finally { await counted; }
+}
+
+async function authed(svc: Services, req: ApiRequest, identity: Identity, input: any, access: [Organisation | null, Member | null] | null) {
+  const { action } = req;
 
   if (action === 'me') return org.me(svc, svc.db, identity, req.orgId ?? undefined);
   if (action === 'me.update') return org.updateProfile(svc, svc.db, identity, input);
@@ -94,12 +109,9 @@ async function dispatch(svc: Services, req: ApiRequest) {
 
   const handler = ORG_ACTIONS[action];
   if (!handler) throw new HttpError(404, 'Unknown action');
-  const orgId = req.orgId;
-  if (!orgId || orgId.includes('/')) throw new HttpError(400, 'No organisation selected', 'no_org');
-  const [o, member] = await svc.db.getMany<any>([C.org(orgId), C.doc(orgId, 'members', identity.uid)]) as [Organisation | null, Member | null];
+  const [o, member] = access ?? [null, null];
   // Same response for "no such org" and "not a member": no tenant enumeration.
   if (!o || !member || member.status !== 'active') throw new HttpError(403, 'You do not have access to this organisation', 'no_access');
-  req.mark?.('access');
   applyOrgFormatting(o.settings);
   const ctx: Ctx = { svc, db: svc.db, identity, org: o, member, ip: req.ip, source: 'web' };
   return handler(ctx, input);

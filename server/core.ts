@@ -143,6 +143,19 @@ export async function membersWith(ctx: Pick<Ctx, 'db' | 'org'>, perm: Permission
 }
 
 /** Fixed-window rate limiter stored in the database (works across instances). */
+/**
+ * The general per-user request budget. A plain read plus an atomic increment: the
+ * same limit, but parallel requests from one person no longer queue behind a lock.
+ * Use rateLimit (a transaction) where an exact count matters (codes, sign-up, uploads).
+ */
+export async function checkRequestBudget(db: Db, key: string, limit: number, windowSeconds: number, now: Date): Promise<() => Promise<void>> {
+  const window = Math.floor(now.getTime() / 1000 / windowSeconds);
+  const path = `rateLimits/${sha256(`${key}:${window}`).slice(0, 32)}`;
+  const cur = await db.get<{ count: number }>(path);
+  if ((cur?.count ?? 0) >= limit) throw new HttpError(429, 'Too many requests. Please wait a moment and try again.', 'rate_limited');
+  return () => db.increment(path, 'count', 1, { key: key.slice(0, 80), expiresAt: new Date((window + 1) * windowSeconds * 1000).toISOString() });
+}
+
 export async function rateLimit(db: Db, key: string, limit: number, windowSeconds: number, now: Date) {
   const window = Math.floor(now.getTime() / 1000 / windowSeconds);
   const path = `rateLimits/${sha256(`${key}:${window}`).slice(0, 32)}`;

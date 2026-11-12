@@ -24,6 +24,8 @@ export interface Db {
   update(path: string, data: Data): Promise<void>;
   delete(path: string): Promise<void>;
   transaction<R>(fn: (tx: Tx) => Promise<R>): Promise<R>;
+  /** Atomically adds `by` to a numeric field, creating the document if needed (no read, no lock). */
+  increment(path: string, field: string, by: number, extra?: Data): Promise<void>;
   newId(): string;
 }
 
@@ -120,6 +122,11 @@ export class MemoryDb implements Db {
     this.persist();
   }
   async delete(path: string) { this.docs.delete(path); this.persist(); }
+  async increment(path: string, field: string, by: number, extra: Data = {}) {
+    const cur = this.docs.get(path) ?? {};
+    this.docs.set(path, { ...cur, ...stripUndefined(extra), [field]: (Number(cur[field]) || 0) + by });
+    this.persist();
+  }
   async transaction<R>(fn: (tx: Tx) => Promise<R>): Promise<R> {
     // Serialise transactions so concurrent writers see each other's results,
     // matching Firestore's optimistic-retry behaviour closely enough for tests.
@@ -171,6 +178,10 @@ export class FirestoreDb implements Db {
     }
   }
   async update(path: string, data: Data) { await this.fs.doc(path).update(data); }
+  async increment(path: string, field: string, by: number, extra: Data = {}) {
+    const { FieldValue } = await import('firebase-admin/firestore');
+    await this.fs.doc(path).set({ ...extra, [field]: FieldValue.increment(by) }, { merge: true });
+  }
   async delete(path: string) { await this.fs.doc(path).delete(); }
   async transaction<R>(fn: (tx: Tx) => Promise<R>) {
     return this.fs.runTransaction(async (t) => {

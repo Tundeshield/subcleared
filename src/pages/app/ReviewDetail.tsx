@@ -7,7 +7,7 @@ import { formatDate, formatDateTime } from '../../domain/dates';
 import { term } from '../../domain/locale';
 import { api, dataChanged, useApi } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { Callout, Checkbox, cx, Dialog, DocStatus, ErrorState, Field, FormError, Glyph, humanize, Icon, PageHeader, PageLoading, Segmented, Spinner, useToast, VerificationLabel } from '../../ui';
+import { Callout, Checkbox, cx, Dialog, Disclosure, DocStatus, ErrorState, Field, FormError, Glyph, humanize, Icon, PageHeader, PageLoading, Segmented, Spinner, useToast, VerificationLabel } from '../../ui';
 import { FilePreview } from './DocumentDetail';
 
 type Decision = 'approve' | 'reject' | 'request_info';
@@ -105,18 +105,39 @@ export default function ReviewDetail() {
 
           <section>
             <h2 className="text-lg font-semibold pb-3 border-b border-line-strong"><span className="text-faint tnum mr-2">1</span>What the document says</h2>
-            <ReadingNotes v={v} kindLabels={data.kindLabels} readingOn={data.readingOn} onReload={reload} />
-            {proposed.length > 0 && (
-              <table className="w-full mt-2 text-sm">
-                <thead className="sr-only"><tr><th>Field</th><th>Read as</th><th>Confidence</th></tr></thead>
-                <tbody>{proposed.map(([k, f]: any) => (
-                  <tr key={k} className="border-b border-line align-top">
-                    <td className="py-2.5 pr-3 text-muted w-[34%]">{fieldLabel(k, v.extraction.kind)}</td>
-                    <td className="py-2.5 pr-3"><span className="text-ink text-[0.9375rem]">{fmtValue(f.value)}</span>{f.source && <div className="text-xs text-faint mt-0.5 break-words">{f.page ? `Page ${f.page}: ` : ''}“{f.source}”</div>}</td>
-                    <td className="py-2.5 tnum text-right whitespace-nowrap">{f.confidence < TRUST ? <span className="inline-flex items-center gap-1.5 font-medium"><Glyph tone="attention" className="w-3.5 h-3.5" />Unsure</span> : <span className="text-faint">{Math.round(f.confidence * 100)}%</span>}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
+            <ReadingSummary v={v} kindLabels={data.kindLabels} readingOn={data.readingOn} onReload={reload} unsure={proposed.filter(([, f]: any) => f.confidence < TRUST).length} />
+            {(proposed.length > 0 || readingNotes(v).length > 0) && (
+              <div className="mt-4 border-t border-line">
+                {proposed.length > 0 && (
+                  <Disclosure title="Details read" note={proposed.length} attention={proposed.some(([, f]: any) => f.confidence < TRUST)} defaultOpen>
+                    <table className="w-full text-sm">
+                      <thead className="sr-only"><tr><th>Field</th><th>Read as</th><th>Confidence</th></tr></thead>
+                      <tbody>{proposed.map(([k, f]: any) => (
+                        <tr key={k} className="border-b border-line last:border-0 align-top">
+                          <td className="py-2 pr-3 text-muted w-[38%]">{fieldLabel(k, v.extraction.kind)}</td>
+                          <td className="py-2 pr-3 text-ink text-[0.9375rem] break-words">{fmtValue(f.value)}</td>
+                          <td className="py-2 tnum text-right whitespace-nowrap">{f.confidence < TRUST ? <span className="inline-flex items-center gap-1.5 font-medium"><Glyph tone="attention" className="w-3.5 h-3.5" />Unsure</span> : <span className="text-faint">{Math.round(f.confidence * 100)}%</span>}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </Disclosure>
+                )}
+                {proposed.some(([, f]: any) => f.source) && (
+                  <Disclosure title="Where each detail was found" note={`${proposed.filter(([, f]: any) => f.source).length} quoted`}>
+                    <ul className="space-y-3 text-sm">{proposed.filter(([, f]: any) => f.source).map(([k, f]: any) => (
+                      <li key={k}>
+                        <div className="flex justify-between gap-3"><span className="font-medium">{fieldLabel(k, v.extraction.kind)}</span><span className={cx('tnum shrink-0', f.confidence < TRUST ? 'font-medium' : 'text-faint')}>{f.confidence < TRUST && <Glyph tone="attention" className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}{Math.round(f.confidence * 100)}%</span></div>
+                        <div className="text-muted mt-0.5 break-words">{f.page ? `Page ${f.page}: ` : ''}“{f.source}”</div>
+                      </li>
+                    ))}</ul>
+                  </Disclosure>
+                )}
+                {readingNotes(v).length > 0 && (
+                  <Disclosure title="Notes from the reading" note={readingNotes(v).length} attention={(v.extraction.issues ?? []).length > 0} defaultOpen={!!pending && (v.extraction.issues ?? []).length > 0}>
+                    <ul className="space-y-2 text-sm text-muted list-disc pl-4">{readingNotes(v).map((n, i) => <li key={i}>{n}</li>)}</ul>
+                  </Disclosure>
+                )}
+              </div>
             )}
             {v.extraction.status === 'completed' && proposed.length === 0 && <p className="text-muted mt-3">Nothing could be read confidently. Enter the details below from the document.</p>}
           </section>
@@ -181,10 +202,9 @@ export default function ReviewDetail() {
                 <>
                   <div className="mt-5 grid sm:grid-cols-2 gap-x-5 gap-y-4">{mainMeta.map(metaField)}{mainValues.map(valueField)}</div>
                   {moreMeta.length + moreValues.length > 0 && (
-                    <details className="group mt-5">
-                      <summary className="cursor-pointer select-none text-sm font-medium text-muted hover:text-ink list-none flex items-center gap-2"><span className="inline-block transition-transform group-open:rotate-90">{Icon.chevron()}</span>More details <span className="font-normal text-faint">(optional)</span></summary>
-                      <div className="mt-4 grid sm:grid-cols-2 gap-x-5 gap-y-4">{moreMeta.map(metaField)}{moreValues.map(valueField)}</div>
-                    </details>
+                    <Disclosure className="mt-5 border-t" title="More details" note="optional">
+                      <div className="grid sm:grid-cols-2 gap-x-5 gap-y-4">{moreMeta.map(metaField)}{moreValues.map(valueField)}</div>
+                    </Disclosure>
                   )}
                 </>
               );
@@ -219,7 +239,7 @@ export default function ReviewDetail() {
               </div>
             </section>
           )}
-          {data.reviews.length > 0 && <section><h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Earlier decisions and notes</h2><ul>{data.reviews.map((r: any) => <li key={r.id} className="py-3 border-b border-line"><span className="font-medium">{humanize(r.decision)}</span> · {r.reviewerName} <span className="text-xs text-faint">{formatDateTime(r.at)}</span>{r.reason && <div className="text-sm text-muted">{r.reason}</div>}{r.internalComment && <div className="text-sm text-muted">Internal: {r.internalComment}</div>}</li>)}</ul></section>}
+          {data.reviews.length > 0 && <section className="border-t border-line-strong"><Disclosure title="Earlier decisions and notes" note={data.reviews.length}><ul>{data.reviews.map((r: any) => <li key={r.id} className="py-3 border-b border-line last:border-0"><span className="font-medium">{humanize(r.decision)}</span> · {r.reviewerName} <span className="text-xs text-faint">{formatDateTime(r.at)}</span>{r.reason && <div className="text-sm text-muted">{r.reason}</div>}{r.internalComment && <div className="text-sm text-muted">Internal: {r.internalComment}</div>}</li>)}</ul></Disclosure></section>}
         </div>
       </div>
       {verify && <VerifyDialog versionId={v.id} market={market} onClose={() => { setVerify(false); reload(); }} />}
@@ -266,22 +286,28 @@ function AssessmentBanner({ a, readingOn, extraction }: { a: any; readingOn: boo
   return <Callout tone={tone as any} title={title}>{a.summary}</Callout>;
 }
 
-function ReadingNotes({ v, kindLabels, readingOn, onReload }: { v: any; kindLabels: Record<string, string>; readingOn: boolean; onReload: () => void }) {
+/** Always visible: what the document was read as, and anything that changes how to treat it. */
+function ReadingSummary({ v, kindLabels, readingOn, onReload, unsure }: { v: any; kindLabels: Record<string, string>; readingOn: boolean; onReload: () => void; unsure: number }) {
   const x = v.extraction;
-  const notes: string[] = [];
-  if (x.status === 'completed' && x.kind) notes.push(`Reads as ${(kindLabels[x.kind] ?? x.kind).toLowerCase()}${x.kindConfidence < TRUST ? ' (not certain)' : ''}.`);
-  if (x.reusedFrom) notes.push('This exact file was read before, so the earlier reading was reused.');
-  if (v.duplicateOf) notes.push(`An identical file was already submitted on ${formatDate(v.duplicateOf.at)}.`);
-  if (v.intake) notes.push(`Arrived by email from ${v.intake.from}${v.intake.subject ? ` (“${v.intake.subject}”)` : ''} on ${formatDateTime(v.intake.receivedAt)}.`);
-  for (const i of x.issues ?? []) notes.push(i);
   return (
-    <div className="mt-3 text-sm text-muted space-y-1">
-      {['queued', 'processing'].includes(x.status) && <div className="flex items-center gap-2"><Spinner /> Reading the document… <button className="btn-ghost btn-sm" onClick={onReload}>Check again</button></div>}
-      {x.status === 'failed' && <p>The document couldn’t be read automatically ({x.error}). Enter the details below.</p>}
-      {x.status === 'skipped' && <p>{x.skippedReason}</p>}
-      {x.status === 'not_configured' && <p>{readingOn ? 'Not read yet.' : 'Automatic reading isn’t switched on. Enter the details below from the document.'}</p>}
-      {notes.map((n, i) => <p key={i}>{n}</p>)}
-      {x.status === 'completed' && <p className="text-xs text-faint">Read automatically{x.escalated ? ', then re-read by a more capable model because some details were unclear' : ''}. Nothing here is official until you confirm it.</p>}
+    <div className="mt-3 space-y-1.5">
+      {['queued', 'processing'].includes(x.status) && <div className="flex items-center gap-2 text-muted"><Spinner /> Reading the document… <button className="btn-ghost btn-sm" onClick={onReload}>Check again</button></div>}
+      {x.status === 'failed' && <p className="text-muted">Couldn’t be read automatically ({x.error}). Enter the details below.</p>}
+      {x.status === 'skipped' && <p className="text-muted">{x.skippedReason}</p>}
+      {x.status === 'not_configured' && <p className="text-muted">{readingOn ? 'Not read yet.' : 'Automatic reading is off. Enter the details below from the document.'}</p>}
+      {x.status === 'completed' && x.kind && (
+        <p><span className="font-medium">Reads as {(kindLabels[x.kind] ?? x.kind).toLowerCase()}</span>{x.kindConfidence < TRUST && <span className="text-muted"> (not certain)</span>}{unsure > 0 && <span className="text-muted"> · {unsure} {unsure === 1 ? 'detail' : 'details'} to check</span>}</p>
+      )}
+      {v.duplicateOf && <p className="flex items-center gap-2 text-sm"><Glyph tone="attention" className="w-3.5 h-3.5" />An identical file was already submitted on {formatDate(v.duplicateOf.at)}.</p>}
+      {x.status === 'completed' && <p className="text-xs text-faint">Read automatically{x.escalated ? ' and checked by a second model' : ''}. Nothing is official until you confirm it.</p>}
     </div>
   );
+}
+
+function readingNotes(v: any): string[] {
+  const x = v.extraction;
+  const notes: string[] = [...(x.issues ?? [])];
+  if (v.intake) notes.push(`Arrived by email from ${v.intake.from}${v.intake.subject ? ` (“${v.intake.subject}”)` : ''} on ${formatDateTime(v.intake.receivedAt)}.`);
+  if (x.reusedFrom) notes.push('This exact file was read before, so that reading was reused.');
+  return notes;
 }

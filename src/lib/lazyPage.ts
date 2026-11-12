@@ -24,7 +24,12 @@ export function reloadForUpdate(): boolean {
 
 export function lazyPage<T extends ComponentType<any>>(load: () => Promise<{ default: T }>) {
   return lazy(async () => {
-    try { return await load(); } catch (e) {
+    try {
+      const m = await load();
+      // A file that loaded but isn't the page (e.g. HTML served in its place) counts as an old release too.
+      if (!m || typeof (m as any).default !== 'function' && typeof (m as any).default !== 'object') throw new Error('Failed to fetch dynamically imported module (empty)');
+      return m;
+    } catch (e) {
       if (isStaleChunkError(e) && reloadForUpdate()) return new Promise<never>(() => {}); // keep the loading state until the reload
       throw e;
     }

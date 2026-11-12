@@ -5,7 +5,11 @@ import { AnthropicProvider, type AiProvider } from './ai';
 import { ResendInbound, type InboundSource } from './intake';
 import { GcsFileStore, storageCorsOrigins, type FileStore } from './storage';
 
-export interface Identity { uid: string; email: string; emailVerified: boolean; name?: string }
+export interface Identity {
+  uid: string; email: string; emailVerified: boolean; name?: string;
+  /** Settles once the server has confirmed the sign-in wasn't revoked or the account disabled; rejects otherwise. */
+  confirmed?: Promise<void>;
+}
 
 export interface AuthVerifier {
   verify(token: string): Promise<Identity>;
@@ -139,8 +143,17 @@ export async function getFirebaseServices(): Promise<Services> {
     files: new GcsFileStore(getStorage(app).bucket() as any, storageCorsOrigins()),
     auth: {
       async verify(token) {
-        const d = await auth.verifyIdToken(token, true);
-        return { uid: d.uid, email: (d.email || '').toLowerCase(), emailVerified: !!d.email_verified, name: d.name };
+        // Signature, expiry and audience are checked locally (no network). The revocation and
+        // disabled-account check needs a call to Firebase, so it runs alongside the other access
+        // checks; the request is refused before any handler runs if it fails.
+        const d = await auth.verifyIdToken(token, false);
+        const confirmed = auth.getUser(d.uid).then((u) => {
+          if (u.disabled) throw new Error('Account disabled');
+          const validSince = u.tokensValidAfterTime ? Math.floor(Date.parse(u.tokensValidAfterTime) / 1000) : 0;
+          if (d.auth_time < validSince) throw new Error('Session revoked');
+        });
+        confirmed.catch(() => undefined); // handled by the caller; avoid an unhandled rejection
+        return { uid: d.uid, email: (d.email || '').toLowerCase(), emailVerified: !!d.email_verified, name: d.name, confirmed };
       },
       async revokeSessions(uid) { await auth.revokeRefreshTokens(uid); },
     },

@@ -495,7 +495,7 @@ describe('Project workflow in one step', () => {
     expect(email.text).toContain('Harbour View');
     expect(email.text).toContain('Reply to this email');
 
-    expect(await ok('owner1', 'nav.counts', {}, o.orgId)).toEqual({ reviews: 0, renewals: 0, inbox: 0 });
+    expect(await ok('owner1', 'nav.counts', {}, o.orgId)).toEqual({ reviews: 0, renewals: 0, inbox: 0, unread: expect.any(Number) });
     const detail = await ok('owner1', 'projects.get', { projectId }, o.orgId);
     const alpha = detail.subcontractors.find((s: any) => s.id === a.subcontractorId);
     expect(alpha.results.every((x: any) => x.status === 'requested')).toBe(true);
@@ -569,5 +569,24 @@ describe('portal uploads (production upload defect, Nov 2026)', () => {
     expect((await call('ownerB', 'uploads.finalize', { versionId: slot.versionId }, bOrg)).status).toBe(404);
     expect((await call('ownerB', 'uploads.failed', { versionId: slot.versionId }, bOrg)).status).toBe(404);
     expect((await call('ownerB', 'uploads.finalize', { versionId: slot.versionId }, a.orgId)).status).toBe(403);
+  });
+});
+
+describe('request checks run in parallel without weakening them', () => {
+  it('refuses a revoked session before any handler runs', async () => {
+    const o = await setupOrg();
+    const real = h.svc.auth.verify;
+    h.svc.auth.verify = async (t) => ({ ...(await real(t)), confirmed: Promise.reject(new Error('Session revoked')) });
+    const before = (await h.db.list<any>(`orgs/${o.orgId}/subcontractors`)).length;
+    const r = await call('owner1', 'subs.create', { legalName: 'Should Not Exist Ltd', trade: 'X' }, o.orgId);
+    expect(r.status).toBe(401);
+    expect((await h.db.list<any>(`orgs/${o.orgId}/subcontractors`)).length).toBe(before);
+  });
+  it('still enforces the per-user request budget', async () => {
+    const o = await setupOrg();
+    const { checkRequestBudget } = await import('../server/core');
+    for (let i = 0; i < 3; i++) await (await checkRequestBudget(h.db, 'user:t', 3, 300, h.svc.now()))();
+    await expect(checkRequestBudget(h.db, 'user:t', 3, 300, h.svc.now())).rejects.toMatchObject({ status: 429 });
+    expect((await call('owner1', 'dashboard', {}, o.orgId)).status).toBe(200);
   });
 });
