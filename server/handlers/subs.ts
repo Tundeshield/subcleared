@@ -4,7 +4,8 @@ import { parseSubcontractorCsv, guessSubTypes, type ImportRow } from '../../src/
 import { SUB_TYPES } from '../../src/domain/library';
 import { canSeeProject, isProjectScoped, permissionsFor } from '../../src/domain/permissions';
 import type { Contact, ContactRole, Subcontractor, SubStatus } from '../../src/domain/types';
-import { audit, bad, C, type Ctx, diff, EMAIL_RE, id, need, notFound, oneOf, reqStr, str } from '../core';
+import { legalNameKey } from '../../src/domain/assessment';
+import { audit, bad, C, type Ctx, diff, EMAIL_RE, HttpError, id, need, notFound, oneOf, reqStr, str } from '../core';
 import { loadOrgData, recompute, type OrgData } from '../data';
 import { enforceLimit } from './billing';
 
@@ -70,10 +71,24 @@ function parseFields(input: any, partial: boolean): Partial<Subcontractor> {
   return out;
 }
 
-async function duplicateCheck(ctx: Ctx, legalName: string, registration?: string, exceptId?: string) {
+/**
+ * A registration number already on file is the same company: refused. A name that matches once case,
+ * punctuation, spacing and legal suffixes (Ltd/Limited, PLC, LLC, Inc…) are ignored is probably the same
+ * company: the person is told which record exists and decides (allowSimilarName adds it anyway).
+ * Nothing is ever merged automatically.
+ */
+async function duplicateCheck(ctx: Ctx, legalName: string, registration?: string, exceptId?: string, allowSimilarName = false, nameUnchanged = false) {
   const all = await ctx.db.list<Subcontractor>(C.col(ctx.org.id, 'subcontractors'));
-  const clash = all.find((s) => s.id !== exceptId && (s.legalName.toLowerCase() === legalName.toLowerCase() || (registration && s.registrationNumber && s.registrationNumber.toLowerCase() === registration.toLowerCase())));
-  if (clash) throw bad(`A subcontractor called "${clash.legalName}" already exists in your directory`);
+  const others = all.filter((s) => s.id !== exceptId);
+  const reg = (x?: string) => (x ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const byReg = registration && reg(registration) ? others.find((s) => reg(s.registrationNumber) === reg(registration)) : undefined;
+  if (byReg) throw new HttpError(409, `${byReg.legalName} already has registration number ${byReg.registrationNumber}`, 'duplicate_registration', { existingId: byReg.id, existingName: byReg.legalName });
+  if (nameUnchanged) return; // an edit that keeps the name never re-raises a name match a person already accepted
+  const key = legalNameKey(legalName);
+  const exact = others.find((s) => s.legalName.trim().toLowerCase() === legalName.trim().toLowerCase());
+  if (exact) throw new HttpError(409, `“${exact.legalName}” is already in your directory`, 'duplicate_name', { existingId: exact.id, existingName: exact.legalName });
+  const similar = key ? others.find((s) => legalNameKey(s.legalName) === key || (s.tradingName && legalNameKey(s.tradingName) === key)) : undefined;
+  if (similar && !allowSimilarName) throw new HttpError(409, `“${similar.legalName}” is already in your directory. Is it the same company?`, 'possible_duplicate', { existingId: similar.id, existingName: similar.legalName });
 }
 
 export async function listSubs(ctx: Ctx, input: any) {
@@ -128,7 +143,7 @@ export async function createSub(ctx: Ctx, input: any) {
   need(ctx, 'subs.manage');
   await enforceLimit(ctx, 'subcontractors');
   const f = parseFields(input, false);
-  await duplicateCheck(ctx, f.legalName!, f.registrationNumber);
+  await duplicateCheck(ctx, f.legalName!, f.registrationNumber, undefined, input?.allowSimilarName === true);
   const now = ctx.svc.now().toISOString();
   const s: Subcontractor = {
     id: ctx.db.newId(), legalName: f.legalName!, tradingName: f.tradingName, registrationNumber: f.registrationNumber, companyType: f.companyType,
@@ -145,7 +160,7 @@ export async function updateSub(ctx: Ctx, input: any) {
   need(ctx, 'subs.manage');
   const s = await loadSub(ctx, input.subcontractorId);
   const f = parseFields(input, true);
-  if (f.legalName || f.registrationNumber) await duplicateCheck(ctx, f.legalName ?? s.legalName, f.registrationNumber ?? s.registrationNumber, s.id);
+  if (f.legalName || f.registrationNumber) await duplicateCheck(ctx, f.legalName ?? s.legalName, f.registrationNumber && f.registrationNumber !== s.registrationNumber ? f.registrationNumber : undefined, s.id, input?.allowSimilarName === true, !f.legalName || f.legalName.trim().toLowerCase() === s.legalName.trim().toLowerCase());
   const next = { ...s, ...f, updatedAt: ctx.svc.now().toISOString() };
   const d = diff(s as any, next as any);
   if (!d.changed) return { ok: true };
@@ -193,11 +208,11 @@ export async function importSubs(ctx: Ctx, input: any) {
   const csv = reqStr(input.csv, 'CSV', 2_000_000);
   const parsed = parseSubcontractorCsv(csv);
   const existing = await ctx.db.list<Subcontractor>(C.col(ctx.org.id, 'subcontractors'));
-  const names = new Set(existing.map((s) => s.legalName.toLowerCase()));
+  const names = new Set(existing.map((s) => legalNameKey(s.legalName)));
   const toCreate: ImportRow[] = [];
   const skipped: { line?: number; name: string; reason: string }[] = [];
   for (const r of parsed.rows) {
-    if (names.has(r.legalName.toLowerCase())) skipped.push({ name: r.legalName, reason: 'Already in directory' });
+    if (names.has(legalNameKey(r.legalName))) skipped.push({ name: r.legalName, reason: 'Already in directory (or a name that differs only by Ltd, punctuation or case)' });
     else toCreate.push(r);
   }
   if (input.dryRun) return { preview: toCreate, errors: parsed.errors, skipped };

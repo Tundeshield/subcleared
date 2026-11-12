@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { runDailyJobs } from '../../server/jobs';
+import { reportError } from '../../server/ops';
 import { getFirebaseServices, internalToken } from '../../server/services';
 
 // The scheduler's work (reminders, chasing, recovery, readiness), run as a
@@ -21,7 +22,7 @@ export default async (req: Request) => {
     console.log('[jobs]', JSON.stringify(summary));
   } catch (e: any) {
     await svc.db.set('jobRuns/latest', { startedAt, finishedAt: new Date().toISOString(), ok: false, storageCors, error: String(e?.message ?? e).slice(0, 500) });
-    console.error('[jobs] failed', e);
+    await reportError(svc, { fn: 'jobs-background', error: e, retry: 'will_retry' });
   }
   return new Response('ok');
 };

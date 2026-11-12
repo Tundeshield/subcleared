@@ -4,7 +4,10 @@ import { formatDateTime } from '../../domain/dates';
 import { api, useApi } from '../../lib/api';
 import { exportCsv, exportPdf } from '../../lib/export';
 import { useSession } from '../../lib/session';
-import { cx, Empty, Field, FormError, Icon, PageHeader, Pagination, Spinner, usePaged, useToast } from '../../ui';
+import { cx, Disclosure, Empty, Field, FormError, Icon, PageHeader, Pagination, Spinner, usePaged, useToast } from '../../ui';
+
+/** The three reports people run regularly. */
+const PRIMARY = ['project_readiness', 'expiring_documents', 'audit_trail'];
 
 const REPORTS: { id: string; name: string; desc: string; perm?: string; filters: string[]; group: string }[] = [
   { group: 'Readiness', id: 'project_readiness', name: 'Project readiness', desc: 'Every subcontractor on each project, whether they are ready, and what is outstanding.', filters: ['projectId', 'subcontractorId', 'trade', 'status', 'jurisdiction'] },
@@ -43,19 +46,22 @@ export default function Reports() {
     } catch (e: any) { toast(e.message, 'bad'); } finally { setBusy(null); }
   };
   const set = (k: string, v: any) => { setFilters((f: any) => ({ ...f, [k]: v || undefined })); setResult(null); };
-  const groups = [...new Set(REPORTS.map((r) => r.group))];
   return (
     <div>
-      <PageHeader title="Reports" description="Built from live records when you run them. Download as CSV for spreadsheets or as a PDF to share." actions={<Link to="/app/compliance" className="btn-secondary">Open readiness matrix</Link>} />
+      <PageHeader title="Reports" description="Built from live records when you run them. Download as CSV for spreadsheets or as a PDF to share." />
       <div className="grid lg:grid-cols-[17rem_1fr] gap-x-12 gap-y-8 items-start">
         <nav aria-label="Reports" className="space-y-6">
-          {groups.map((g) => (
-            <div key={g}><div className="eyebrow mb-2">{g}</div>
-              <ul>{REPORTS.filter((r) => r.group === g && (!r.perm || can(r.perm as any))).map((r) => (
-                <li key={r.id}><button onClick={() => { setType(r.id); setResult(null); }} aria-current={type === r.id} className={cx('relative w-full text-left px-3 py-2 rounded text-[0.9375rem]', type === r.id ? 'bg-ink/[0.05] font-medium before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-accent' : 'text-muted hover:text-ink')}>{r.name}</button></li>
+          {/* Three reports cover the regular questions; the rest stay one click away. */}
+          <ul>{REPORTS.filter((r) => PRIMARY.includes(r.id) && (!r.perm || can(r.perm as any))).sort((a, b) => PRIMARY.indexOf(a.id) - PRIMARY.indexOf(b.id)).map((r) => (
+            <li key={r.id}><button onClick={() => { setType(r.id); setResult(null); }} aria-current={type === r.id} className={cx('relative w-full text-left px-3 py-2 rounded text-[0.9375rem]', type === r.id ? 'bg-ink/[0.05] font-medium before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-accent' : 'text-muted hover:text-ink')}>{r.name}</button></li>
               ))}</ul>
-            </div>
-          ))}
+          <Disclosure className="border-t" title="More reports" defaultOpen={!PRIMARY.includes(type)}>
+            <ul className="-ml-7">{REPORTS.filter((r) => !PRIMARY.includes(r.id) && (!r.perm || can(r.perm as any))).map((r) => (
+              <li key={r.id}><button onClick={() => { setType(r.id); setResult(null); }} aria-current={type === r.id} className={cx('relative w-full text-left px-3 py-2 rounded text-[0.9375rem]', type === r.id ? 'bg-ink/[0.05] font-medium before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-accent' : 'text-muted hover:text-ink')}>{r.name}</button></li>
+              ))}
+              <li><Link to="/app/compliance" className="block px-3 py-2 rounded text-[0.9375rem] text-muted hover:text-ink">Readiness matrix</Link></li>
+            </ul>
+          </Disclosure>
         </nav>
         <div className="min-w-0">
           <h2 className="text-xl font-medium">{def.name}</h2><p className="text-muted mt-1">{def.desc}</p>

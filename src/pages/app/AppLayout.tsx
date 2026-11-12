@@ -23,16 +23,22 @@ const NAV_ICON = {
   settings: <><circle cx="8" cy="8" r="2.1" {...P} /><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2" {...P} /></>,
   billing: <><rect x="1.8" y="3.5" width="12.4" height="9" rx="1.2" {...P} /><path d="M1.8 6.5h12.4M4.5 10h2.5" {...P} /></>,
 };
-// Everyday work stays visible; everything else sits in collapsible groups.
-const MAIN: NavItem[] = [{ to: 'overview', label: 'Overview', icon: 'overview' }, { to: 'projects', label: 'Projects', icon: 'projects' }, { to: 'subcontractors', label: 'Subcontractors', icon: 'subs' }];
+// One list for everyday work, in the order people use it; everything else sits under "More".
+const MAIN: NavItem[] = [
+  { to: 'overview', label: 'Overview', icon: 'overview' },
+  { to: 'projects', label: 'Projects', icon: 'projects' },
+  { to: 'subcontractors', label: 'Subcontractors', icon: 'subs' },
+  { to: 'reviews', label: 'Documents to review', perm: 'documents.review', count: 'reviews', icon: 'review' },
+  { to: 'renewals', label: 'Renewals', count: 'renewals', icon: 'renewals' },
+  { to: 'inbox', label: 'Emailed documents', perm: 'documents.upload', count: 'inbox', icon: 'documents', onlyWhenCounted: true },
+  { to: 'reports', label: 'Reports', perm: 'reports.view', icon: 'reports' },
+];
 const GROUPS: { id: string; label: string; items: NavItem[] }[] = [
-  { id: 'work', label: 'Work to do', items: [{ to: 'reviews', label: 'Documents to review', perm: 'documents.review', count: 'reviews', icon: 'review' }, { to: 'renewals', label: 'Renewals', count: 'renewals', icon: 'renewals' }, { to: 'inbox', label: 'Emailed documents', perm: 'documents.upload', count: 'inbox', icon: 'documents', onlyWhenCounted: true }] },
-  { id: 'records', label: 'Records & tools', items: [{ to: 'documents', label: 'All documents', icon: 'documents' }, { to: 'requirements', label: 'Requirements & templates', icon: 'requirements' }, { to: 'reports', label: 'Reports', perm: 'reports.view', icon: 'reports' }] },
-  { id: 'admin', label: 'Administration', items: [{ to: 'team', label: 'Team and permissions', icon: 'team' }, { to: 'settings', label: 'Settings', icon: 'settings' }, { to: 'billing', label: 'Billing', icon: 'billing' }] },
+  { id: 'more', label: 'More', items: [{ to: 'documents', label: 'All documents', icon: 'documents' }, { to: 'requirements', label: 'Requirements & templates', icon: 'requirements' }, { to: 'team', label: 'Team and permissions', icon: 'team' }, { to: 'settings', label: 'Settings', icon: 'settings' }, { to: 'billing', label: 'Billing', icon: 'billing' }] },
 ];
 const COLLAPSE_KEY = 'sc.nav.collapsed';
 function readCollapsed(): Record<string, boolean> {
-  try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '') || { records: true, admin: true }; } catch { return { records: true, admin: true }; }
+  try { return { more: true, ...(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '{}') || {}) }; } catch { return { more: true }; }
 }
 
 export default function AppLayout() {
@@ -90,7 +96,7 @@ export default function AppLayout() {
         ) : <div><div className="text-sm font-medium truncate">{org.name}</div><div className="text-xs text-faint">{ROLE_LABELS[me!.member!.role]}</div></div>}
       </div>
       <div className="flex-1 overflow-y-auto px-2.5 pb-6">
-        <ul className="space-y-0.5 pt-1">{MAIN.map(item)}</ul>
+        <ul className="space-y-0.5 pt-1">{MAIN.filter((n) => (!n.perm || can(n.perm as any)) && (!n.onlyWhenCounted || countOf(n.count) > 0 || loc.pathname.startsWith(`/app/${n.to}`))).map(item)}</ul>
         {GROUPS.map((g) => {
           const items = g.items.filter((n) => (!n.perm || can(n.perm as any)) && (!n.onlyWhenCounted || countOf(n.count) > 0 || loc.pathname.startsWith(`/app/${n.to}`)));
           if (!items.length) return null;

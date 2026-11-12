@@ -497,15 +497,17 @@ export async function dashboard(ctx: Ctx, input: any) {
   // Only what the user can act on goes in the list. Anything SubCleared is already chasing becomes one quiet line.
   const escalatedRequests = new Set(escalations.map((e: any) => e.requestId).filter(Boolean));
   const waitingSubs = new Set<string>();
-  const checks = new Map<string, { r: typeof rows[number]; names: string[]; first: string }>();
+  // One line per subcontractor: a check like CIS verification is recorded once and covers every project.
+  const checks = new Map<string, { r: typeof rows[number]; names: string[]; first: string; projects: string[] }>();
   const stuck = new Map<string, { r: typeof rows[number]; names: string[] }>();
   for (const r of rows) for (const x of r.results) {
     if (!x.mandatory) continue;
     const def = defs.get(x.requirementId);
     const k = `${r.projectId}:${r.subcontractorId}`;
     if (def && def.kind !== 'document') {
+      const ck = r.subcontractorId;
       // A check your team makes: nothing to ask the subcontractor for.
-      if (['missing', 'requested', 'overdue', 'expired', 'expiring_soon'].includes(x.status)) { const e = checks.get(k) ?? { r, names: [], first: x.requirementId }; e.names.push(x.requirementName); checks.set(k, e); }
+      if (['missing', 'requested', 'overdue', 'expired', 'expiring_soon'].includes(x.status)) { const e = checks.get(ck) ?? { r, names: [], first: x.requirementId, projects: [] }; if (!e.names.includes(x.requirementName)) e.names.push(x.requirementName); const pn = pname(r.projectId); if (pn && !e.projects.includes(pn)) e.projects.push(pn); checks.set(ck, e); }
       continue;
     }
     if (['requested', 'overdue', 'rejected'].includes(x.status)) {
@@ -514,7 +516,7 @@ export async function dashboard(ctx: Ctx, input: any) {
       else waitingSubs.add(r.subcontractorId);
     }
   }
-  for (const { r, names, first } of checks.values()) needs.push({ tone: 'attention', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, context: pname(r.projectId), issue: `${names.join(', ')}: your team’s check`, action: 'Record check', link: `/app/subcontractors/${r.subcontractorId}?tab=requirements&project=${r.projectId}&check=${first}`, rank: 2 });
+  for (const { r, names, first, projects: ps } of checks.values()) needs.push({ tone: 'attention', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, context: ps.length > 1 ? `${ps.length} projects` : ps[0], issue: `${names.join(', ')}: your team’s check`, action: 'Record check', link: `/app/subcontractors/${r.subcontractorId}?tab=requirements&check=${first}`, rank: 2 });
   for (const { r, names } of stuck.values()) needs.push({ tone: 'blocked', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, issue: `Still hasn’t sent ${names.join(', ')} after every reminder — may need a call`, action: 'View contact', link: `/app/subcontractors/${r.subcontractorId}`, rank: 2 });
   for (const x of expired) {
     const st = renewalStage(x.v);
@@ -525,7 +527,7 @@ export async function dashboard(ctx: Ctx, input: any) {
     const hasReqs = data.projectRequirements.some((x) => x.projectId === p.id && x.active);
     if (!hasReqs && pr.length) { needs.push({ tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: 'No paperwork chosen, so nothing can be requested', action: 'Choose paperwork', link: `/app/projects/${p.id}?tab=requirements`, rank: 4 }); continue; }
     const toRequest = pr.filter((r) => r.results.some((x) => ['missing', 'not_requested'].includes(x.status) && defs.get(x.requirementId)?.kind === 'document'));
-    if (toRequest.length) needs.push({ tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: `${toRequest.length} subcontractor${toRequest.length === 1 ? ' hasn’t' : 's haven’t'} been asked for paperwork`, action: 'Request paperwork', link: `/app/projects/${p.id}`, rank: 4 });
+    if (toRequest.length) needs.push({ tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: `${toRequest.length} subcontractor${toRequest.length === 1 ? ' needs' : 's need'} asking for paperwork`, action: 'Request paperwork', link: `/app/projects/${p.id}`, rank: 4 });
   }
   // Expiring evidence is renewed automatically; only list it when no renewal could be requested.
   let renewing = 0;

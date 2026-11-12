@@ -119,7 +119,8 @@ export function SubDrawer({ open, onClose, sub }: { open: boolean; onClose: () =
   const [touched, setTouched] = useState(false);
   const members = useApi<any>(open ? 'members.list' : null);
   const { me } = useSession();
-  const { run, busy, error } = useMutation(sub ? 'subs.update' : 'subs.create');
+  const { run, busy, error, setError } = useMutation(sub ? 'subs.update' : 'subs.create');
+  const [dup, setDup] = useState<{ existingId: string; existingName: string; code: string } | null>(null);
   const toast = useToast();
   const nav = useNavigate();
   useEffect(() => { if (open) { setTouched(false); setF(sub ? { ...blank, ...sub, tags: sub.tags.join(', '), contacts: keyed(sub.contacts.length ? sub.contacts : blank.contacts), ownerUid: sub.ownerUid ?? '' } : { ...blank, contacts: keyed(blank.contacts), country: me?.org?.settings.market === 'US' ? 'United States' : me?.org?.settings.market === 'UK' ? 'United Kingdom' : '' }); } }, [open]); // eslint-disable-line
@@ -128,20 +129,23 @@ export function SubDrawer({ open, onClose, sub }: { open: boolean; onClose: () =
   const badEmail = (e: string) => e && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
   const valid = f.legalName.trim() && f.trade.trim() && !f.contacts.some((c: any) => badEmail(c.email) || (c.email && !c.name.trim()));
   const us = me?.org?.settings.market === 'US';
+  // A name or registration already on file: say which record exists and let the person decide.
+  const save = async (allowSimilarName: boolean) => {
+    setTouched(true); setDup(null);
+    if (!valid) return;
+        try {
+          const contacts = f.contacts.filter((c: any) => c.name.trim() || c.email.trim()).map(withoutRowKey);
+          const r = await run({ ...f, subcontractorId: sub?.id, allowSimilarName, tags: f.tags.split(',').map((t: string) => t.trim()).filter(Boolean), contacts, ownerUid: f.ownerUid || undefined, subTypes: f.subTypes.length ? f.subTypes : undefined });
+          toast(sub ? 'Saved' : 'Subcontractor added'); onClose();
+          if (!sub) nav(`/app/subcontractors/${r.subcontractorId}`);
+        } catch (e: any) { if (['possible_duplicate', 'duplicate_name', 'duplicate_registration'].includes(e?.code) && e.data?.existingId) setDup({ ...e.data, code: e.code }); }
+  };
   return (
     <Drawer open={open} onClose={onClose} title={sub ? `Edit ${sub.legalName}` : 'Add a subcontractor'} width="max-w-2xl" footer={<>
       <button className="btn-secondary" onClick={onClose}>Cancel</button>
-      <button className="btn-primary" disabled={busy} onClick={async () => {
-        setTouched(true);
-        if (!valid) return;
-        try {
-          const contacts = f.contacts.filter((c: any) => c.name.trim() || c.email.trim()).map(withoutRowKey);
-          const r = await run({ ...f, subcontractorId: sub?.id, tags: f.tags.split(',').map((t: string) => t.trim()).filter(Boolean), contacts, ownerUid: f.ownerUid || undefined, subTypes: f.subTypes.length ? f.subTypes : undefined });
-          toast(sub ? 'Saved' : 'Subcontractor added'); onClose();
-          if (!sub) nav(`/app/subcontractors/${r.subcontractorId}`);
-        } catch { /* shown */ }
-      }}>{busy && <Spinner />}{sub ? 'Save changes' : 'Add subcontractor'}</button>
+      <button className="btn-primary" disabled={busy} onClick={() => save(false)}>{busy && <Spinner />}{sub ? 'Save changes' : 'Add subcontractor'}</button>
     </>}>
+
       <div className="space-y-9">
         <fieldset className="space-y-5">
           <legend className="eyebrow mb-4">Business</legend>
@@ -188,7 +192,15 @@ export function SubDrawer({ open, onClose, sub }: { open: boolean; onClose: () =
           </div>
           <Field label="Tags" optional hint="Separate with commas."><input className="input" value={f.tags} onChange={(e) => set('tags', e.target.value)} /></Field>
         </fieldset>
-        <FormError error={error} />
+        {dup ? (
+          <Callout tone="warn" title={dup.code === 'possible_duplicate' ? 'Possibly already in your directory' : 'Already in your directory'}>
+            {error}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button className="btn-secondary btn-sm" onClick={() => { onClose(); nav(`/app/subcontractors/${dup.existingId}`); }}>Open {dup.existingName}</button>
+              {dup.code === 'possible_duplicate' && <button className="btn-ghost btn-sm" onClick={() => { setError(null); save(true); }}>It’s a different company — add it</button>}
+            </div>
+          </Callout>
+        ) : <FormError error={error} />}
       </div>
     </Drawer>
   );

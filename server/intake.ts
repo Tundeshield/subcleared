@@ -15,7 +15,7 @@
 // small queue for a person to confirm. Nothing is ever attached across
 // organisations: the address alone decides the organisation.
 import crypto from 'node:crypto';
-import { namesMatch, TRUST } from '../src/domain/assessment';
+import { namesMatch, TRUST, insuranceCover } from '../src/domain/assessment';
 import { expectedKinds } from '../src/domain/extraction';
 import { ALLOWED_MIME, MAX_UPLOAD_BYTES } from '../src/domain/fileSafety';
 import type { DocumentRequest, DocumentVersion, Extraction, Organisation, ProjectRequirement, RequirementDefinition, Subcontractor, Assignment } from '../src/domain/types';
@@ -23,6 +23,7 @@ import { readDocument } from './ai';
 import { audit, bad, C, type Ctx, HttpError, id, membersWith, need, notFound, notifyMembers, randomToken, rateLimit, sha256 } from './core';
 import { recompute } from './data';
 import { createUploadSlot, finalizeUploadSlot, progressRequests } from './handlers/documents';
+import { reportError } from './ops';
 import { scanFile } from './scan';
 import type { Services } from './services';
 
@@ -164,7 +165,7 @@ export async function handleInboundEmail(svc: Services, rawBody: string, headers
   };
   // Resend delivers at least once: the email id makes repeats harmless.
   try { await svc.db.create(C.doc(org.id, 'intakeMessages', emailId), msg as any); } catch { return { status: 200, body: { ok: true, duplicate: true } }; }
-  try { await svc.queueIntake(org.id, `msg:${emailId}`); } catch (e: any) { console.error('queue intake failed', e); await fetchMessage(svc, org, emailId).catch(() => undefined); }
+  try { await svc.queueIntake(org.id, `msg:${emailId}`); } catch (e: any) { await reportError(svc, { fn: 'inbound-email', op: 'queueIntake', orgId: org.id, error: e, retry: 'retried' }); await fetchMessage(svc, org, emailId).catch((e2) => reportError(svc, { fn: 'inbound-email', op: 'fetchMessage', orgId: org.id, error: e2, retry: 'will_retry' })); }
   return { status: 200, body: { ok: true, routed: true } };
 }
 
@@ -329,7 +330,15 @@ export async function suggestMatch(svc: Services, org: Organisation, item: Pick<
   const projectsForSub = new Set(assignments.filter((a) => a.active && a.subcontractorId === sub!.id).map((a) => a.projectId));
   const applicable = new Set(projectReqs.filter((p) => p.active && projectsForSub.has(p.projectId)).map((p) => p.requirementId));
   const kind = item.extraction?.status === 'completed' && (item.extraction.kindConfidence ?? 0) >= TRUST ? item.extraction.kind : undefined;
-  const fits = (rid: string) => { const d = defs.find((x) => x.id === rid); if (!d || d.kind !== 'document') return false; if (!kind) return true; const want = expectedKinds(d); return !want.length || want.includes(kind as any); };
+  const fields = item.extraction?.status === 'completed' ? item.extraction.fields ?? {} : {};
+  // A requirement fits when the document is the kind it asks for and, for a named insurance cover
+  // (public vs employers' liability), the certificate shows that cover. Never a guess between two.
+  const fits = (rid: string) => {
+    const d = defs.find((x) => x.id === rid); if (!d || d.kind !== 'document') return false; if (!kind) return true;
+    const want = expectedKinds(d); if (want.length && !want.includes(kind as any)) return false;
+    if (kind === 'insurance_certificate') { const c = insuranceCover(d, fields); if (c && c.outcome !== 'pass') return false; }
+    return true;
+  };
   const outstandingFit = [...outstanding].filter(fits);
   let requirementId: string | undefined; let reqStrong = false;
   if (outstandingFit.length === 1 && (kind || outstanding.size === 1)) { requirementId = outstandingFit[0]; reqStrong = true; reasons.push(`${defs.find((d) => d.id === requirementId)?.name} was requested and not yet received`); }

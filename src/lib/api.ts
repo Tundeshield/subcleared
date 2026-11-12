@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { auth } from './auth';
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number, public code?: string) { super(message); }
+  constructor(message: string, public status: number, public code?: string, public data?: any) { super(message); }
 }
 
 let currentOrgId: string | null = (() => { try { return localStorage.getItem('sc.org'); } catch { return null; } })();
@@ -29,7 +29,7 @@ export async function api<T = any>(action: string, input: unknown = {}, opts: { 
   }
   let body: any = null;
   try { body = await res.json(); } catch { /* non-JSON */ }
-  if (!res.ok) throw new ApiError(body?.error || `Request failed (${res.status})`, res.status, body?.code);
+  if (!res.ok) throw new ApiError(body?.error || `Request failed (${res.status})`, res.status, body?.code, body?.data);
   return body as T;
 }
 

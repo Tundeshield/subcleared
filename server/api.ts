@@ -3,6 +3,7 @@ import { applyOrgFormatting } from '../src/domain/locale';
 // dev server. Every organisation action resolves the caller's membership from
 // the verified ID token and the x-org-id header before any handler runs.
 import type { Member, Organisation } from '../src/domain/types';
+import { reportError } from './ops';
 import { C, checkRequestBudget, type Ctx, HttpError, rateLimit } from './core';
 import * as assistant from './handlers/assistant';
 import * as billing from './handlers/billing';
@@ -59,9 +60,9 @@ export async function handleApi(svc: Services, req: ApiRequest): Promise<ApiResp
     const body = await dispatch(svc, req);
     return { status: 200, body: body ?? { ok: true } };
   } catch (e: any) {
-    if (e instanceof HttpError) return { status: e.status, body: { error: e.message, code: e.code } };
+    if (e instanceof HttpError) return { status: e.status, body: { error: e.message, code: e.code, ...(e.data ? { data: e.data } : {}) } };
     if (e?.code === 'auth/id-token-expired' || e?.code === 'auth/id-token-revoked' || e?.code === 'auth/argument-error') return { status: 401, body: { error: 'Your session has expired. Please sign in again.', code: 'unauthenticated' } };
-    console.error(`[api] ${req.action} failed`, e);
+    await reportError(svc, { fn: 'api', op: String(req.action).slice(0, 60), orgId: req.orgId ?? undefined, error: e });
     return { status: 500, body: { error: 'Something went wrong on our side. The error has been logged.', code: 'internal' } };
   }
 }

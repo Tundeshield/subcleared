@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { TRUST } from '../../domain/assessment';
+import { insuranceEyeChecks, TRUST } from '../../domain/assessment';
 import { checkCriteria } from '../../domain/compliance';
 import { fieldLabel } from '../../domain/extraction';
 import { formatDate, formatDateTime } from '../../domain/dates';
@@ -80,7 +80,11 @@ export default function ReviewDetail() {
       const values = Object.fromEntries(Object.entries(meta.values ?? {}).filter(([, x]) => x !== '' && x !== undefined && x !== null));
       await api('reviews.decide', {
         versionId: v.id, decision, reason: reason || undefined, internalComment: comment || undefined, revision: rev ?? v.revision,
-        metadata: { ...meta, values }, checklist: [...checks.map((c) => ({ key: c.criterion.key, label: c.criterion.label, passed: c.passed })), ...Object.entries(manual).map(([k, p]) => ({ key: k, label: k, passed: p }))],
+        metadata: { ...meta, values }, checklist: [
+          ...checks.map((c) => ({ key: c.criterion.key, label: c.criterion.label, passed: c.passed })),
+          ...(data.assessment?.checks ?? []).map((c: any) => ({ key: `auto:${c.key}`, label: `${c.label} (automatic)`, passed: c.outcome === 'pass' ? true : c.outcome === 'fail' ? false : null })),
+          ...Object.entries(manual).map(([k, p]) => ({ key: k, label: `${k} (by reviewer)`, passed: p })),
+        ],
       });
       dataChanged();
       toast(decision === 'approve' ? 'Approved — readiness updated' : decision === 'reject' ? 'Rejected — the subcontractor has been told why' : 'Correction requested — the subcontractor has been told what to change');
@@ -162,14 +166,20 @@ export default function ReviewDetail() {
                   {!data.requirement.expiryRequired && checks.length === 0 && <li className="text-muted">No structured conditions. Compare the document with the description above.</li>}
                 </ul>
               )}
-              {isInsurance && pending && (
-                <div className="mt-6 space-y-2.5">
-                  <div className="text-sm font-medium">Also check by eye</div>
-                  {['Named insured matches the subcontractor', `${market === 'US' ? 'Carrier' : 'Insurer'} and policy number are legible`, 'Policy dates cover the work period', 'Endorsements are present where required'].map((k) => (
-                    <Checkbox key={k} checked={manual[k] === true} onChange={(x) => setManual({ ...manual, [k]: x ? true : null })} label={k} />
-                  ))}
-                </div>
-              )}
+              {isInsurance && pending && (() => {
+                // Ask a person only for what the automatic comparison couldn't establish. A passed check is
+                // shown as done (and recorded as automatic); anything unclear or unread becomes a box to tick.
+                const items = insuranceEyeChecks(data.assessment?.checks ?? [], fields, market).map((x) => ({ k: x.label, auto: x.automatic }));
+                const done = items.filter((x) => x.auto);
+                const todo = items.filter((x) => !x.auto);
+                return (
+                  <div className="mt-6 space-y-2.5">
+                    {todo.length > 0 && <div className="text-sm font-medium">Check by eye</div>}
+                    {todo.map(({ k }) => <Checkbox key={k} checked={manual[k] === true} onChange={(x) => setManual({ ...manual, [k]: x ? true : null })} label={k} />)}
+                    {done.length > 0 && <p className="text-sm text-muted flex items-start gap-2 pt-1"><Glyph tone="ok" className="w-3.5 h-3.5 mt-1 shrink-0" /><span>Checked automatically: {done.map((x) => x.k.charAt(0).toLowerCase() + x.k.slice(1)).join('; ')}.</span></p>}
+                  </div>
+                );
+              })()}
               <p className="text-xs text-faint leading-relaxed mt-4">This comparison uses what was read from the document and your requirement. It isn’t a review decision, and {isInsurance ? `${/^[aeiou]/i.test(term(market, 'coi')) ? 'an' : 'a'} ${term(market, 'coi')} is evidence of cover, not proof of it` : 'it doesn’t verify the document with the issuer'}.</p>
             </section>
           )}

@@ -5,7 +5,6 @@ import { addDays, formatDate, formatDateTime } from '../../domain/dates';
 import { api, dataChanged, useApi, useMutation } from '../../lib/api';
 import { exportCsv, exportPdf } from '../../lib/export';
 import { useSession } from '../../lib/session';
-import { AskBox } from './Ask';
 import { Callout, Checkbox, Confirm, cx, Dialog, DocStatus, Drawer, Empty, ErrorState, Field, FormError, Glyph, HelpTip, humanize, Icon, KeyValue, Menu, MoreButton, newRowKey, PageHeader, PageLoading, ReadinessBadge, ReadinessBar, SampleTag, SearchInput, Skeleton, Spinner, StatusText, Tabs, Toolbar, useToast } from '../../ui';
 import { ProjectDrawer } from './Projects';
 import { activityLine, RequestDialog } from './shared';
@@ -90,7 +89,6 @@ export default function ProjectDetail() {
         </>} />
       {archived && <div className="mb-8"><Callout title="Archived">Readiness is frozen as it was when the project was archived, and reminders stop for documents only this project needs.</Callout></div>}
       {!archived && <NextStep data={data} onAdd={() => setAssign(true)} onRequest={() => setRequesting({})} goTo={setTab} />}
-      {!archived && c.total > 0 && me?.extractionConfigured && <AskBox projectId={p.id} className="mb-8" />}
       {c.total > 0 && (
         <section aria-label="Project readiness" className="mb-8 rounded-md border border-line bg-paper px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-3">
           <div className="min-w-[14rem]">
@@ -387,13 +385,25 @@ function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNo
   const incomplete = filled.find((f) => !f.trade.trim() || !f.name.trim() || !/^\S+@\S+\.\S+$/.test(f.email.trim()));
   const total = sel.length + filled.length;
   const close = () => { setSel([]); setFresh([]); setQ(''); setError(null); onClose(); };
-  const save = async () => {
-    setBusy(true); setError(null);
+  const [dup, setDup] = useState<{ k: string; existingId: string; existingName: string; code: string } | null>(null);
+  // A company that may already be in the directory: say which, and let the person choose.
+  const save = async (allowKeys: string[] = []) => {
+    setBusy(true); setError(null); setDup(null);
     const ids = [...sel];
+    const created: string[] = [];
     try {
       for (const f of filled) {
-        const r = await api('subs.create', { legalName: f.legalName.trim(), trade: f.trade.trim(), contacts: [{ name: f.name.trim(), email: f.email.trim(), primary: true }] });
-        ids.push(r.subcontractorId);
+        try {
+          const r = await api('subs.create', { legalName: f.legalName.trim(), trade: f.trade.trim(), contacts: [{ name: f.name.trim(), email: f.email.trim(), primary: true }], allowSimilarName: allowKeys.includes(f.k) });
+          ids.push(r.subcontractorId); created.push(f.k);
+        } catch (e: any) {
+          if (['possible_duplicate', 'duplicate_name', 'duplicate_registration'].includes(e?.code) && e.data?.existingId) {
+            // Rows already created stay created; keep them out of the form so a retry doesn't repeat them.
+            setFresh((rows) => rows.filter((x) => !created.includes(x.k))); setSel(ids);
+            setDup({ k: f.k, ...e.data, code: e.code }); setError(e.message); return;
+          }
+          throw e;
+        }
       }
       // Assigning sends the outstanding requests itself (one step); nothing already approved is asked for again.
       const r = await api<any>('projects.assign', { projectId, subcontractorIds: ids, sendRequests: canSendNow && sendNow });
@@ -411,7 +421,7 @@ function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNo
   };
   return (
     <Drawer open={open} onClose={close} title="Add subcontractors to this project" description="Choose companies you already work with, or add new ones. SubCleared works out what each one still needs to provide."
-      footer={<div className="flex w-full flex-wrap items-center justify-between gap-3">{canSendNow ? <Checkbox checked={sendNow} onChange={setSendNow} label="Send paperwork requests now" hint="Each contact gets a secure link; reminders follow automatically." /> : <span />}<div className="flex gap-2"><button className="btn-secondary" onClick={close}>Cancel</button><button className="btn-primary" disabled={!total || !!incomplete || busy} onClick={save}>{busy && <Spinner />}{canSendNow && sendNow ? `Add ${total || ''} and send requests` : `Add ${total || ''} to project`}</button></div></div>}>
+      footer={<div className="flex w-full flex-wrap items-center justify-between gap-3">{canSendNow ? <Checkbox checked={sendNow} onChange={setSendNow} label="Send paperwork requests now" hint="Each contact gets a secure link; reminders follow automatically." /> : <span />}<div className="flex gap-2"><button className="btn-secondary" onClick={close}>Cancel</button><button className="btn-primary" disabled={!total || !!incomplete || busy} onClick={() => save()}>{busy && <Spinner />}{canSendNow && sendNow ? `Add ${total || ''} and send requests` : `Add ${total || ''} to project`}</button></div></div>}>
       <div className="space-y-8">
         <section>
           <h3 className="text-md font-semibold">From your directory</h3>
@@ -445,7 +455,15 @@ function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNo
             {incomplete && <p className="hint text-ink">Fill in the trade, contact name and a valid email for {incomplete.legalName}.</p>}
           </section>
         )}
-        <FormError error={error} />
+        {dup ? (
+          <Callout tone="warn" title={dup.code === 'possible_duplicate' ? 'Possibly already in your directory' : 'Already in your directory'}>
+            {error}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button className="btn-secondary btn-sm" disabled={busy} onClick={() => { setSel((s) => [...new Set([...s, dup.existingId])]); setFresh((rows) => rows.filter((x) => x.k !== dup.k)); setDup(null); setError(null); }}>Use {dup.existingName}</button>
+              {dup.code === 'possible_duplicate' && <button className="btn-ghost btn-sm" disabled={busy} onClick={() => save([dup.k])}>It’s a different company — add it</button>}
+            </div>
+          </Callout>
+        ) : <FormError error={error} />}
       </div>
     </Drawer>
   );

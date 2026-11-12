@@ -1,7 +1,7 @@
 // The right document, not just a readable one. Tax and company documents are told apart,
 // employers' and public liability certificates are told apart, and anything uncertain goes to a person.
 import { describe, expect, it } from 'vitest';
-import { assess, currentTriage, RULES_VERSION } from '../src/domain/assessment';
+import { assess, currentTriage, insuranceEyeChecks, RULES_VERSION } from '../src/domain/assessment';
 import { expectedKinds } from '../src/domain/extraction';
 
 const F = (v: any, confidence = 0.95) => ({ value: v, confidence, page: 1, source: String(v) });
@@ -69,5 +69,16 @@ describe('document classification', () => {
     expect(currentTriage({ triage: 'looks_good', rulesVersion: RULES_VERSION }, 'completed')).toBe('looks_good');
     expect(currentTriage({ triage: 'problem' }, 'completed')).toBe('problem');
     expect(currentTriage(undefined, 'completed')).toBe('check');
+  });
+});
+
+describe('by-eye checks on insurance reviews', () => {
+  it('asks only for what the comparison could not establish; endorsements always need a person', () => {
+    const allPassed = [{ key: 'name', label: '', outcome: 'pass' }, { key: 'expiry', label: '', outcome: 'pass' }, { key: 'covers:p1', label: '', outcome: 'pass' }] as any;
+    const read = { issuer: F('Hartwell Mutual'), referenceNumber: F('HM-2231') };
+    const a = insuranceEyeChecks(allPassed, read, 'UK');
+    expect(a.filter((x) => !x.automatic).map((x) => x.label)).toEqual(['Endorsements are present where required']);
+    const unsure = insuranceEyeChecks([{ key: 'name', label: '', outcome: 'unclear' }, { key: 'expiry', label: '', outcome: 'pass' }, { key: 'covers:p1', label: '', outcome: 'fail' }] as any, { issuer: F('Hartwell Mutual'), referenceNumber: F('HM-2231', 0.5) }, 'US');
+    expect(unsure.filter((x) => !x.automatic).map((x) => x.label)).toEqual(['Named insured matches the subcontractor', 'Carrier and policy number are legible', 'Policy dates cover the work period', 'Endorsements are present where required']);
   });
 });

@@ -15,6 +15,7 @@ import { replyToFor, sendEmail } from './email';
 import { issuePortalLink } from './handlers/requests';
 import type { Services } from './services';
 import { subscriptionUsable } from './handlers/billing';
+import { reportError } from './ops';
 
 export interface JobOptions { orgId?: string; /** Dev/test only: send now regardless of working hours, and rerun daily steps. */ force?: boolean }
 
@@ -24,7 +25,7 @@ export async function runDailyJobs(svc: Services, opts: JobOptions = {}) {
   for (const org of orgs) {
     applyOrgFormatting(org.settings);
     try { summary.push({ orgId: org.id, ...(await runForOrg(svc, org, opts)) }); } catch (e: any) {
-      console.error('daily job failed', org.id, e);
+      await reportError(svc, { fn: 'jobs', op: 'runForOrg', orgId: org.id, error: e, retry: 'will_retry' });
       summary.push({ orgId: org.id, error: e.message });
     }
   }
@@ -64,16 +65,17 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
   const inHours = opts.force || inWorkingHours(org.settings, svc.now());
   // Heavier daily steps (recompute, escalations, alerts) run once per local day even though the scheduler runs hourly.
   // Organisations created before automatic intake get their address here, once.
-  if (!org.settings.intakeKey) await provisionIntake(svc, org).catch((e) => console.error('intake provisioning failed', org.id, e));
+  if (!org.settings.intakeKey) await provisionIntake(svc, org).catch((e) => reportError(svc, { fn: 'jobs', op: 'provisionIntake', orgId: org.id, error: e, retry: 'will_retry' }));
   // Recover background work that failed or stalled, whatever the hour.
-  const recovered = await recoverWork(svc, org).catch((e) => { console.error('recover failed', org.id, e); return 0; });
+  const recovered = await recoverWork(svc, org).catch(async (e) => { await reportError(svc, { fn: 'jobs', op: 'recoverWork', orgId: org.id, error: e, retry: 'will_retry' }); return 0; });
   let dailyDue = true;
   if (!opts.force) { try { await svc.db.create(C.doc(org.id, 'reminders', `daily:${today}`), { id: `daily:${today}`, status: 'sent', at: svc.now().toISOString() }); } catch { dailyDue = false; } }
 
   // 0. One short daily email per manager with only what needs them (after 07:00 local, working days).
-  const digests = await sendDigests(svc, org, opts).catch((e) => { console.error('digest failed', org.id, e); return 0; });
+  const digests = await sendDigests(svc, org, opts).catch(async (e) => { await reportError(svc, { fn: 'jobs', op: 'digest', orgId: org.id, error: e, retry: 'will_retry' }); return 0; });
 
   // 1. Expiry reminders for the evidence currently in force.
+  const due_: { key: string; d: DocumentRecord; v: DocumentVersion; sub: Subcontractor; exp: string; days: number; offset: number }[] = [];
   for (const d of inHours ? docs : []) {
     if (d.archived || !d.approvedVersionId) continue;
     const v = versions.find((x) => x.id === d.approvedVersionId);
@@ -94,48 +96,71 @@ async function runForOrg(svc: Services, org: Organisation, opts: JobOptions) {
     }
     const key = `${v.id}:${due.offset}`;
     if (!(await claimReminder(svc, org, key, { versionId: v.id, documentId: d.id, subcontractorId: sub.id, offset: due.offset, expiryDate: exp }))) continue;
-    try {
-      const problems = new Set((await svc.db.list<any>(C.col(org.id, 'emailProblems'))).map((p) => p.email));
-      const contact = sub.contacts.find((c) => c.primary && !problems.has(c.email.toLowerCase())) ?? sub.contacts.find((c) => !problems.has(c.email.toLowerCase()));
-      const def = d.requirementId ? defsById.get(d.requirementId) : undefined;
-      let emailStatus = contact ? 'no_contact' : sub.contacts.length ? 'address_problem' : 'no_contact';
-      if (contact && d.requirementId) {
-        // One open renewal request per document version; reuse it if present.
-        let req = requests.find((r) => r.renewalOfVersionId === v.id && ['sent', 'acknowledged', 'partially_fulfilled'].includes(r.status));
-        let url: string;
-        const link = await issuePortalLink(base, { subcontractorId: sub.id, contactEmail: contact.email, requirementIds: [d.requirementId], projectIds: [], fullPortal: false, days: Math.max(org.settings.defaultLinkExpiryDays, 7), requestId: req?.id });
-        url = link.url;
-        if (!req) {
-          req = {
-            id: svc.db.newId(), type: 'renewal', subcontractorId: sub.id, contactId: contact.id, contactEmail: contact.email, contactName: contact.name, projectIds: [],
-            requirementIds: [d.requirementId], status: 'sent', linkId: link.linkId, createdBy: { uid: 'system', name: 'Automatic reminder' }, createdAt: svc.now().toISOString(),
-            renewalOfVersionId: v.id, dueDate: exp,
-          };
-          await svc.db.set(C.doc(org.id, 'requests', req.id), req as any);
-          await svc.db.update(C.doc(org.id, 'links', link.linkId), { requestId: req.id });
+    due_.push({ key, d, v, sub, exp, days, offset: due.offset });
+  }
+  // Group what's due by subcontractor contact: one email listing every document, each with its own upload link.
+  if (due_.length) {
+    const problems = new Set((await svc.db.list<any>(C.col(org.id, 'emailProblems'))).map((p) => p.email));
+    const bySub = new Map<string, typeof due_>();
+    for (const x of due_) bySub.set(x.sub.id, [...(bySub.get(x.sub.id) ?? []), x]);
+    for (const [, items] of bySub) {
+      const sub = items[0].sub;
+      try {
+        const contact = sub.contacts.find((c) => c.primary && !problems.has(c.email.toLowerCase())) ?? sub.contacts.find((c) => !problems.has(c.email.toLowerCase()));
+        let emailStatus = contact ? 'no_contact' : sub.contacts.length ? 'address_problem' : 'no_contact';
+        const lines: { text: string; url: string; item: (typeof items)[number] }[] = [];
+        if (contact) {
+          for (const x of items) {
+            if (!x.d.requirementId) continue;
+            // One open renewal request per document version; reuse it if present.
+            let req = requests.find((r) => r.renewalOfVersionId === x.v.id && ['sent', 'acknowledged', 'partially_fulfilled'].includes(r.status));
+            const link = await issuePortalLink(base, { subcontractorId: sub.id, contactEmail: contact.email, requirementIds: [x.d.requirementId], projectIds: [], fullPortal: false, days: Math.max(org.settings.defaultLinkExpiryDays, 7), requestId: req?.id });
+            if (!req) {
+              req = {
+                id: svc.db.newId(), type: 'renewal', subcontractorId: sub.id, contactId: contact.id, contactEmail: contact.email, contactName: contact.name, projectIds: [],
+                requirementIds: [x.d.requirementId], status: 'sent', linkId: link.linkId, createdBy: { uid: 'system', name: 'Automatic reminder' }, createdAt: svc.now().toISOString(),
+                renewalOfVersionId: x.v.id, dueDate: x.exp,
+              };
+              await svc.db.set(C.doc(org.id, 'requests', req.id), req as any);
+              requests.push(req);
+              await svc.db.update(C.doc(org.id, 'links', link.linkId), { requestId: req.id });
+            }
+            const name = (x.d.requirementId ? defsById.get(x.d.requirementId)?.name : undefined) ?? x.d.title;
+            const when = x.days > 0 ? `expires ${formatDate(x.exp)} (in ${x.days} day${x.days === 1 ? '' : 's'})` : x.days === 0 ? 'expires today' : `expired ${formatDate(x.exp)}`;
+            lines.push({ text: `${name}: ${when} — upload the renewal`, url: link.url, item: x });
+          }
         }
-        const when = days > 0 ? `expires on ${formatDate(exp)} (in ${days} day${days === 1 ? '' : 's'})` : days === 0 ? `expires today (${formatDate(exp)})` : `expired on ${formatDate(exp)}`;
-        const log = await sendEmail(base, {
-          to: contact.email, template: 'sub.renewal_reminder', dedupeKey: `reminder:${key}`, replyTo: replyToFor(base),
-          subject: days >= 0 ? `${def?.name ?? d.title} ${days === 0 ? 'expires today' : `expires in ${days} days`} — ${org.name}` : `${def?.name ?? d.title} has expired — ${org.name}`,
-          heading: days >= 0 ? 'Please send an updated document' : 'Your document has expired',
-          body: `Hello ${contact.name},\n\nThe ${def?.name ?? d.title} we hold for ${sub.legalName} ${when}.\n\nPlease upload the renewed document using the secure link below so ${org.name} can keep your records current.`,
-          cta: { label: 'Upload the renewal', url },
+        if (contact && lines.length) {
+          const one = lines.length === 1 ? lines[0].item : undefined;
+          const oneName = one ? ((one.d.requirementId ? defsById.get(one.d.requirementId)?.name : undefined) ?? one.d.title) : '';
+          const anyExpired = lines.some((l) => l.item.days < 0);
+          const log = await sendEmail(base, {
+            to: contact.email, template: 'sub.renewal_reminder', dedupeKey: `reminder:${lines.map((l) => l.item.key).sort().join('|')}`, replyTo: replyToFor(base),
+            subject: one ? (one.days >= 0 ? `${oneName} ${one.days === 0 ? 'expires today' : `expires in ${one.days} days`} — ${org.name}` : `${oneName} has expired — ${org.name}`) : `${lines.length} documents need renewing — ${org.name}`,
+            heading: anyExpired && one ? 'Your document has expired' : one ? 'Please send an updated document' : 'Please send updated documents',
+            body: `Hello ${contact.name},\n\n${one ? `The ${oneName} we hold for ${sub.legalName} ${lines[0].text.split(': ')[1].replace(' — upload the renewal', '')}.` : `Some documents we hold for ${sub.legalName} are expiring or have expired.`}\n\nPlease upload the renewed ${one ? 'document' : 'documents'} using the secure ${one ? 'link' : 'links'} below so ${org.name} can keep your records current.`,
+            ...(one ? { cta: { label: 'Upload the renewal', url: lines[0].url } } : { groups: [{ title: sub.legalName, lines: lines.map(({ text, url }) => ({ text, url })) }] }),
+          });
+          emailStatus = log.status;
+          if (log.status === 'failed') throw new Error(log.error ?? 'Email failed');
+        }
+        // One in-app note per subcontractor, not one per document.
+        const owners = [sub.ownerUid, ...(await membersWith(base, 'requirements.manage')).map((m) => m.uid)].filter(Boolean) as string[];
+        const names = items.map((x) => (x.d.requirementId ? defsById.get(x.d.requirementId)?.name : undefined) ?? x.d.title);
+        const worst = Math.min(...items.map((x) => x.days));
+        await notifyMembers(base, owners, {
+          type: worst < 0 ? 'expired' : 'expiring', title: `${sub.legalName}: ${names.length === 1 ? names[0] : `${names.length} documents`} ${worst < 0 ? (names.length === 1 ? 'has expired' : 'expiring or expired') : worst === 0 ? 'expire today' : `expiring within ${worst} days`}`,
+          body: contact ? `Renewal requested from ${contact.email}${names.length > 1 ? `: ${names.join(', ')}` : ''}.` : 'No contact on file — add one to request the renewal.', link: `/app/renewals`, dedupeKey: `exp:${items.map((x) => x.key).sort().join('|')}`,
         });
-        emailStatus = log.status;
-        if (log.status === 'failed') throw new Error(log.error ?? 'Email failed');
+        for (const x of items) {
+          await svc.db.update(C.doc(org.id, 'reminders', x.key), { status: 'sent', emailStatus, at: svc.now().toISOString() });
+          await audit({ ...base, source: 'scheduler' }, { action: 'notification.renewal_reminder', entity: { type: 'document', id: x.d.id, label: x.d.title }, after: { offset: x.offset, expiryDate: x.exp, emailStatus, to: contact?.email, groupedWith: items.length - 1 }, actor: { type: 'system', id: 'scheduler', name: 'Reminder scheduler' }, refs: [sub.id] });
+          reminders++;
+        }
+      } catch (e: any) {
+        failures++;
+        for (const x of items) await svc.db.update(C.doc(org.id, 'reminders', x.key), { status: 'failed', error: e.message?.slice(0, 300), at: svc.now().toISOString() });
       }
-      const owners = [sub.ownerUid, ...(await membersWith(base, 'requirements.manage')).map((m) => m.uid)].filter(Boolean) as string[];
-      await notifyMembers(base, owners, {
-        type: days < 0 ? 'expired' : 'expiring', title: `${sub.legalName}: ${def?.name ?? d.title} ${days < 0 ? 'has expired' : days === 0 ? 'expires today' : `expires in ${days} days`}`,
-        body: contact ? `Renewal requested from ${contact.email}.` : 'No contact on file — add one to request the renewal.', link: `/app/renewals`, dedupeKey: `exp:${key}`,
-      });
-      await svc.db.update(C.doc(org.id, 'reminders', key), { status: 'sent', emailStatus, at: svc.now().toISOString() });
-      await audit({ ...base, source: 'scheduler' }, { action: 'notification.renewal_reminder', entity: { type: 'document', id: d.id, label: d.title }, after: { offset: due.offset, expiryDate: exp, emailStatus, to: contact?.email }, actor: { type: 'system', id: 'scheduler', name: 'Reminder scheduler' }, refs: [sub.id] });
-      reminders++;
-    } catch (e: any) {
-      failures++;
-      await svc.db.update(C.doc(org.id, 'reminders', key), { status: 'failed', error: e.message?.slice(0, 300), at: svc.now().toISOString() });
     }
   }
 

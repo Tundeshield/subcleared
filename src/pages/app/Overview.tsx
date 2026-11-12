@@ -49,7 +49,6 @@ export default function Overview() {
             </Callout></div>
           )}
           <Summary data={data} />
-          {data.readingOn && <AskBox className="mt-8" />}
 
           <section aria-labelledby="action-h" className="mt-10">
             <div className="flex items-baseline justify-between gap-3"><h2 id="action-h" className="text-lg font-semibold">Needs your attention</h2>{data.needsTotal > 0 && <span className="text-sm text-faint tnum">{data.needsTotal} item{data.needsTotal === 1 ? '' : 's'}</span>}</div>
@@ -74,6 +73,9 @@ export default function Overview() {
                 . Reminders are going out automatically.</span></p>
             )}
           </section>
+
+          {/* A shortcut, not a task: below the work, not above it. */}
+          {data.readingOn && <AskBox className="mt-12" />}
 
           {data.projects.length > 0 && (
             <section aria-labelledby="proj-h" className="mt-12">

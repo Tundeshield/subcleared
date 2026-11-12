@@ -24,6 +24,34 @@ export function namesMatch(read: string, names: (string | undefined)[]) {
   });
 }
 
+/**
+ * For an insurance requirement that names a cover (public/general liability, or employers' liability /
+ * workers' compensation): does a certificate's reading show that cover? null when the requirement names none.
+ */
+export function insuranceCover(req: { name: string; category?: string; documentType?: string }, fields: Record<string, ExtractedField>) {
+  const trusted = (k: string) => { const x = fields[k]; return x && x.value !== null && x.value !== undefined && x.value !== '' && x.confidence >= TRUST ? x : undefined; };
+  const s = `${req.category ?? ''} ${req.documentType ?? ''} ${req.name}`.toLowerCase();
+  const wantsEl = /employers'? liability|workers'? comp/.test(s);
+  const wantsPl = !wantsEl && /public liability|general liability/.test(s);
+  if (!wantsEl && !wantsPl) return null;
+  const plShown = !!trusted('glEachOccurrence') || !!trusted('glAggregate');
+  const elShown = !!trusted('elLimit') || (() => { const w = trusted('wcCoverage'); return !!w && (w.value === true || w.value === 'true'); })();
+  const label = wantsEl ? `Shows ${/workers/.test(s) ? 'workers’ compensation' : 'employers’ liability'} cover` : 'Shows public or general liability cover';
+  const has = wantsEl ? elShown : plShown;
+  const other = wantsEl ? plShown : elShown;
+  return has
+    ? { label, outcome: 'pass' as const, detail: 'The certificate lists this cover.' }
+    : other
+      ? { label, outcome: 'fail' as const, detail: wantsEl ? 'The certificate shows public or general liability, not employers’ liability or workers’ compensation.' : 'The certificate shows employers’ liability or workers’ compensation, not public or general liability.' }
+      : { label, outcome: 'unclear' as const, detail: 'Couldn’t confirm which cover the certificate lists.' };
+}
+
+/** Same legal entity for duplicate warnings: ignores case, punctuation, spacing and legal suffixes only. */
+export function legalNameKey(n: string) {
+  return n.toLowerCase().replace(/&/g, ' and ').replace(/[.,'’"()\-/]/g, ' ')
+    .replace(/\b(limited|ltd|plc|llc|l l c|inc|incorporated|llp|lp|corp|corporation|co)\b/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 /** Bump when the comparison rules change: stored results from older rules no longer count as "looks right". */
 export const RULES_VERSION = 2;
 
@@ -78,21 +106,8 @@ export function assess(i: AssessInput): Assessment {
   // 1b. Insurance: the right cover, not just an insurance certificate. Employers' liability and
   // public liability certificates look alike; a combined certificate showing both satisfies either.
   if (req && i.kind === 'insurance_certificate') {
-    const s = `${req.category ?? ''} ${req.documentType ?? ''} ${req.name}`.toLowerCase();
-    const wantsEl = /employers'? liability|workers'? comp/.test(s);
-    const wantsPl = !wantsEl && /public liability|general liability/.test(s);
-    const plShown = !!trusted('glEachOccurrence') || !!trusted('glAggregate');
-    const elShown = !!trusted('elLimit') || (() => { const w = trusted('wcCoverage'); return !!w && (w.value === true || w.value === 'true'); })();
-    const label = wantsEl ? `Shows ${/workers/.test(s) ? 'workers’ compensation' : 'employers’ liability'} cover` : 'Shows public or general liability cover';
-    if (wantsEl || wantsPl) {
-      const has = wantsEl ? elShown : plShown;
-      const other = wantsEl ? plShown : elShown;
-      checks.push(has
-        ? { key: 'cover', label, outcome: 'pass', detail: 'The certificate lists this cover.' }
-        : other
-          ? { key: 'cover', label, outcome: 'fail', detail: wantsEl ? 'The certificate shows public or general liability, not employers’ liability or workers’ compensation.' : 'The certificate shows employers’ liability or workers’ compensation, not public or general liability.' }
-          : { key: 'cover', label, outcome: 'unclear', detail: 'Couldn’t confirm which cover the certificate lists.' });
-    }
+    const c = insuranceCover(req, i.fields);
+    if (c) checks.push({ key: 'cover', label: c.label, outcome: c.outcome, detail: c.detail });
   }
 
   // 2. Does it name this subcontractor?
@@ -187,4 +202,20 @@ export function assess(i: AssessInput): Assessment {
       ? `${unclear.length} thing${unclear.length === 1 ? '' : 's'} to check by eye: ${unclear.map((x) => x.label.toLowerCase()).join(', ')}.`
       : 'Everything that could be read matches the requirement. Confirm and approve.';
   return { triage, summary, checks, requirementVersion: req?.version, rulesVersion: RULES_VERSION, at: i.nowIso };
+}
+
+/**
+ * The by-eye checks on an insurance review. Each is marked automatic only when the comparison already
+ * established it; otherwise the reviewer is asked. Endorsements always need a person.
+ */
+export function insuranceEyeChecks(checks: AssessmentCheck[], fields: Record<string, ExtractedField>, market?: string) {
+  const passed = (pred: (c: AssessmentCheck) => boolean) => checks.some((c) => pred(c) && c.outcome === 'pass');
+  const trusted = (k: string) => { const f = fields[k]; return !!f && f.value !== null && f.value !== undefined && f.value !== '' && f.confidence >= TRUST; };
+  const covers = checks.filter((c) => c.key.startsWith('covers:'));
+  return [
+    { label: 'Named insured matches the subcontractor', automatic: passed((c) => c.key === 'name') },
+    { label: `${market === 'US' ? 'Carrier' : 'Insurer'} and policy number are legible`, automatic: trusted('issuer') && trusted('referenceNumber') },
+    { label: 'Policy dates cover the work period', automatic: passed((c) => c.key === 'expiry') && covers.every((c) => c.outcome === 'pass') },
+    { label: 'Endorsements are present where required', automatic: false },
+  ];
 }

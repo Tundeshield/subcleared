@@ -5,7 +5,7 @@ import type { Db } from './db';
 import type { Identity, Services } from './services';
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string, public code?: string) { super(message); }
+  constructor(public status: number, message: string, public code?: string, public data?: Record<string, unknown>) { super(message); }
 }
 export const bad = (m: string) => new HttpError(400, m, 'bad_request');
 export const forbidden = (m = 'You do not have permission to do that') => new HttpError(403, m, 'forbidden');

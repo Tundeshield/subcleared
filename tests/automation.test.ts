@@ -406,6 +406,12 @@ describe('only the user’s own decisions reach the attention list', () => {
     let dash = await ok(o.uid, 'dashboard', {}, o.orgId);
     const need = dash.needs.find((n: any) => n.action === 'Record check');
     expect(need?.issue).toContain('CIS verification');
+    // On a second project the same check is still one line: it's recorded once for every project.
+    const { projectId: p2 } = await ok(o.uid, 'projects.create', { name: 'Second site', status: 'active', templateId: (await ok(o.uid, 'requirements.list', {}, o.orgId)).templates.find((t: any) => /General/.test(t.name)).id }, o.orgId);
+    await ok(o.uid, 'projects.assign', { projectId: p2, subcontractorIds: [subcontractorId], sendRequests: false }, o.orgId);
+    const twice = (await ok(o.uid, 'dashboard', {}, o.orgId)).needs.filter((n: any) => n.action === 'Record check');
+    expect(twice).toHaveLength(1);
+    expect(twice[0].context).toBe('2 projects');
     expect(dash.needs.some((n: any) => /Request/.test(n.action) && n.item === 'Lee Electrical Ltd')).toBe(false);
     const req = await ok(o.uid, 'requests.forProject', { projectId: o.projectId, subcontractorIds: [subcontractorId] }, o.orgId);
     expect(req.results[0].status).toBe('skipped'); // nothing for the subcontractor to send
@@ -568,5 +574,107 @@ describe('requests on assignment', () => {
     await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [sid] }, o.orgId);
     const open = (await h.db.list<any>(`orgs/${o.orgId}/requests`)).filter((r) => r.subcontractorId === sid && ['sent', 'acknowledged', 'partially_fulfilled'].includes(r.status));
     expect(open).toHaveLength(1);
+  });
+});
+
+describe('renewals', () => {
+  it('documents expiring together reach the subcontractor as one email with a link for each', async () => {
+    const o = await setup();
+    const reqs = (await ok('owner1', 'requirements.list', {}, o.orgId)).requirements;
+    const wc = reqs.find((r: any) => r.name === "Workers' compensation insurance").id;
+    await ok('owner1', 'projects.setRequirement', { projectId: o.projectId, requirementId: wc, mandatory: true }, o.orgId);
+    for (const r of [o.gl, wc]) {
+      const v = await upload(o.orgId, o.subcontractorId, r, coi({ insured: 'Renew Co Limited', expiry: '2026-07-15', extra: '(Employers liability: 1,000,000) Tj' }));
+      const rv = (await ok('owner1', 'reviews.get', { versionId: v }, o.orgId)).version;
+      await ok('owner1', 'reviews.decide', { versionId: v, decision: 'approve', revision: rv.revision, metadata: { expiryDate: '2026-07-15', values: { glEachOccurrence: 2000000, wcCoverage: true } }, checklist: [] }, o.orgId);
+    }
+    const before = h.mail.length;
+    h.clock.now = new Date('2026-06-16T15:00:00Z'); await runDailyJobs(h.svc); // 29 days out: the 30-day reminder is due for both
+    const mine = h.mail.slice(before).filter((m) => m.to === 'rae@renew.example');
+    expect(mine).toHaveLength(1);
+    expect(mine[0].subject).toBe('2 documents need renewing — Acme Build');
+    expect((mine[0].text.match(/\/portal\//g) ?? []).length).toBe(2);
+    const notes = (await ok('owner1', 'notifications.list', {}, o.orgId)).items.filter((n: any) => ['expiring', 'expired'].includes(n.type));
+    expect(notes).toHaveLength(1);
+    await runDailyJobs(h.svc);
+    expect(h.mail.slice(before).filter((m) => m.to === 'rae@renew.example')).toHaveLength(1); // never twice
+    expect((await ok('owner1', 'renewals.list', {}, o.orgId)).items.filter((x: any) => (x.stage ?? x.status) === 'requested').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('matching emailed documents', () => {
+  const doc = (lines: string[]) => new TextEncoder().encode(`%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n2 0 obj << /Type /Page >> endobj\nBT ${lines.map((l) => `(${l}) Tj`).join(' ')} ET\ntrailer\n%%EOF\n`);
+  const glOnly = (who: string) => doc(['Certificate of insurance', `Named insured: ${who}`, 'Insurer: Hartwell Mutual', 'Policy number: GL-1', 'Effective: 2026-01-01', 'Expiry: 2027-06-30', 'General liability each occurrence: 2,000,000']);
+  const elOnly = (who: string) => doc(['Certificate of insurance', `Named insured: ${who}`, 'Insurer: Hartwell Mutual', 'Policy number: WC-1', 'Effective: 2026-01-01', 'Expiry: 2027-06-30', 'Employers liability each accident: 1,000,000']);
+  const both = (who: string) => doc(['Certificate of insurance', `Named insured: ${who}`, 'Insurer: Hartwell Mutual', 'Policy number: PK-1', 'Effective: 2026-01-01', 'Expiry: 2027-06-30', 'General liability each occurrence: 2,000,000', 'Employers liability each accident: 1,000,000']);
+  async function twoInsuranceRequests() {
+    const o = await setup();
+    const reqs = (await ok('owner1', 'requirements.list', {}, o.orgId)).requirements;
+    const wc = reqs.find((r: any) => r.name === "Workers' compensation insurance").id;
+    await ok('owner1', 'projects.setRequirement', { projectId: o.projectId, requirementId: wc, mandatory: true }, o.orgId);
+    await ok('owner1', 'requests.forProject', { projectId: o.projectId, subcontractorIds: [o.subcontractorId] }, o.orgId);
+    const { address } = await ok('owner1', 'intake.setup', {}, o.orgId);
+    const send = (from: string, bytes: Uint8Array, to = address) => simulateResendDelivery(h.svc, h.inbound, { from, to: [to], subject: 'Insurance', attachments: [{ filename: `c-${Math.random().toString(36).slice(2)}.pdf`, contentType: 'application/pdf', bytes }] });
+    return { ...o, wc, address, send };
+  }
+  const latest = async (orgId: string) => (await ok('owner1', 'intake.list', { all: true }, orgId)).recent[0];
+
+  it('known contact, two insurance requests, but the certificate shows only one cover: attached to that one', async () => {
+    const o = await twoInsuranceRequests();
+    await o.send('rae@renew.example', glOnly('Renew Co Ltd'));
+    const a = await latest(o.orgId);
+    expect(a).toMatchObject({ status: 'attached', attached: { automatic: true, requirementId: o.gl } });
+    await o.send('rae@renew.example', elOnly('Renew Co Ltd'));
+    expect(await latest(o.orgId)).toMatchObject({ status: 'attached', attached: { automatic: true, requirementId: o.wc } });
+  });
+  it('known contact, a combined certificate that fits both requests: a person decides, with the reason', async () => {
+    const o = await twoInsuranceRequests();
+    await o.send('rae@renew.example', both('Renew Co Ltd'));
+    const q = (await ok('owner1', 'intake.list', {}, o.orgId)).items;
+    expect(q).toHaveLength(1);
+    expect(q[0].status).toBe('needs_match');
+    expect(q[0].suggestion.reasons.join(' ')).toMatch(/2 outstanding requests could match/);
+  });
+  it('one approved certificate serves every project the subcontractor is on', async () => {
+    const o = await twoInsuranceRequests();
+    const { projectId: p2 } = await ok('owner1', 'projects.create', { name: 'Quay Street', status: 'active', endDate: '2027-03-31' }, o.orgId);
+    await ok('owner1', 'projects.setRequirement', { projectId: p2, requirementId: o.gl, mandatory: true }, o.orgId);
+    await ok('owner1', 'projects.assign', { projectId: p2, subcontractorIds: [o.subcontractorId] }, o.orgId);
+    await o.send('rae@renew.example', glOnly('Renew Co Ltd'));
+    const a = await latest(o.orgId);
+    expect(a).toMatchObject({ status: 'attached', attached: { requirementId: o.gl } });
+    const docs = (await ok('owner1', 'documents.list', { subcontractorId: o.subcontractorId }, o.orgId));
+    expect(JSON.stringify(docs).match(new RegExp(`"requirementId":"${o.gl}"`, 'g'))?.length).toBe(1); // one document, not one per project
+  });
+  it('a company with the same name and contact in another organisation never receives it', async () => {
+    const o = await twoInsuranceRequests();
+    h.users.rival = { email: 'boss@rival.example' };
+    const r = await ok('rival', 'org.register', { orgName: 'Rival Build', country: 'United States', timezone: 'America/Chicago', name: 'Rival' });
+    const twin = await ok('rival', 'subs.create', { legalName: 'Renew Co Ltd', trade: 'General', contacts: [{ name: 'Rae', email: 'rae@renew.example', primary: true }] }, r.orgId);
+    await o.send('rae@renew.example', glOnly('Renew Co Ltd'));
+    expect(await latest(o.orgId)).toMatchObject({ status: 'attached', attached: { subcontractorId: o.subcontractorId } });
+    expect((await ok('rival', 'intake.list', { all: true }, r.orgId)).recent).toHaveLength(0);
+    expect((await ok('rival', 'documents.list', { subcontractorId: twin.subcontractorId }, r.orgId)).items ?? []).toHaveLength(0);
+  });
+});
+
+describe('duplicate subcontractors', () => {
+  it('warns about the same company spelled differently, lets a person add it anyway, and blocks a repeated registration number', async () => {
+    const o = await setup();
+    const r1 = await call('owner1', 'subs.create', { legalName: 'renew co. limited', trade: 'General' }, o.orgId);
+    expect(r1.status).toBe(409);
+    expect(r1.body).toMatchObject({ code: 'possible_duplicate', data: { existingId: o.subcontractorId, existingName: 'Renew Co Ltd' } });
+    // A person says it's a different company: added, nothing merged.
+    const r2 = await ok('owner1', 'subs.create', { legalName: 'Renew Co. Limited', trade: 'Roofing', allowSimilarName: true }, o.orgId);
+    expect(r2.subcontractorId).not.toBe(o.subcontractorId);
+    expect(((await call('owner1', 'subs.create', { legalName: 'Renew Co Ltd', trade: 'General', allowSimilarName: true }, o.orgId)).body as any).code).toBe('duplicate_name');
+    // "Group" or "Services" are part of a name, not a legal suffix: not flagged.
+    expect((await call('owner1', 'subs.create', { legalName: 'Renew Co Services', trade: 'General' }, o.orgId)).status).toBe(200);
+    await ok('owner1', 'subs.update', { subcontractorId: o.subcontractorId, registrationNumber: '0987 6543' }, o.orgId);
+    const r3 = await call('owner1', 'subs.create', { legalName: 'Totally Different Ltd', trade: 'General', registrationNumber: '09876543', allowSimilarName: true }, o.orgId);
+    expect(r3.body).toMatchObject({ code: 'duplicate_registration', data: { existingId: o.subcontractorId } });
+    // Existing records and their assignments are untouched.
+    const sub = (await ok('owner1', 'subs.get', { subcontractorId: o.subcontractorId }, o.orgId)).subcontractor;
+    expect(sub.legalName).toBe('Renew Co Ltd');
   });
 });
