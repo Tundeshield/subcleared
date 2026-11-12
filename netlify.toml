@@ -9,6 +9,8 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
   external_node_modules = ["firebase-admin", "stripe"]
+  # The extraction test set travels with the functions so accuracy can be measured against the production model.
+  included_files = ["tests/fixtures/certificates/**"]
 
 # SPA routing (API routes are declared in each function's config.path)
 [[redirects]]

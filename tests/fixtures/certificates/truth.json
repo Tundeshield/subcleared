@@ -1,0 +1,184 @@
+[
+  {
+    "file": "us-acord-clean.pdf",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Keystone Plumbing LLC",
+      "issuer": "Granite Mutual Insurance Company",
+      "referenceNumber": "GL-4471-22",
+      "issueDate": "2026-03-01",
+      "expiryDate": "2027-03-01",
+      "glEachOccurrence": 1000000,
+      "glAggregate": 2000000,
+      "autoCombinedSingleLimit": 1000000,
+      "umbrellaLimit": 5000000,
+      "wcCoverage": true,
+      "additionalInsured": true,
+      "waiverOfSubrogation": true,
+      "certificateHolder": "Harbourline Construction"
+    },
+    "note": "Clean ACORD-style certificate, four policies, same dates",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "us-multi-policy.pdf",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Ridgeline Mechanical Inc",
+      "issuer": "Granite Mutual Insurance Company",
+      "glEachOccurrence": 1000000,
+      "glAggregate": 2000000,
+      "autoCombinedSingleLimit": 1000000,
+      "wcCoverage": true,
+      "expiryDate": "2026-09-30"
+    },
+    "note": "Policies expire on different dates; the earliest (workers comp, 30 Sep 2026) must be reported, with an issue raised",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "wrong-company.pdf",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Northgate Roofing Ltd",
+      "expiryDate": "2027-03-01",
+      "glEachOccurrence": 1000000,
+      "referenceNumber": "GL-7710-03"
+    },
+    "note": "Certificate names a different company than the subcontractor who sent it",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "expired.pdf",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Keystone Plumbing LLC",
+      "expiryDate": "2025-10-31",
+      "issueDate": "2024-11-01",
+      "referenceNumber": "GL-3120-19"
+    },
+    "note": "Expired policy",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "low-limit.pdf",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Brookside Painting Co",
+      "glEachOccurrence": 500000,
+      "glAggregate": 1000000,
+      "expiryDate": "2027-03-01"
+    },
+    "note": "Each-occurrence limit below a typical $1m requirement",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "uk-schedule.pdf",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Thameside Electrical Services Ltd",
+      "issuer": "Albion General plc",
+      "referenceNumber": "AG/CCI/88213",
+      "issueDate": "2026-04-01",
+      "expiryDate": "2027-03-31",
+      "glEachOccurrence": 5000000,
+      "elLimit": 10000000,
+      "wcCoverage": true,
+      "currency": "GBP"
+    },
+    "note": "UK schedule: DD/MM/YYYY dates, pounds, public and employers liability",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "uk-schedule-poor-scan.jpg",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Thameside Electrical Services Ltd",
+      "issuer": "Albion General plc",
+      "referenceNumber": "AG/CCI/88213",
+      "issueDate": "2026-04-01",
+      "expiryDate": "2027-03-31",
+      "glEachOccurrence": 5000000,
+      "elLimit": 10000000,
+      "wcCoverage": true,
+      "currency": "GBP"
+    },
+    "note": "Same schedule as a low-quality greyscale scan: 110 dpi, rotated, blurred, noisy, JPEG quality 55",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "us-acord-phone-photo.jpg",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Keystone Plumbing LLC",
+      "issuer": "Granite Mutual Insurance Company",
+      "referenceNumber": "GL-4471-22",
+      "issueDate": "2026-03-01",
+      "expiryDate": "2027-03-01",
+      "glEachOccurrence": 1000000,
+      "glAggregate": 2000000,
+      "autoCombinedSingleLimit": 1000000,
+      "umbrellaLimit": 5000000,
+      "wcCoverage": true,
+      "additionalInsured": true,
+      "waiverOfSubrogation": true,
+      "certificateHolder": "Harbourline Construction"
+    },
+    "note": "Phone photo of the clean certificate: perspective skew, shadow, background, downscaled",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "ambiguous-dates.pdf",
+    "kind": "insurance_certificate",
+    "fields": {
+      "namedInsured": "Coastline Glazing Ltd",
+      "issuer": "Meridian Assurance Ltd",
+      "referenceNumber": "MA-20931",
+      "glEachOccurrence": 2000000
+    },
+    "note": "Dates could be 3 April or 4 March; no country or currency shown. The reader must not be confident about the dates.",
+    "expectLowConfidence": [
+      "issueDate",
+      "expiryDate"
+    ]
+  },
+  {
+    "file": "endorsement.pdf",
+    "kind": "insurance_endorsement",
+    "fields": {
+      "namedInsured": "Keystone Plumbing LLC",
+      "issuer": "Granite Mutual Insurance Company",
+      "referenceNumber": "GL-4471-22",
+      "issueDate": "2026-03-01",
+      "expiryDate": "2027-03-01",
+      "additionalInsured": true,
+      "waiverOfSubrogation": true
+    },
+    "note": "Additional insured endorsement page with waiver wording",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "licence.pdf",
+    "kind": "licence_registration",
+    "fields": {
+      "namedInsured": "Lee Electrical Ltd",
+      "referenceNumber": "EC-55821",
+      "issueDate": "2025-06-01",
+      "expiryDate": "2027-05-31",
+      "jurisdiction": "State of Illinois"
+    },
+    "note": "Contractor licence with written-out dates",
+    "expectLowConfidence": []
+  },
+  {
+    "file": "method-statement.pdf",
+    "kind": "method_statement",
+    "fields": {
+      "namedInsured": "Harbour Scaffolding Ltd",
+      "projectReference": "Quayside Library",
+      "issueDate": "2026-10-02",
+      "expiryDate": "2027-04-02"
+    },
+    "note": "Two-page method statement, UK dates",
+    "expectLowConfidence": []
+  }
+]

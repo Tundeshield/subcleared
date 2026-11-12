@@ -8,3 +8,4 @@ dist
 *.log
 test-results
 dist-dev
+eval-results/

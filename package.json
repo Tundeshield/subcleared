@@ -1,7 +1,7 @@
 {
   "name": "subcleared",
   "version": "1.0.0",
-  "description": "SubCleared — subcontractor compliance and readiness platform",
+  "description": "SubCleared \u2014 subcontractor compliance and readiness platform",
   "scripts": {
     "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "tsx watch server/dev.ts",
@@ -10,7 +10,9 @@
     "build:dev": "VITE_AUTH_MODE=dev vite build --outDir dist-dev",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes,storage"
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes,storage",
+    "eval:extraction": "tsx scripts/eval-extraction.ts",
+    "fixtures:certificates": "python3 scripts/fixtures/make_certificates.py"
   },
   "license": "UNLICENSED",
   "dependencies": {

@@ -170,6 +170,19 @@ export async function getFirebaseServices(): Promise<Services> {
   return firebaseServices;
 }
 
+/**
+ * Token for internal endpoints (scheduler trigger, accuracy runs). Uses the
+ * dedicated variable when set, otherwise a value derived from the portal
+ * secret, so the endpoints work without extra configuration but stay closed
+ * to anyone who can't read the deployment's settings.
+ */
+export function internalToken(purpose: 'jobs' | 'eval', env: NodeJS.ProcessEnv = process.env): string {
+  const own = purpose === 'jobs' ? env.CRON_SECRET : env.EVAL_SECRET;
+  if (own) return own;
+  const base = env.PORTAL_SESSION_SECRET || '';
+  return base.length >= 32 ? crypto.createHmac('sha256', base).update(`internal-endpoint:${purpose}`).digest('hex') : '';
+}
+
 export function internalSignature(secret: string, payload: string) {
   return crypto.createHmac('sha256', secret).update(`internal:${payload}`).digest('hex');
 }
