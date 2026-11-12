@@ -14,7 +14,7 @@ export type DocumentKind =
   | 'other';
 
 export type FieldType = 'text' | 'date' | 'amount' | 'boolean';
-export interface SchemaField { key: string; label: string; type: FieldType; critical?: boolean }
+export interface SchemaField { key: string; label: string; type: FieldType; critical?: boolean; hint?: string }
 
 export const KIND_LABELS: Record<DocumentKind, string> = {
   insurance_certificate: 'Insurance certificate',
@@ -31,20 +31,20 @@ const holder = (label: string): SchemaField => ({ key: 'namedInsured', label, ty
 export const SCHEMAS: Record<DocumentKind, SchemaField[]> = {
   insurance_certificate: [
     holder('Named insured'),
-    { key: 'issuer', label: 'Insurer', type: 'text' },
-    { key: 'referenceNumber', label: 'Policy number', type: 'text' },
+    { key: 'issuer', label: 'Insurer', type: 'text', hint: 'the insurance company (insurer A on an ACORD form), not the broker or producer' },
+    { key: 'referenceNumber', label: 'Policy number', type: 'text', hint: 'the general or public liability policy number when several are listed' },
     { key: 'coverageType', label: 'Policy type', type: 'text' },
-    { key: 'issueDate', label: 'Effective date', type: 'date' },
-    { key: 'expiryDate', label: 'Expiry date', type: 'date', critical: true },
-    { key: 'glEachOccurrence', label: 'Liability limit, each occurrence', type: 'amount' },
+    { key: 'issueDate', label: 'Effective date', type: 'date', hint: 'the date cover starts (policy effective date, start of the period of insurance), NOT the date the certificate or schedule was printed or issued' },
+    { key: 'expiryDate', label: 'Expiry date', type: 'date', critical: true, hint: 'the date cover ends; if policies end on different dates, the earliest one, and add an issue' },
+    { key: 'glEachOccurrence', label: 'Liability limit, each occurrence', type: 'amount', hint: 'general or public liability limit per occurrence / any one occurrence' },
     { key: 'glAggregate', label: 'Liability limit, aggregate', type: 'amount' },
-    { key: 'elLimit', label: "Employers' liability limit", type: 'amount' },
+    { key: 'elLimit', label: "Employers' liability limit", type: 'amount', hint: "employers' liability limit, or the E.L. each accident limit" },
     { key: 'autoCombinedSingleLimit', label: 'Vehicle liability limit', type: 'amount' },
     { key: 'umbrellaLimit', label: 'Excess / umbrella limit', type: 'amount' },
-    { key: 'wcCoverage', label: "Workers' comp / employers' liability shown", type: 'boolean' },
+    { key: 'wcCoverage', label: "Workers' comp / employers' liability shown", type: 'boolean', hint: "true if workers' compensation or employers' liability cover is listed as in force" },
     { key: 'additionalInsured', label: 'Additional insured / indemnity to principal shown', type: 'boolean' },
     { key: 'waiverOfSubrogation', label: 'Waiver of subrogation shown', type: 'boolean' },
-    { key: 'certificateHolder', label: 'Certificate holder', type: 'text' },
+    { key: 'certificateHolder', label: 'Certificate holder', type: 'text', hint: 'the organisation name in the certificate holder box (name only, no address)' },
     { key: 'currency', label: 'Currency of limits', type: 'text' },
   ],
   insurance_endorsement: [
@@ -73,7 +73,7 @@ export const SCHEMAS: Record<DocumentKind, SchemaField[]> = {
     { key: 'author', label: 'Prepared by', type: 'text' },
     { key: 'revision', label: 'Revision', type: 'text' },
     { key: 'issueDate', label: 'Date', type: 'date' },
-    { key: 'expiryDate', label: 'Review or expiry date', type: 'date' },
+    { key: 'expiryDate', label: 'Review or expiry date', type: 'date', hint: 'the review date or expiry date printed on the document' },
   ],
   training_certificate: [
     holder('Card or certificate holder'),

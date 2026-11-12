@@ -17,8 +17,8 @@ import type { Assignment, DocumentVersion, ExtractedField, Extraction, Organisat
 import { C } from './core';
 import type { Services } from './services';
 
-export interface AiCall { model: string; system?: string; content: any[]; maxTokens: number }
-export interface AiResult { text: string; inputTokens: number; outputTokens: number; model: string }
+export interface AiCall { model: string; system?: string; content: any[]; maxTokens: number; /** Forces a structured answer through a tool, so the reply is always valid JSON. */ tool?: { name: string; description: string; schema: any } }
+export interface AiResult { text: string; inputTokens: number; outputTokens: number; model: string; /** The tool input, when a tool was required. */ json?: any }
 export interface AiProvider { name: string; call(c: AiCall): Promise<AiResult> }
 
 export class AnthropicProvider implements AiProvider {
@@ -28,22 +28,26 @@ export class AnthropicProvider implements AiProvider {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': this.key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: c.model, max_tokens: c.maxTokens, ...(c.system ? { system: c.system } : {}), messages: [{ role: 'user', content: c.content }] }),
+      body: JSON.stringify({
+        model: c.model, max_tokens: c.maxTokens, ...(c.system ? { system: c.system } : {}), messages: [{ role: 'user', content: c.content }],
+        ...(c.tool ? { tools: [{ name: c.tool.name, description: c.tool.description, input_schema: c.tool.schema }], tool_choice: { type: 'tool', name: c.tool.name } } : {}),
+      }),
     });
     const body: any = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body?.error?.message || `AI provider responded ${res.status}`);
     const text = (body.content ?? []).filter((x: any) => x.type === 'text').map((x: any) => x.text).join('');
-    return { text, inputTokens: body.usage?.input_tokens ?? 0, outputTokens: body.usage?.output_tokens ?? 0, model: body.model ?? c.model };
+    const json = (body.content ?? []).find((x: any) => x.type === 'tool_use')?.input;
+    if (c.tool && body.stop_reason === 'max_tokens') throw new Error('The reading was cut off before it finished');
+    return { text, json, inputTokens: body.usage?.input_tokens ?? 0, outputTokens: body.usage?.output_tokens ?? 0, model: body.model ?? c.model };
   }
 }
 
-const FIELD_DOCS = ALL_KINDS.map((k) => `- ${k} (${KIND_LABELS[k]}): ${SCHEMAS[k].map((f) => `${f.key} [${f.type}]`).join(', ')}`).join('\n');
+const FIELD_DOCS = ALL_KINDS.map((k) => `- ${k} (${KIND_LABELS[k]}):\n${SCHEMAS[k].map((f) => `    ${f.key} [${f.type}] ${f.label}${f.hint ? ` — ${f.hint}` : ''}`).join('\n')}`).join('\n');
 
 export const EXTRACTION_SYSTEM = `You read construction subcontractor paperwork so a person can check it quickly. You transcribe; you never judge validity or coverage.
 
-Return ONLY one JSON object:
-{"kind": <one of: ${ALL_KINDS.join(', ')}>, "kindConfidence": <0..1>, "issues": [<short strings>],
- "fields": {"<key>": {"value": <value or null>, "confidence": <0..1>, "page": <1-based page or null>, "source": "<the exact printed text you read, max 120 chars>"}}}
+Record your reading with the record_reading tool:
+kind (one of: ${ALL_KINDS.join(', ')}), kindConfidence (0..1), issues (short strings), and fields: for each key, {value, confidence 0..1, page (1-based), source (the exact printed text you read, max 120 characters)}.
 
 Fields to read for each kind:
 ${FIELD_DOCS}
@@ -51,11 +55,33 @@ ${FIELD_DOCS}
 Rules:
 - Only report what is printed. If a field is absent, illegible or ambiguous, use value null and confidence 0. Never guess, infer or fill gaps.
 - "source" must be copied from the document, not paraphrased.
-- Dates: YYYY-MM-DD exactly as printed (convert written dates like "1 March 2027"; do not shift timezones). If day/month order is ambiguous, set confidence at most 0.5 and say so in issues.
+- Dates: YYYY-MM-DD (convert written dates like "1 March 2027"; do not shift timezones). Decide day/month order from the document's own cues: a printed format label such as MM/DD/YYYY, a written-out date elsewhere, the country of addresses, the currency, or the form (ACORD and ISO "CG" forms are US: month first; a UK insurer or £ amounts: day first). Only when the document gives no such cue is the order ambiguous: then set confidence at most 0.5 and say so in issues.
 - Amounts: plain numbers, no symbols or separators. Put the currency (ISO code) in the "currency" field when shown.
 - Booleans are true only when the document explicitly shows it; false only when it explicitly shows it is absent; otherwise null.
 - If one file contains several different documents, read the main one and add an issue.
 - If several policies appear on one certificate, read each limit into its own field; namedInsured and expiryDate refer to the policy most relevant to the field list (use the earliest expiry if they differ, and add an issue).`;
+
+const READING_TOOL = {
+  name: 'record_reading',
+  description: 'Record what the document says.',
+  schema: {
+    type: 'object',
+    properties: {
+      kind: { type: 'string', enum: ALL_KINDS },
+      kindConfidence: { type: 'number' },
+      issues: { type: 'array', items: { type: 'string' } },
+      fields: {
+        type: 'object',
+        additionalProperties: {
+          type: 'object',
+          properties: { value: {}, confidence: { type: 'number' }, page: { type: ['integer', 'null'] }, source: { type: ['string', 'null'] } },
+          required: ['value', 'confidence'],
+        },
+      },
+    },
+    required: ['kind', 'kindConfidence', 'fields'],
+  },
+};
 
 export function parseAiJson(text: string): any {
   const a = text.indexOf('{'); const b = text.lastIndexOf('}');
@@ -148,15 +174,20 @@ export async function readDocument(svc: Services, org: Organisation, bytes: Uint
 
   const usage = { inputTokens: 0, outputTokens: 0, calls: 0 };
   const run = async (model: string, first: boolean) => {
-    const r = await svc.ai!.call({ model, system: EXTRACTION_SYSTEM, maxTokens: 2000, content: [contentBlock(bytes, mimeType), { type: 'text', text: 'Read this document and return the JSON object.' }] });
+    const r = await svc.ai!.call({ model, system: EXTRACTION_SYSTEM, maxTokens: 4000, tool: READING_TOOL, content: [contentBlock(bytes, mimeType), { type: 'text', text: 'Read this document and record what it says.' }] });
     usage.inputTokens += r.inputTokens; usage.outputTokens += r.outputTokens; usage.calls += 1;
     await recordUsage(svc, org.id, { model: r.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens, document: first, purpose });
-    return { ...cleanExtraction(parseAiJson(r.text)), model: r.model };
+    return { ...cleanExtraction(r.json ?? parseAiJson(r.text)), model: r.model };
   };
   try {
-    let x = await run(svc.env.aiFastModel, true);
+    let x: Awaited<ReturnType<typeof run>>;
     let escalated = false;
-    if (needsSecondLook(x) && svc.env.anthropicModel !== svc.env.aiFastModel) {
+    try { x = await run(svc.env.aiFastModel, true); } catch (e) {
+      // The fast reader failed outright: give the document to the stronger model once before giving up.
+      if (svc.env.anthropicModel === svc.env.aiFastModel) throw e;
+      x = await run(svc.env.anthropicModel, false); escalated = true;
+    }
+    if (!escalated && needsSecondLook(x) && svc.env.anthropicModel !== svc.env.aiFastModel) {
       try { const y = await run(svc.env.anthropicModel, false); x = y; escalated = true; } catch { /* keep the first reading */ }
     }
     return { status: 'completed', kind: x.kind, kindConfidence: x.kindConfidence, issues: x.issues, fields: x.fields, model: x.model, escalated, usage, startedAt, completedAt: svc.now().toISOString() };

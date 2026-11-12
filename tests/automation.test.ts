@@ -106,6 +106,16 @@ describe('pure rules', () => {
 });
 
 describe('document reading pipeline', () => {
+  it('gives a document to the stronger reader when the fast one fails, instead of losing it', async () => {
+    const o = await setup();
+    const real = h.svc.ai!; const models: string[] = [];
+    h.svc.ai = { name: 'flaky', call: async (c) => { models.push(c.model); if (c.model === h.svc.env.aiFastModel) throw new Error('The reading was cut off before it finished'); return real.call(c); } };
+    const v = await upload(o.orgId, o.subcontractorId, o.gl, coi({ insured: 'Renew Co Limited', expiry: '2027-06-30' }));
+    const r = await ok('owner1', 'reviews.get', { versionId: v }, o.orgId);
+    expect(models).toEqual([h.svc.env.aiFastModel, h.svc.env.anthropicModel]);
+    expect(r.version.extraction).toMatchObject({ status: 'completed', kind: 'insurance_certificate', escalated: true });
+    expect(r.version.extraction.fields.expiryDate.value).toBe('2027-06-30');
+  });
   it('reads a certificate, compares it with the project, and never re-reads an identical file', async () => {
     const o = await setup();
     const v1 = await upload(o.orgId, o.subcontractorId, o.gl, coi({ insured: 'Renew Co Limited', expiry: '2027-06-30' }));
