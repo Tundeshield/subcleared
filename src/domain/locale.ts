@@ -20,6 +20,17 @@ export const COUNTRIES: { name: string; locale: string; currency: string; timezo
   ['Sweden', 'en-SE', 'SEK', 'Europe/Stockholm'], ['Switzerland', 'en-CH', 'CHF', 'Europe/Zurich'], ['United Arab Emirates', 'en-AE', 'AED', 'Asia/Dubai'],
   ['United Kingdom', 'en-GB', 'GBP', 'Europe/London'], ['United States', 'en-US', 'USD', 'America/Chicago'], ['Other', 'en-GB', 'USD', 'UTC'],
 ].map(([name, locale, currency, timezone]) => ({ name, locale, currency, timezone }));
+/** A best guess at the country from the browser's timezone, for a default the user can change. */
+const ZONE_COUNTRY: [RegExp, string][] = [
+  [/^Australia\//, 'Australia'], [/^America\/(Toronto|Vancouver|Edmonton|Winnipeg|Halifax|St_Johns|Regina|Montreal)$/, 'Canada'],
+  [/^(America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Detroit|Boise|Indiana\/.+|Kentucky\/.+)|Pacific\/Honolulu|US\/.+)$/, 'United States'],
+  [/^Europe\/(London|Belfast|Guernsey|Isle_of_Man|Jersey)$/, 'United Kingdom'], [/^Pacific\/(Auckland|Chatham)$/, 'New Zealand'], [/^Asia\/(Kolkata|Calcutta)$/, 'India'],
+];
+export function countryFromTimezone(tz: string): string {
+  const hit = COUNTRIES.find((c) => c.timezone === tz && c.name !== 'Other');
+  if (hit) return hit.name;
+  return ZONE_COUNTRY.find(([re]) => re.test(tz))?.[1] ?? 'Other';
+}
 export const countryDefaults = (country: string) => COUNTRIES.find((c) => c.name.toLowerCase() === country.toLowerCase()) ?? COUNTRIES[COUNTRIES.length - 1];
 export const LOCALES = [...new Set(COUNTRIES.map((c) => c.locale))].sort();
 export const CURRENCIES = [...new Set(COUNTRIES.map((c) => c.currency))].sort();
@@ -60,4 +71,15 @@ export function money(n: number, currency = activeCurrency) {
 export function applyOrgFormatting(s?: Partial<Pick<OrgSettings, 'locale' | 'currency'>>) {
   activeLocale = s?.locale ?? 'en-GB';
   activeCurrency = s?.currency ?? 'GBP';
+}
+
+/** Plain-language reminder schedules. Each maps to the existing reminderSchedule setting; anything else is shown as custom. */
+export const REMINDER_PRESETS: { id: string; label: string; schedule: number[] }[] = [
+  { id: 'standard', label: 'Standard — 90, 60, 30, 14 and 7 days before expiry, on the day, and a week after', schedule: [90, 60, 30, 14, 7, 0, -7] },
+  { id: 'fewer', label: 'Fewer — 30, 14 and 7 days before expiry, and on the day', schedule: [30, 14, 7, 0] },
+  { id: 'early', label: 'Early and steady — 90, 60 and 30 days before expiry, then on the day', schedule: [90, 60, 30, 0] },
+];
+export function reminderPreset(schedule: number[]): string {
+  const key = [...schedule].sort((a, b) => b - a).join(',');
+  return REMINDER_PRESETS.find((p) => p.schedule.join(',') === key)?.id ?? 'custom';
 }

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { formatDate } from '../../domain/dates';
 import { CSV_TEMPLATE } from '../../domain/importCsv';
 import { SUB_TYPES } from '../../domain/library';
 import { api, dataChanged, useApi, useMutation } from '../../lib/api';
@@ -40,7 +39,7 @@ export default function Subcontractors() {
   const flat = (list: any[]) => list.map((r) => ({ ...r, contactName: r.contact?.name, contactEmail: r.contact?.email, readiness: humanize(r.readiness), outstanding: subIssues(r).join('; ') }));
   return (
     <div>
-      <PageHeader title="Subcontractors" description="One record per company, shared across every project. Readiness is always worked out per project — open a company to see where it is and isn't ready."
+      <PageHeader title="Subcontractors"
         actions={<>
           {can('subs.manage') && <button className="btn-secondary" onClick={() => setImporting(true)}>Import CSV</button>}
           {can('subs.manage') && <button className="btn-primary" onClick={() => setOpen(true)}>Add subcontractor</button>}
@@ -65,23 +64,20 @@ export default function Subcontractors() {
       ) : (
         <>
           <div className="overflow-x-auto -mx-4 sm:mx-0">
-            <table className="table min-w-[1000px]">
+            <table className="table min-w-[760px]">
               <thead><tr>
                 <th className="th w-10"><Checkbox checked={allOnPage} onChange={(v) => setSel(v ? [...new Set([...sel, ...paged.slice.map((s: any) => s.id)])] : sel.filter((id) => !paged.slice.some((s: any) => s.id === id)))} label={<span className="sr-only">Select all on page</span>} /></th>
-                <SortHeader label="Subcontractor" k="legalName" sort={sort} setSort={setSort} /><th className="th">Primary contact</th>
-                <SortHeader label="Project readiness" k="readiness" sort={sort} setSort={setSort} />
-                <SortHeader label="Paperwork" k="outstanding" sort={sort} setSort={setSort} /><SortHeader label="Status" k="status" sort={sort} setSort={setSort} />
-                <SortHeader label="Last activity" k="lastActivityAt" sort={sort} setSort={setSort} />
+                <SortHeader label="Company" k="legalName" sort={sort} setSort={setSort} className="w-[36%]" /><th className="th">Contact</th>
+                <SortHeader label="Readiness" k="readiness" sort={sort} setSort={setSort} />
+                <SortHeader label="What’s outstanding" k="outstanding" sort={sort} setSort={setSort} />
               </tr></thead>
               <tbody>{paged.slice.map((s: any) => (
                 <tr key={s.id} className={cx('tr-link', sel.includes(s.id) && 'bg-raised/60')} onClick={rowClick(() => nav(`/app/subcontractors/${s.id}`))}>
                   <td className="td" onClick={(e) => e.stopPropagation()}><Checkbox checked={sel.includes(s.id)} onChange={(v) => setSel(v ? [...sel, s.id] : sel.filter((x) => x !== s.id))} label={<span className="sr-only">Select {s.legalName}</span>} /></td>
-                  <td className="td"><div><RowLink to={`/app/subcontractors/${s.id}`}>{s.legalName}</RowLink></div><div className="text-sm text-faint">{[s.trade, s.tradingName && `t/a ${s.tradingName}`].filter(Boolean).join(' · ')}{s.tags.includes('Sample') && <> <SampleTag /></>}</div></td>
-                  <td className="td">{s.contact ? <><div>{s.contact.name}</div><div className="text-sm text-faint truncate max-w-[15rem]" title={s.contact.email}>{s.contact.email}</div></> : <span className="text-faint">No contact</span>}</td>
-                  <td className="td"><ProjectReadiness s={s} /></td>
+                  <td className="td"><div><RowLink to={`/app/subcontractors/${s.id}`}>{s.legalName}</RowLink></div><div className="text-sm text-faint">{[s.trade, s.tradingName && `t/a ${s.tradingName}`, ['suspended', 'archived'].includes(s.status) && humanize(s.status)].filter(Boolean).join(' · ')}{s.tags.includes('Sample') && <> <SampleTag /></>}</div></td>
+                  <td className="td">{s.contact ? <><div className="truncate max-w-[14rem]">{s.contact.name}</div><div className="text-sm text-faint truncate max-w-[14rem]" title={s.contact.email}>{s.contact.email}</div></> : <span className="text-faint">No contact</span>}</td>
+                  <td className="td whitespace-nowrap"><ProjectReadiness s={s} /></td>
                   <td className="td text-sm">{s.projects === 0 ? <span className="text-faint">—</span> : subIssues(s).length ? subIssues(s).join(' · ') : <span className="text-success">All approved</span>}</td>
-                  <td className="td text-sm">{s.status === 'attention' ? 'Attention required' : humanize(s.status)}</td>
-                  <td className="td text-muted whitespace-nowrap">{formatDate(s.lastActivityAt)}</td>
                 </tr>
               ))}</tbody>
             </table>

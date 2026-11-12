@@ -19,7 +19,8 @@ export default function Portal() {
   const [session, setSession] = useState<string | null>(() => sessionStorage.getItem(key));
   const [state, setState] = useState<any>(null);
   const [tab, setTab] = useState<'todo' | 'library' | 'history' | 'contact'>('todo');
-  const [notice, setNotice] = useState<{ file: string; req: string } | null>(null);
+  // A receipt per upload, kept for this visit so each document shows what was received and when.
+  const [receipts, setReceipts] = useState<Record<string, { file: string; at: string; sig: string }>>({});
 
   const fail = (e: any) => {
     const title = e.code === 'link_expired' ? 'This link has expired' : e.code === 'link_revoked' ? 'This link has been withdrawn' : e.code === 'sub_inactive' ? 'Document collection is paused' : e.status === 429 ? 'Please wait a moment' : 'This link isn’t valid';
@@ -46,36 +47,31 @@ export default function Portal() {
   const s = state;
   const todo = s.requirements.filter((r: any) => r.needsAction);
   const others = s.requirements.filter((r: any) => !r.needsAction);
-  const onDone = (req: string) => (f: string) => { setNotice({ file: f, req }); load(session!); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const onDone = (reqId: string) => (f: string, sig: string) => { setReceipts((x) => ({ ...x, [reqId]: { file: f, at: new Date().toISOString(), sig } })); load(session!); };
+  const all = s.projects as string[];
+  const sameProjects = (r: any) => r.projects.length === 0 || (r.projects.length === all.length && r.projects.every((x: string) => all.includes(x)));
   return (
     <Shell org={s.organisation.name}>
       <div className="pt-8 pb-6">
         <p className="text-sm text-muted">{s.organisation.name} has asked for documents from</p>
         <h1 className="text-2xl font-medium mt-1 leading-tight">{s.subcontractor.legalName}</h1>
         {s.projects.length > 0 && <p className="text-muted mt-2">For {s.projects.join(', ')}</p>}
-        <dl className="grid grid-cols-3 mt-7 border-t border-ink">
-          {[['Still needed', s.summary.needed], ['Being reviewed', s.summary.review], ['Accepted', s.summary.accepted]].map(([l, n]) => (
+        <dl className="grid grid-cols-3 mt-7 border-t border-ink" aria-live="polite">
+          {[['Remaining', s.summary.needed], ['Being reviewed', s.summary.review], ['Accepted', s.summary.accepted]].map(([l, n]) => (
             <div key={l as string} className="pt-3"><dd className={cx('text-2xl tnum', l === 'Accepted' && Number(n) > 0 && 'text-success')}>{n}</dd><dt className="text-sm text-muted">{l}</dt></div>
           ))}
         </dl>
         {s.openRequests.filter((r: any) => r.message || r.dueDate).map((r: any) => (
           <div key={r.id} className="mt-6 border-l-2 border-accent pl-4 text-[0.9375rem]">{r.message && <p>“{r.message}” <span className="text-muted">— {r.from}</span></p>}{r.dueDate && <p className="text-muted mt-0.5">Please send by <span className="text-ink font-medium">{formatDate(r.dueDate)}</span>.</p>}</div>
         ))}
-        <p className="mt-6 text-sm text-muted">Choose each document below and upload a PDF or a clear photo. Questions about what's needed? Reply to the email you received{s.openRequests[0]?.from ? ` to reach ${s.openRequests[0].from}` : ''}.</p>
+        <p className="mt-6 text-sm text-muted">Choose a PDF or a clear photo for each document below — it uploads straight away, and you can do several at once. Questions about what's needed? Reply to the email you received{s.openRequests[0]?.from ? ` to reach ${s.openRequests[0].from}` : ''}.</p>
       </div>
-      {notice && (
-        <div className="mb-6 rounded-md bg-accent/[0.09] px-4 py-3.5 flex gap-3" role="status">
-          <Glyph tone="ok" className="w-5 h-5 mt-0.5" />
-          <div className="flex-1"><div className="font-medium">Received: {notice.req}</div><p className="text-sm text-muted mt-0.5">{notice.file} passed our security checks and is now with {s.organisation.name} for review.</p></div>
-          <button className="text-faint self-start p-1" onClick={() => setNotice(null)} aria-label="Dismiss">{Icon.x()}</button>
-        </div>
-      )}
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'todo', label: 'To do', count: todo.length }, { value: 'library', label: 'Accepted', count: s.library.length }, { value: 'history', label: 'History' }, { value: 'contact', label: 'Your details' }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'todo', label: 'To do' }, { value: 'library', label: 'Accepted' }, { value: 'history', label: 'History' }, { value: 'contact', label: 'Your details' }]} />
       <div className="py-6">
         {tab === 'todo' && <>
           {todo.length === 0 && <div className="flex gap-3 py-2"><Glyph tone="ok" className="w-5 h-5 mt-0.5" /><div><div className="font-medium">Nothing needed right now</div><p className="text-muted mt-1">Everything requested has been sent. We'll email you if anything changes or a document is due for renewal.</p></div></div>}
-          <div className="space-y-4">{todo.map((r: any, i: number) => <RequirementCard key={r.id} r={r} first={i === 0} session={session!} onDone={onDone(r.name)} />)}</div>
-          {others.length > 0 && <><h2 className="eyebrow mt-10 mb-3">Already sent</h2><div className="border-t border-line">{others.map((r: any) => <RequirementCard key={r.id} r={r} session={session!} onDone={onDone(r.name)} compact />)}</div></>}
+          <div className="space-y-4">{todo.map((r: any, i: number) => <RequirementCard key={r.id} r={r} first={i === 0} session={session!} onDone={onDone(r.id)} receipt={receipts[r.id]} showProjects={!sameProjects(r)} org={s.organisation.name} />)}</div>
+          {others.length > 0 && <><h2 className="eyebrow mt-10 mb-3">Already sent</h2><div className="border-t border-line">{others.map((r: any) => <RequirementCard key={r.id} r={r} session={session!} onDone={onDone(r.id)} receipt={receipts[r.id]} showProjects={!sameProjects(r)} org={s.organisation.name} compact />)}</div></>}
         </>}
         {tab === 'library' && (s.library.length === 0 ? <p className="text-muted">Nothing has been accepted yet.</p> : <ul className="border-t border-line">{s.library.map((d: any) => (
           <li key={d.versionId} className="py-4 border-b border-line flex items-center justify-between gap-3">
@@ -125,8 +121,13 @@ function CodeStep({ phase, onSubmit, onResend }: { phase: { hint: string; org: s
   );
 }
 
-/** Only the first outstanding item gets the filled button, so there is one obvious next step. */
-function RequirementCard({ r, session, onDone, compact, first }: { r: any; session: string; onDone: (fileName: string) => void; compact?: boolean; first?: boolean }) {
+/**
+ * One document. Choosing a file uploads it straight away (no separate Send),
+ * with progress, Cancel, and a receipt once the server has checked and stored it.
+ * A failed upload keeps the file so it can be retried. Only the first outstanding
+ * item gets the filled button, so there is one obvious next step.
+ */
+function RequirementCard({ r, session, onDone, compact, first, receipt, showProjects, org }: { r: any; session: string; onDone: (fileName: string, sig: string) => void; compact?: boolean; first?: boolean; receipt?: { file: string; at: string; sig: string }; showProjects?: boolean; org?: string }) {
   const [file, setFile] = useState<File | null>(null);
   const [stage, setStage] = useState<null | 'preparing' | 'uploading' | 'verifying'>(null);
   const [progress, setProgress] = useState(0);
@@ -134,40 +135,62 @@ function RequirementCard({ r, session, onDone, compact, first }: { r: any; sessi
   const [expanded, setExpanded] = useState(!compact);
   const input = useRef<HTMLInputElement>(null);
   const abort = useRef<AbortController | null>(null);
+  const busy = useRef(false);
   const canUpload = r.kind === 'document';
-  const pick = (f: File | null) => { setErr(null); if (f) { const p = precheck(f); if (p) { setErr(p); return; } } setFile(f); };
-  const send = async () => {
-    if (!file) return;
-    setErr(null); abort.current = new AbortController();
+  const sigOf = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
+  const send = async (f: File) => {
+    if (busy.current) return; // one upload at a time per document
+    if (receipt && receipt.sig === sigOf(f)) { setErr('You’ve just sent this exact file. Choose a different file to replace it.'); return; }
+    busy.current = true; setErr(null); setFile(f); setProgress(0); abort.current = new AbortController();
     try {
-      await uploadDocument({ portal: session }, file, r.id, (s, p) => { setStage(s); setProgress(p); }, abort.current.signal);
-      const name = file.name; setFile(null); onDone(name);
-    } catch (e: any) { setErr(e.code === 'portal_session' ? 'Your session has ended. Open the link from your email again and retry.' : e.message); } finally { setStage(null); }
+      await uploadDocument({ portal: session }, f, r.id, (st, p) => { setStage(st); setProgress(p); }, abort.current.signal);
+      setFile(null); onDone(f.name, sigOf(f));
+    } catch (e: any) {
+      setErr(e.name === 'AbortError' || /abort|cancel/i.test(e.message ?? '') ? 'Upload cancelled. Nothing was sent.' : e.code === 'portal_session' ? 'Your session has ended. Open the link from your email again and retry.' : e.message);
+    } finally { busy.current = false; setStage(null); }
   };
+  const pick = (f: File | null) => { setErr(null); if (!f) return; const p = precheck(f); if (p) { setFile(null); setErr(p); return; } send(f); };
   const header = (
     <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0"><h3 className="font-medium text-md">{r.name}{!r.mandatory && <span className="text-sm text-faint font-normal"> · optional</span>}</h3>{r.projects.length > 0 && !compact && <p className="text-sm text-faint">{r.projects.join(', ')}</p>}</div>
+      <div className="min-w-0"><h3 className="font-medium text-md">{r.name}{!r.mandatory && <span className="text-sm text-faint font-normal"> · optional</span>}</h3>{showProjects && r.projects.length > 0 && <p className="text-sm text-faint">{r.projects.join(', ')}</p>}</div>
       <span className={cx('inline-flex items-center gap-1.5 text-sm whitespace-nowrap', toneText(TONE[r.status] ?? 'none'))}><Glyph tone={TONE[r.status] ?? 'none'} className="w-3.5 h-3.5" />{r.label}</span>
     </div>
   );
-  if (compact && !expanded) return <div className="py-4 border-b border-line">{header}{canUpload && <button className="btn-quiet mt-2" onClick={() => setExpanded(true)}>{r.status === 'approved' || r.status === 'expiring_soon' ? 'Send a newer version' : 'Replace what you sent'}</button>}</div>;
+  const receiptLine = receipt && !stage && (
+    <div className="mt-3 rounded bg-accent/[0.09] px-3 py-2.5 flex gap-2.5 text-sm" role="status">
+      <Glyph tone="ok" className="w-4 h-4 mt-0.5 shrink-0" />
+      <div className="min-w-0"><span className="font-medium">Received</span> <span className="break-all">{receipt.file}</span><span className="text-muted"> · {formatDateTime(receipt.at)}. Checked and stored{org ? ` — with ${org} for review` : ''}.</span></div>
+    </div>
+  );
+  const fileInput = <input ref={input} type="file" accept={ACCEPT} className="sr-only" onChange={(e) => { pick(e.target.files?.[0] ?? null); e.target.value = ''; }} aria-label={`Choose a file for ${r.name}`} />;
+  const progressBlock = stage && (
+    <div className="mt-4">
+      <div className="flex items-center gap-2.5 mb-2"><span className="text-accent-ink">{Icon.file()}</span><span className="truncate flex-1 text-sm">{file?.name}</span><button className="btn-ghost btn-sm" onClick={() => abort.current?.abort()} disabled={stage === 'verifying'}>Cancel</button></div>
+      <div className="text-sm text-muted mb-1.5" aria-live="polite">{stage === 'preparing' ? 'Getting ready…' : stage === 'uploading' ? `Uploading… ${Math.round(progress * 100)}%` : 'Checking the file and saving…'}</div>
+      <Progress value={stage === 'verifying' ? 1 : progress} />
+    </div>
+  );
+  const failed = err && file && !stage;
+  if (compact && !expanded && !stage && !err) return <div className="py-4 border-b border-line">{header}{receiptLine}{canUpload && <><button className="btn-quiet mt-2" onClick={() => input.current?.click()}>{r.status === 'approved' || r.status === 'expiring_soon' ? 'Send a newer version' : 'Replace'}</button>{fileInput}</>}</div>;
   return (
     <div className={cx(compact ? 'py-4 border-b border-line' : 'rounded-md border border-line-strong bg-paper p-5')}>
       {header}
+      {receiptLine}
       {r.rejectionReason && <div className="mt-3 border-l-2 border-ink pl-3"><div className="text-sm font-medium">Why it wasn't accepted</div><p className="text-sm text-muted mt-0.5">{r.rejectionReason}</p></div>}
       {r.expiryDate && <p className="text-sm text-muted mt-2">{r.status === 'expired' ? 'Expired' : 'Expires'} {formatDate(r.expiryDate)}</p>}
       {(r.instructions || r.description) && r.needsAction && <p className="text-[0.9375rem] text-muted mt-3 leading-relaxed">{r.instructions || r.description}</p>}
       {!canUpload && r.needsAction && <p className="text-sm text-muted mt-3">This is checked directly by the contractor — they'll be in touch if they need anything.</p>}
       {canUpload && (
         <div className="mt-5">
-          <input ref={input} type="file" accept={ACCEPT} className="sr-only" onChange={(e) => { pick(e.target.files?.[0] ?? null); e.target.value = ''; }} aria-label={`Choose a file for ${r.name}`} />
-          {file && !stage && <div className="flex items-center gap-2.5 mb-3 py-2.5 border-y border-line"><span className="text-accent-ink">{Icon.file()}</span><span className="truncate flex-1">{file.name}</span><span className="text-sm text-faint tnum">{(file.size / 1024 / 1024).toFixed(1)} MB</span></div>}
-          {stage && <div className="mb-4"><div className="text-sm text-muted mb-1.5">{stage === 'preparing' ? 'Getting ready…' : stage === 'uploading' ? `Uploading… ${Math.round(progress * 100)}%` : 'Checking the file and saving…'}</div><Progress value={stage === 'verifying' ? 1 : progress} /></div>}
+          {fileInput}
+          {progressBlock}
           <FormError error={err} />
-          <div className="flex gap-2 mt-2">
-            {!file ? <button className={cx('flex-1 btn-lg', r.needsAction && first ? 'btn-primary' : 'btn-secondary')} onClick={() => input.current?.click()} disabled={!!stage}>{Icon.upload()}{r.needsAction ? 'Choose a file or take a photo' : 'Choose a file'}</button>
-              : <><button className="btn-primary btn-lg flex-1" onClick={send} disabled={!!stage}>{stage && <Spinner />}Send</button>{stage ? <button className="btn-secondary btn-lg" onClick={() => abort.current?.abort()}>Cancel</button> : <button className="btn-secondary btn-lg" onClick={() => setFile(null)}>Change</button>}</>}
-          </div>
+          {!stage && (
+            <div className="flex gap-2 mt-2">
+              {failed ? <><button className="btn-primary btn-lg flex-1" onClick={() => send(file!)}>Try again</button><button className="btn-secondary btn-lg" onClick={() => input.current?.click()}>Choose another</button></>
+                : <button className={cx('flex-1 btn-lg', r.needsAction && first && !receipt ? 'btn-primary' : 'btn-secondary')} onClick={() => input.current?.click()}>{Icon.upload()}{receipt ? 'Replace' : r.needsAction ? 'Choose a file or take a photo' : 'Choose a file'}</button>}
+            </div>
+          )}
           <p className="text-xs text-faint mt-2.5">PDF, JPEG or PNG · up to 15 MB</p>
         </div>
       )}

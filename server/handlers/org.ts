@@ -13,6 +13,7 @@ import {
   audit, bad, C, conflict, type Ctx, diff, email, forbidden, HttpError, id, ids, need, notFound, oneOf, randomToken, reqStr, sha256, str,
 } from '../core';
 import { loadOrgData } from '../data';
+import { renewalFollowUp } from '../followup';
 import type { Db } from '../db';
 import { sendEmail } from '../email';
 import type { Identity, Services } from '../services';
@@ -377,14 +378,16 @@ const MEANINGFUL = /^(document\.(uploaded|replaced|approved|rejected|info_reques
 export async function dashboard(ctx: Ctx, input: any) {
   // All independent reads at once (they used to run one after another). Recent activity reads the
   // newest audit entries only, not the whole history.
-  const [data, members, emailProblems, intakeWaiting, recentAudit, escalations] = await Promise.all([
+  const [data, members, emailProblems, intakeWaiting, recentAudit, reminderLog] = await Promise.all([
     loadOrgData(ctx.db, ctx.org.id),
     ctx.db.list<Member>(C.col(ctx.org.id, 'members')),
     ctx.db.list<any>(C.col(ctx.org.id, 'emailProblems')),
     can(ctx, 'documents.upload') ? ctx.db.list<any>(C.col(ctx.org.id, 'intake'), [['status', '==', 'needs_match']]) : Promise.resolve([]),
     ctx.db.list<AuditEvent>(C.col(ctx.org.id, 'audit'), [], { orderBy: ['at', 'desc'], limit: 300 }),
-    ctx.db.list<any>(C.col(ctx.org.id, 'reminders'), [['type', '==', 'escalation']]),
+    ctx.db.list<any>(C.col(ctx.org.id, 'reminders')),
   ]);
+  const escalations = reminderLog.filter((r: any) => r.type === 'escalation');
+  const sentKeys = new Set<string>(reminderLog.filter((r: any) => ['sent', 'skipped', 'processing'].includes(r.status)).map((r: any) => r.id));
   const today = todayIn(ctx.org.settings.timezone, ctx.svc.now());
   const soon = ctx.org.settings.expiringSoonDays;
   let projects = data.projects.filter((p) => !['archived', 'completed'].includes(p.status) && canSeeProject(ctx.member, p));
@@ -457,18 +460,21 @@ export async function dashboard(ctx: Ctx, input: any) {
   }
 
   // "Needs your attention": one row per thing to do — item, issue, action — most urgent first.
-  type Need = { tone: 'progress' | 'blocked' | 'attention'; item: string; itemLink: string; context?: string; issue: string; action: string; link: string; rank: number };
+  // Grouped on the overview into at most four kinds of work; anything SubCleared does on its own is not a task.
+  type Group = 'review' | 'checks' | 'inbox' | 'request';
+  type Need = { group: Group; tone: 'progress' | 'blocked' | 'attention'; item: string; itemLink: string; context?: string; issue: string; action: string; link: string; rank: number; docs?: number };
+  const auto = (x: { v: any }) => renewalFollowUp(ctx.org, data, sentKeys, { subcontractorId: x.v.subcontractorId, versionId: x.v.id, expiryDate: x.v.metadata.expiryDate }, today).kind !== 'manual';
   const needs: Need[] = [];
   const pname = (id: string) => projects.find((p) => p.id === id)?.name;
   // Addresses that bounced or complained: chasing has stopped, so a person must act.
   for (const p of emailProblems) {
     const s = data.subs.find((x) => x.contacts.some((c) => c.email.toLowerCase() === p.email));
-    needs.push({ tone: 'blocked', item: s?.legalName ?? p.email, itemLink: s ? `/app/subcontractors/${s.id}` : '/app/settings/delivery', context: p.email, issue: p.kind === 'bounced' ? 'Email to this address bounced — reminders have stopped' : 'This address marked our email as spam — reminders have stopped', action: 'Fix contact', link: s ? `/app/subcontractors/${s.id}` : '/app/settings/delivery', rank: 0 });
+    needs.push({ group: 'checks', tone: 'blocked', item: s?.legalName ?? p.email, itemLink: s ? `/app/subcontractors/${s.id}` : '/app/settings/delivery', context: p.email, issue: p.kind === 'bounced' ? 'Email to this address bounced — reminders have stopped' : 'This address marked our email as spam — reminders have stopped', action: 'Fix contact', link: s ? `/app/subcontractors/${s.id}` : '/app/settings/delivery', rank: 0 });
   }
   // Emailed documents that couldn't be matched with confidence.
   const inbox = intakeWaiting;
   for (const i of inbox.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt))) {
-    needs.push({ tone: 'attention', item: i.fileName, itemLink: '/app/inbox', context: `from ${i.from}`, issue: i.suggestion?.subcontractorId ? (i.suggestion?.requirementId ? 'Emailed in — confirm where it belongs' : 'Emailed in — choose which document it is') : 'Emailed in from an unknown sender — choose who it’s from', action: 'Match document', link: '/app/inbox', rank: 1 });
+    needs.push({ group: 'inbox', tone: 'attention', item: i.fileName, itemLink: '/app/inbox', context: `from ${i.from}`, issue: i.suggestion?.subcontractorId ? (i.suggestion?.requirementId ? 'Emailed in — confirm where it belongs' : 'Emailed in — choose which document it is') : 'Emailed in from an unknown sender — choose who it’s from', action: 'Match document', link: '/app/inbox', rank: 1 });
   }
   // Documents waiting for a decision, triaged by the automatic comparison.
   const triage = (v: any) => currentTriage(v.assessment, v.extraction?.status);
@@ -490,7 +496,7 @@ export async function dashboard(ctx: Ctx, input: any) {
     }
     const first = probs[0] ?? vs.find((v) => triage(v) !== 'looks_good') ?? vs[0];
     needs.push({
-      tone: probs.length ? 'blocked' : 'progress', item: subName.get(sid) ?? 'Subcontractor', itemLink: `/app/subcontractors/${sid}`, issue,
+      group: 'review', docs: vs.length, tone: probs.length ? 'blocked' : 'progress', item: subName.get(sid) ?? 'Subcontractor', itemLink: `/app/subcontractors/${sid}`, issue,
       action: !probs.length && !other ? (vs.length === 1 ? 'Confirm' : 'Confirm all') : 'Review', link: !probs.length && !other && vs.length > 1 ? '/app/reviews?confirm=1' : `/app/reviews/${first.id}`, rank: probs.length ? 0 : 1,
     });
   }
@@ -516,27 +522,39 @@ export async function dashboard(ctx: Ctx, input: any) {
       else waitingSubs.add(r.subcontractorId);
     }
   }
-  for (const { r, names, first, projects: ps } of checks.values()) needs.push({ tone: 'attention', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, context: ps.length > 1 ? `${ps.length} projects` : ps[0], issue: `${names.join(', ')}: your team’s check`, action: 'Record check', link: `/app/subcontractors/${r.subcontractorId}?tab=requirements&check=${first}`, rank: 2 });
-  for (const { r, names } of stuck.values()) needs.push({ tone: 'blocked', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, issue: `Still hasn’t sent ${names.join(', ')} after every reminder — may need a call`, action: 'View contact', link: `/app/subcontractors/${r.subcontractorId}`, rank: 2 });
+  for (const { r, names, first, projects: ps } of checks.values()) needs.push({ group: 'checks', tone: 'attention', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, context: ps.length > 1 ? `${ps.length} projects` : ps[0], issue: `${names.join(', ')}: your team’s check`, action: 'Record check', link: `/app/subcontractors/${r.subcontractorId}?tab=requirements&check=${first}`, rank: 2 });
+  for (const { r, names } of stuck.values()) needs.push({ group: 'checks', tone: 'blocked', item: subName.get(r.subcontractorId) ?? '', itemLink: `/app/subcontractors/${r.subcontractorId}`, issue: `Still hasn’t sent ${names.join(', ')} after every reminder — may need a call`, action: 'View contact', link: `/app/subcontractors/${r.subcontractorId}`, rank: 2 });
+  let renewing = 0;
   for (const x of expired) {
     const st = renewalStage(x.v);
-    needs.push({ tone: 'blocked', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expired ${-x.days === 0 ? 'today' : `${-x.days} day${-x.days === 1 ? '' : 's'} ago`}${st.stage === 'requested' ? ' — renewal requested' : ''}`, action: st.stage === 'replacement_received' ? 'Review replacement' : st.stage === 'not_requested' ? 'Request renewal' : 'View', link: st.stage === 'replacement_received' ? `/app/reviews/${(st as any).replacementVersionId}` : '/app/renewals?window=expired', rank: 3 });
+    const issue = `${docById.get(x.v.documentId)?.title} expired ${-x.days === 0 ? 'today' : `${-x.days} day${-x.days === 1 ? '' : 's'} ago`}`;
+    if (st.stage === 'replacement_received') needs.push({ group: 'review', docs: 1, tone: 'blocked', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${issue} — replacement received`, action: 'Review replacement', link: `/app/reviews/${(st as any).replacementVersionId}`, rank: 0 });
+    else if (st.stage === 'not_requested' && !auto(x)) needs.push({ group: 'request', tone: 'blocked', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue, action: 'Request renewal', link: '/app/renewals?window=expired', rank: 3 });
+    else renewing++;
   }
   for (const p of projects) {
     const pr = rows.filter((r) => r.projectId === p.id);
     const hasReqs = data.projectRequirements.some((x) => x.projectId === p.id && x.active);
-    if (!hasReqs && pr.length) { needs.push({ tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: 'No paperwork chosen, so nothing can be requested', action: 'Choose paperwork', link: `/app/projects/${p.id}?tab=requirements`, rank: 4 }); continue; }
+    if (!hasReqs && pr.length) { needs.push({ group: 'request', tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: 'No paperwork chosen, so nothing can be requested', action: 'Choose paperwork', link: `/app/projects/${p.id}?tab=requirements`, rank: 4 }); continue; }
     const toRequest = pr.filter((r) => r.results.some((x) => ['missing', 'not_requested'].includes(x.status) && defs.get(x.requirementId)?.kind === 'document'));
-    if (toRequest.length) needs.push({ tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: `${toRequest.length} subcontractor${toRequest.length === 1 ? ' needs' : 's need'} asking for paperwork`, action: 'Request paperwork', link: `/app/projects/${p.id}`, rank: 4 });
+    if (toRequest.length) needs.push({ group: 'request', tone: 'blocked', item: p.name, itemLink: `/app/projects/${p.id}`, issue: `${toRequest.length} subcontractor${toRequest.length === 1 ? ' needs' : 's need'} asking for paperwork`, action: 'Request paperwork', link: `/app/projects/${p.id}`, rank: 4 });
   }
-  // Expiring evidence is renewed automatically; only list it when no renewal could be requested.
-  let renewing = 0;
+  // Expiring evidence is renewed automatically; only list it when no automatic reminder will go.
   for (const x of [...expiring30].sort((a, b) => a.days - b.days)) {
     const st = renewalStage(x.v);
-    if (st.stage === 'not_requested') needs.push({ tone: 'attention', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expires ${x.days === 0 ? 'today' : `in ${x.days} day${x.days === 1 ? '' : 's'}`}`, action: 'Request renewal', link: '/app/renewals?window=30', rank: 7 });
+    if (st.stage === 'replacement_received') continue; // counted in documents to review
+    if (st.stage === 'not_requested' && !auto(x)) needs.push({ group: 'request', tone: 'attention', item: subName.get(x.v.subcontractorId) ?? '', itemLink: `/app/subcontractors/${x.v.subcontractorId}`, issue: `${docById.get(x.v.documentId)?.title} expires ${x.days === 0 ? 'today' : `in ${x.days} day${x.days === 1 ? '' : 's'}`}`, action: 'Request renewal', link: '/app/renewals?window=30', rank: 7 });
     else renewing++;
   }
   needs.sort((a, b) => a.rank - b.rank);
+  const GROUPS: { key: Group; title: string }[] = [
+    { key: 'review', title: 'To review' }, { key: 'checks', title: 'Your checks' },
+    { key: 'inbox', title: 'Emailed documents' }, { key: 'request', title: 'Not yet requested' },
+  ];
+  const groups = GROUPS.map((g) => ({ ...g, items: needs.filter((n) => n.group === g.key) })).filter((g) => g.items.length).map((g) => ({
+    ...g, count: g.items.length, docs: g.key === 'review' ? g.items.reduce((n, x) => n + (x.docs ?? 1), 0) : undefined,
+    tone: g.items.some((x) => x.tone === 'blocked') ? 'blocked' : g.items[0].tone,
+  }));
   const waiting = { subcontractors: waitingSubs.size, renewals: renewing };
 
   const recent = recentAudit.filter((e) => MEANINGFUL.test(e.action)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10);
@@ -553,7 +571,7 @@ export async function dashboard(ctx: Ctx, input: any) {
     review: { total: pending.length, looksGood: pending.filter((v) => triage(v) === 'looks_good').length, toCheck: pending.filter((v) => ['check', 'not_read'].includes(triage(v))).length, problems: pending.filter((v) => triage(v) === 'problem').length },
     inbox: inbox.length, readingOn: !!ctx.svc.ai,
     mailHealth: can(ctx, 'settings.manage') ? await ctx.db.get<any>(C.doc(ctx.org.id, 'health', 'mail')) : null,
-    attention, actions: actions.slice(0, 8), actionsTotal: actions.length, needs: input?.full ? needs : needs.slice(0, 12), needsTotal: needs.length, waiting,
+    attention, actions: actions.slice(0, 8), actionsTotal: actions.length, needs: input?.full ? needs : needs.slice(0, 12), needsTotal: needs.length, groups, waiting,
     projects: projectSummary,
     upcoming: inForce.filter((x) => x.days <= Math.max(Number(input?.days) || 60, soon)).sort((a, b) => a.days - b.days).slice(0, 8).map((x) => ({
       versionId: x.v.id, documentId: x.v.documentId, title: docById.get(x.v.documentId)?.title, subcontractor: subName.get(x.v.subcontractorId), subcontractorId: x.v.subcontractorId,

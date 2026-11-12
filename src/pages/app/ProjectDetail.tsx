@@ -122,7 +122,7 @@ export default function ProjectDetail() {
         )}
       </div>
       <ProjectDrawer open={edit} onClose={() => setEdit(false)} project={p} />
-      <AddSubsDrawer open={assign} onClose={() => setAssign(false)} projectId={p.id} available={data.available} canSendNow={can('requests.send') && data.requirements.length > 0} onAdded={(ids, sent) => { setAssign(false); if (!sent && can('requests.send') && data.requirements.length > 0) setRequesting({ ids }); }} />
+      <AddSubsDrawer open={assign} onClose={() => setAssign(false)} projectId={p.id} available={data.available} directoryEmpty={data.available.length === 0 && data.subcontractors.length === 0} canSendNow={can('requests.send') && data.requirements.length > 0} onAdded={(ids, sent) => { setAssign(false); if (!sent && can('requests.send') && data.requirements.length > 0) setRequesting({ ids }); }} />
       <RequestPaperworkDialog open={!!requesting} onClose={() => setRequesting(null)} data={data} preselect={requesting?.ids} />
       <Confirm open={archive} onClose={() => setArchive(false)} title={archived ? 'Restore this project?' : 'Archive this project?'} confirmLabel={archived ? 'Restore' : 'Archive'} danger={!archived} busy={archiveM.busy}
         onConfirm={async () => { await archiveM.run({ projectId: p.id, archived: !archived }); setArchive(false); toast(archived ? 'Project restored' : 'Project archived'); }}>
@@ -377,7 +377,7 @@ type NewSub = { k: string; legalName: string; trade: string; name: string; email
 const blankSub = (): NewSub => ({ k: newRowKey(), legalName: '', trade: '', name: '', email: '' });
 
 /** Add existing directory companies and brand-new ones in one place, then assign them all. */
-function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNow }: { open: boolean; onClose: () => void; projectId: string; available: any[]; onAdded: (ids: string[], sent: boolean) => void; canSendNow: boolean }) {
+function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNow, directoryEmpty }: { directoryEmpty?: boolean; open: boolean; onClose: () => void; projectId: string; available: any[]; onAdded: (ids: string[], sent: boolean) => void; canSendNow: boolean }) {
   const { can } = useSession();
   const [sendNow, setSendNow] = useState(true);
   const [sel, setSel] = useState<string[]>([]);
@@ -431,7 +431,7 @@ function AddSubsDrawer({ open, onClose, projectId, available, onAdded, canSendNo
       <div className="space-y-8">
         <section>
           <h3 className="text-md font-semibold">From your directory</h3>
-          {available.length === 0 ? <p className="text-sm text-muted mt-2">Everyone in your directory is already on this project.</p> : <>
+          {available.length === 0 ? <p className="text-sm text-muted mt-2">{directoryEmpty ? 'No subcontractors in your directory yet. Add your first subcontractor below.' : 'Everyone in your directory is already on this project.'}</p> : <>
             {available.length > 6 && <SearchInput value={q} onChange={setQ} placeholder="Search by company or trade" className="mt-3" />}
             <div className="mt-3 max-h-72 overflow-y-auto divide-y divide-line border-y border-line">{list.map((s) => <div key={s.id} className="py-2.5"><Checkbox checked={sel.includes(s.id)} onChange={(v) => setSel(v ? [...sel, s.id] : sel.filter((x) => x !== s.id))} label={s.legalName} hint={s.trade} /></div>)}{list.length === 0 && <p className="py-3 text-sm text-muted">No matches.</p>}</div>
           </>}

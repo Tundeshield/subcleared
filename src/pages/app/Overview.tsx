@@ -51,26 +51,17 @@ export default function Overview() {
           <Summary data={data} />
 
           <section aria-labelledby="action-h" className="mt-10">
-            <div className="flex items-baseline justify-between gap-3"><h2 id="action-h" className="text-lg font-semibold">Needs your attention</h2>{data.needsTotal > 0 && <span className="text-sm text-faint tnum">{data.needsTotal} item{data.needsTotal === 1 ? '' : 's'}</span>}</div>
-            {data.needs.length === 0 ? (
+            <h2 id="action-h" className="text-lg font-semibold">Needs your attention</h2>
+            {!data.groups?.length ? (
               <div className="mt-4 flex gap-3 items-start border-t border-line-strong pt-4"><Glyph tone="ok" className="w-4 h-4 mt-1" /><p className="text-muted">You’re all caught up. Requests and reminders are running on their own; anything that needs a decision will appear here.</p></div>
             ) : (
-              <ul className="mt-3 border-t border-line-strong">
-                {data.needs.map((n: any, i: number) => (
-                  <li key={i} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 py-3.5 border-b border-line">
-                    <Glyph tone={n.tone} className="w-3.5 h-3.5" />
-                    <div className="min-w-0"><Link to={n.itemLink} className="font-medium hover:underline underline-offset-4 break-words">{n.item}</Link>{n.context && <span className="text-sm text-faint"> · {n.context}</span>}<div className="text-sm text-muted">{n.issue}</div></div>
-                    <Link to={n.link} className={cx('btn-sm whitespace-nowrap', i === 0 ? 'btn-primary' : 'btn-secondary')}>{n.action}</Link>
-                  </li>
-                ))}
-              </ul>
+              <ul className="mt-3 border-t border-line-strong">{data.groups.map((g: any, i: number) => <AttentionGroup key={g.key} g={g} first={i === 0} review={data.review} />)}</ul>
             )}
-            {data.needsTotal > data.needs.length && <p className="text-sm text-faint mt-3">Showing the {data.needs.length} most urgent. Open a project to see everything on it.</p>}
             {(data.waiting?.subcontractors > 0 || data.waiting?.renewals > 0) && (
               <p className="text-sm text-muted mt-4 flex items-start gap-2"><Glyph tone="progress" className="w-3.5 h-3.5 mt-1 shrink-0" /><span>
-                {[data.waiting.subcontractors > 0 && <Link key="s" to="/app/subcontractors?issue=outstanding" className="hover:underline underline-offset-4">{data.waiting.subcontractors} subcontractor{data.waiting.subcontractors === 1 ? ' is' : 's are'} still sending paperwork</Link>,
-                  data.waiting.renewals > 0 && <Link key="r" to="/app/renewals?window=30" className="hover:underline underline-offset-4">{data.waiting.renewals} renewal{data.waiting.renewals === 1 ? '' : 's'} requested</Link>].filter(Boolean).reduce((acc: any[], x, i) => (i ? [...acc, ' · ', x] : [x]), [])}
-                . Reminders are going out automatically.</span></p>
+                Handled automatically: {[data.waiting.subcontractors > 0 && <Link key="s" to="/app/subcontractors?issue=outstanding" className="hover:underline underline-offset-4">{data.waiting.subcontractors} subcontractor{data.waiting.subcontractors === 1 ? ' is' : 's are'} still sending paperwork</Link>,
+                  data.waiting.renewals > 0 && <Link key="r" to="/app/renewals" className="hover:underline underline-offset-4">{data.waiting.renewals} renewal{data.waiting.renewals === 1 ? '' : 's'} with reminders scheduled or sent</Link>].filter(Boolean).reduce((acc: any[], x, i) => (i ? [...acc, ' · ', x] : [x]), [])}
+                . Nothing to do unless something changes.</span></p>
             )}
           </section>
 
@@ -153,5 +144,47 @@ function Onboarding({ data, onSample, sampleBusy, market }: { data: any; onSampl
         </aside>
       )}
     </div>
+  );
+}
+
+const GROUP_TEXT: Record<string, (g: any, review: any) => { summary: string; action?: { label: string; to: string } }> = {
+  review: (g, r) => ({
+    summary: `${g.docs} document${g.docs === 1 ? '' : 's'} from ${g.count} subcontractor${g.count === 1 ? '' : 's'}${r?.looksGood ? ` · ${r.looksGood} passed every automatic check` : ''}${r?.problems ? ` · ${r.problems} ${r.problems === 1 ? 'doesn’t' : 'don’t'} match` : ''}`,
+    action: g.count === 1 ? { label: g.items[0].action, to: g.items[0].link } : { label: 'Review documents', to: '/app/reviews' },
+  }),
+  checks: (g) => ({ summary: g.count === 1 ? g.items[0].issue : `${g.count} subcontractors need something only your team can do`, action: { label: g.items[0].action, to: g.items[0].link } }),
+  inbox: (g) => ({ summary: `${g.count} document${g.count === 1 ? '' : 's'} emailed in couldn’t be matched with confidence`, action: { label: g.count === 1 ? 'Match document' : 'Match documents', to: '/app/inbox' } }),
+  request: (g) => ({ summary: g.count === 1 ? `${g.items[0].item}: ${g.items[0].issue}` : `${g.count} things waiting for a first request — nothing is chased until one is sent`, action: g.count === 1 ? { label: g.items[0].action, to: g.items[0].link } : undefined }),
+};
+
+/** One kind of work: what it is, one action for the group, and the items behind it on demand. */
+function AttentionGroup({ g, first, review }: { g: any; first: boolean; review: any }) {
+  const [open, setOpen] = useState(g.count > 1 && g.count <= 3);
+  const t = GROUP_TEXT[g.key](g, review);
+  const id = `grp-${g.key}`;
+  return (
+    <li className="border-b border-line">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 py-4">
+        <Glyph tone={g.tone} className="w-3.5 h-3.5 mt-1" />
+        <div className="min-w-0">
+          <h3 className="font-medium">{g.title} <span className="text-faint font-normal tnum">{g.key === 'review' ? g.docs : g.count}</span></h3>
+          <p className="text-sm text-muted">{t.summary}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {t.action && <Link to={t.action.to} className={cx('btn-sm whitespace-nowrap', first ? 'btn-primary' : 'btn-secondary')}>{t.action.label}</Link>}
+          {g.count > 1 && <button type="button" className="btn-ghost btn-sm" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>{open ? 'Hide' : `Show ${g.count}`}</button>}
+        </div>
+      </div>
+      {open && g.count > 1 && (
+        <ul id={id} className="mb-4 ml-6 rounded-md border border-line bg-paper divide-y divide-line">
+          {g.items.map((n: any, i: number) => (
+            <li key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-2.5">
+              <div className="min-w-0"><Link to={n.itemLink} className="font-medium hover:underline underline-offset-4 break-words">{n.item}</Link>{n.context && <span className="text-sm text-faint"> · {n.context}</span>}<div className="text-sm text-muted">{n.issue}</div></div>
+              <Link to={n.link} className="btn-quiet whitespace-nowrap">{n.action}</Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }

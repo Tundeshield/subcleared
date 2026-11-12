@@ -122,3 +122,20 @@ describe('renewal plan (read-only mirror of the reminder job)', () => {
     expect(renewalPlan(20, '2026-12-02', sched, [90, 60, 30])).toEqual({ dueNow: false, nextDate: '2026-11-18', lastSentOffset: 30 });
   });
 });
+
+import { countryFromTimezone, reminderPreset, REMINDER_PRESETS } from '../src/domain/locale';
+describe('onboarding and settings defaults', () => {
+  it('suggests a country from the timezone, or Other', () => {
+    expect(countryFromTimezone('Europe/London')).toBe('United Kingdom');
+    expect(countryFromTimezone('America/New_York')).toBe('United States');
+    expect(countryFromTimezone('America/Vancouver')).toBe('Canada');
+    expect(countryFromTimezone('Australia/Perth')).toBe('Australia');
+    expect(countryFromTimezone('UTC')).toBe('Other');
+  });
+  it('maps the existing default schedule to the Standard preset and keeps anything else as custom', () => {
+    expect(reminderPreset([90, 60, 30, 14, 7, 0, -7])).toBe('standard');
+    expect(reminderPreset([-7, 0, 7, 14, 30, 60, 90])).toBe('standard');
+    expect(reminderPreset([45, 10])).toBe('custom');
+    expect(REMINDER_PRESETS[0].id).toBe('standard');
+  });
+});

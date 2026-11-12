@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, setOrgId } from '../../lib/api';
 import { auth } from '../../lib/auth';
-import { COUNTRIES, countryDefaults } from '../../domain/locale';
+import { COUNTRIES, countryDefaults, countryFromTimezone } from '../../domain/locale';
 import { useSession } from '../../lib/session';
 import { Callout, Checkbox, Field, FormError, LoadingBlock, Spinner } from '../../ui';
 import { AuthCard } from './PublicShell';
@@ -149,7 +149,9 @@ export function VerifyNotice() {
 export function Onboarding() {
   const { authUser, ready, me, refresh } = useSession();
   const [orgName, setOrgName] = useState('');
-  const [country, setCountry] = useState(() => { const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? ''; return COUNTRIES.find((c) => c.timezone === tz)?.name ?? (/^America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix)/.test(tz) ? 'United States' : 'Other'); });
+  // Suggested from the browser's timezone; once the user picks a country, nothing changes it again.
+  const [country, setCountry] = useState(() => countryFromTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone ?? ''));
+  const [suggested, setSuggested] = useState(true);
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const [name, setName] = useState('');
   const [seed, setSeed] = useState(true);
@@ -163,7 +165,7 @@ export function Onboarding() {
   if (me?.org) return <Navigate to="/app/overview" replace />;
   const zones: string[] = (Intl as any).supportedValuesOf ? (Intl as any).supportedValuesOf('timeZone') : [timezone, 'UTC', 'Europe/London', 'America/New_York', 'America/Chicago'];
   return (
-    <AuthCard title="Set up your organisation" subtitle="This is your company's workspace. You can invite colleagues once it's created.">
+    <AuthCard minimal title="Set up your organisation" subtitle="This is your company's workspace. You can invite colleagues once it's created.">
       <form className="space-y-4" onSubmit={async (e) => {
         e.preventDefault(); setBusy(true); setError(null);
         try { const r = await api('org.register', { orgName, country, timezone, name, seedLibrary: seed }); setOrgId(r.orgId); await refresh(); nav('/app/overview'); } catch (err: any) { setError(err.message); } finally { setBusy(false); }
@@ -171,7 +173,7 @@ export function Onboarding() {
         <Field label="Company name" required><input className="input" required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="e.g. Harbourline Construction" /></Field>
         <Field label="Your name" required><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="Country" hint="Sets terminology, date format and currency. You can change these later."><select className="input" value={country} onChange={(e) => { setCountry(e.target.value); const d = countryDefaults(e.target.value); if (d.name !== 'Other' && zones.includes(d.timezone)) setTimezone(d.timezone); }}>{COUNTRIES.map((c) => <option key={c.name}>{c.name}</option>)}</select></Field>
+          <Field label="Country" hint={`${suggested && country !== 'Other' ? 'Suggested from your timezone. ' : ''}Sets terminology, date format and currency. You can change these later.`}><select className="input" value={country} onChange={(e) => { setCountry(e.target.value); setSuggested(false); const d = countryDefaults(e.target.value); if (d.name !== 'Other' && zones.includes(d.timezone)) setTimezone(d.timezone); }}>{COUNTRIES.map((c) => <option key={c.name}>{c.name}</option>)}</select></Field>
           <Field label="Timezone" hint="Used for expiry dates and reminders."><select className="input" value={timezone} onChange={(e) => setTimezone(e.target.value)}>{zones.map((z) => <option key={z}>{z}</option>)}</select></Field>
         </div>
         <Checkbox checked={seed} onChange={setSeed} label="Add the starter requirement library" hint={`${country === 'United States' ? 'US-style' : country === 'United Kingdom' ? 'UK-style' : 'Internationally worded'} requirements and eight trade templates you can edit — starting points, not legal standards for your jurisdiction.`} />

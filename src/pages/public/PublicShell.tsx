@@ -38,10 +38,11 @@ export function PublicFooter() {
   );
 }
 
-export function AuthCard({ title, subtitle, children, footer }: { title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode }) {
+/** minimal: a signed-in setup step, so no marketing links — just the logo. */
+export function AuthCard({ title, subtitle, children, footer, minimal }: { title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; minimal?: boolean }) {
   return (
     <div className="min-h-screen flex flex-col">
-      <PublicNav />
+      {minimal ? <header className="border-b border-line"><div className="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center"><Logo /></div></header> : <PublicNav />}
       <main className="flex-1 grid place-items-center px-5 py-16">
         <div className="w-full max-w-[27rem]">
           <h1 className="text-2xl font-medium">{title}</h1>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { formatDateTime } from '../../domain/dates';
-import { COUNTRIES, CURRENCIES, LOCALES, MARKETS, setFormatting } from '../../domain/locale';
+import { COUNTRIES, countryDefaults, CURRENCIES, LOCALES, MARKETS, marketFromCountry, REMINDER_PRESETS, reminderPreset, setFormatting } from '../../domain/locale';
 import { api, useApi, useMutation } from '../../lib/api';
 import { exportCsv } from '../../lib/export';
 import { useSession } from '../../lib/session';
@@ -36,7 +36,7 @@ export default function Settings() {
 function OrgSettings() {
   const { me, can, refresh } = useSession();
   const org = me!.org!;
-  const [f, setF] = useState<any>({ name: org.name, country: org.country, ...org.settings, market: org.settings.market ?? 'OTHER', locale: org.settings.locale ?? 'en-GB', currency: org.settings.currency ?? 'USD', reminderText: org.settings.reminderSchedule.join(', ') });
+  const [f, setF] = useState<any>({ name: org.name, country: org.country, ...org.settings, market: org.settings.market ?? 'OTHER', locale: org.settings.locale ?? 'en-GB', currency: org.settings.currency ?? 'USD', reminderText: org.settings.reminderSchedule.join(', '), preset: reminderPreset(org.settings.reminderSchedule) });
   const { run, busy, error } = useMutation('org.updateSettings');
   const toast = useToast();
   const editable = can('settings.manage');
@@ -49,24 +49,31 @@ function OrgSettings() {
         <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Organisation</h2>
         <div className="grid sm:grid-cols-2 gap-5 pt-5">
           <Field label="Name"><input className="input" value={f.name} disabled={!editable} onChange={(e) => set('name', e.target.value)} /></Field>
-          <Field label="Country"><select className="input" value={COUNTRIES.some((c) => c.name === f.country) ? f.country : 'Other'} disabled={!editable} onChange={(e) => set('country', e.target.value)}>{COUNTRIES.map((c) => <option key={c.name}>{c.name}</option>)}</select></Field>
-        </div>
-      </section>
-      <section>
-        <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Region and formats</h2>
-        <div className="grid sm:grid-cols-2 gap-5 pt-5">
-          <Field label="Terminology" hint="How the product words things — for example “general contractor” and “certificate of insurance”, or “principal contractor” and “insurance certificate”. Neutral wording suits most countries."><select className="input" value={f.market} disabled={!editable} onChange={(e) => set('market', e.target.value)}>{MARKETS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}</select></Field>
+          {/* Choosing a country sets its date, currency and wording defaults; existing values are only changed when the country is changed here. */}
+          <Field label="Country" hint="Sets the date format, currency and wording below."><select className="input" value={COUNTRIES.some((c) => c.name === f.country) ? f.country : 'Other'} disabled={!editable} onChange={(e) => { const d = countryDefaults(e.target.value); setF((x: any) => ({ ...x, country: e.target.value, ...(e.target.value === 'Other' ? {} : { market: marketFromCountry(e.target.value), locale: d.locale, currency: d.currency }) })); }}>{COUNTRIES.map((c) => <option key={c.name}>{c.name}</option>)}</select></Field>
           <Field label="Timezone" hint="Defines “today” for expiry checks and when reminders go out."><select className="input" value={f.timezone} disabled={!editable} onChange={(e) => set('timezone', e.target.value)}>{zones.map((z) => <option key={z}>{z}</option>)}</select></Field>
+        </div>
+        <p className="text-sm text-muted mt-4">Formats: {MARKETS.find((m) => m.id === f.market)?.label ?? 'Neutral'} · dates like {new Date(Date.UTC(2026, 10, 11)).toLocaleDateString(f.locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })} · {f.currency}</p>
+        <Disclosure title="Change formats" className="mt-3 border-y border-line">
+        <div className="grid sm:grid-cols-2 gap-5 pb-5">
+          <Field label="Terminology" hint="How the product words things — for example “general contractor” and “certificate of insurance”, or “principal contractor” and “insurance certificate”. Neutral wording suits most countries."><select className="input" value={f.market} disabled={!editable} onChange={(e) => set('market', e.target.value)}>{MARKETS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}</select></Field>
           <Field label="Date format and spelling"><select className="input" value={f.locale} disabled={!editable} onChange={(e) => set('locale', e.target.value)}>{LOCALES.map((l) => <option key={l} value={l}>{l} — {new Date(Date.UTC(2026, 10, 11)).toLocaleDateString(l, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })} · {new Date(Date.UTC(2026, 10, 11)).toLocaleDateString(l, { timeZone: 'UTC' })}</option>)}</select></Field>
           <Field label="Currency" hint="Used for coverage limits. Subscriptions are billed in pounds sterling for GBP organisations and US dollars otherwise."><select className="input" value={f.currency} disabled={!editable} onChange={(e) => set('currency', e.target.value)}>{CURRENCIES.map((c) => <option key={c} value={c}>{c} — {new Intl.DisplayNames(['en'], { type: 'currency' }).of(c)}</option>)}</select></Field>
         </div>
+        </Disclosure>
       </section>
       <section>
         <h2 className="text-lg font-semibold pb-3 border-b border-line-strong">Compliance rules</h2>
         <div className="grid sm:grid-cols-2 gap-5 pt-5">
           <Field label="Expiring-soon window (days)" hint="Approved documents expiring within this many days mark a subcontractor as needing attention."><input className="input" type="number" min={0} max={180} value={f.expiringSoonDays} disabled={!editable} onChange={(e) => set('expiringSoonDays', e.target.value)} /></Field>
           <Field label="Escalate after (days)" hint="Tell the project manager when a mandatory item is still missing this long after assignment."><input className="input" type="number" min={1} max={120} value={f.escalationDays} disabled={!editable} onChange={(e) => set('escalationDays', e.target.value)} /></Field>
-          <Field label="Reminder schedule" hint="Days before expiry, separated by commas. 0 means on the expiry date; negative numbers are days after. Each reminder is sent once." className="sm:col-span-2"><input className="input font-mono" value={f.reminderText} disabled={!editable} onChange={(e) => set('reminderText', e.target.value)} /></Field>
+          <Field label="Renewal reminders" hint="When subcontractors are emailed about a document that’s about to expire. Each reminder is sent once." className="sm:col-span-2">
+            <select className="input" value={f.preset} disabled={!editable} onChange={(e) => { const p = REMINDER_PRESETS.find((x) => x.id === e.target.value); setF((x: any) => ({ ...x, preset: e.target.value, ...(p ? { reminderText: p.schedule.join(', ') } : {}) })); }}>
+              {REMINDER_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+              <option value="custom">Custom days</option>
+            </select>
+          </Field>
+          {f.preset === 'custom' && <Field label="Custom reminder days" hint="Days before expiry, separated by commas. 0 means on the expiry date; negative numbers are days after." className="sm:col-span-2"><input className="input font-mono" value={f.reminderText} disabled={!editable} onChange={(e) => set('reminderText', e.target.value)} /></Field>}
           <Field label="Upload links expire after (days)"><input className="input" type="number" min={1} max={30} value={f.defaultLinkExpiryDays} disabled={!editable} onChange={(e) => set('defaultLinkExpiryDays', e.target.value)} /></Field>
           <Field label="Keep superseded evidence for (years)"><input className="input" type="number" min={1} max={30} value={f.retentionYears} disabled={!editable} onChange={(e) => set('retentionYears', e.target.value)} /></Field>
           <div className="sm:col-span-2"><Checkbox checked={f.remindArchived} disabled={!editable} onChange={(v) => set('remindArchived', v)} label="Remind archived and inactive subcontractors too" hint="Off by default — no reminders for archived subcontractors, or for documents only needed on finished projects." /></div>
